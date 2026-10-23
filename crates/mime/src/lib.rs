@@ -220,6 +220,9 @@ pub fn sanitize_html(html: &str, allow_remote: bool, inline: &[(String, String)]
     b.add_tag_attributes("th", ["colspan", "rowspan"]);
     b.add_tag_attributes("font", ["face", "size"]);
     b.add_tag_attributes("img", ["src", "alt", "title", "width", "height"]);
+    // Markers mail clients put on quoted history, so the reader can fold it.
+    b.add_tag_attributes("div", ["id"]);
+    b.add_tag_attributes("blockquote", ["type"]);
     b.url_schemes(HashSet::from(["http", "https", "mailto", "data", "cid", "tel"]));
     b.link_rel(Some("noopener noreferrer nofollow"));
     b.attribute_filter(move |element, attribute, value| {
@@ -540,6 +543,13 @@ mod tests {
         assert!(s.html.contains("data:image/png;base64,AAAA"));
         assert!(!s.html.contains("x/y.png"));
         assert!(s.had_remote_content);
+    }
+
+    #[test]
+    fn sanitize_keeps_quote_markers() {
+        let s = sanitize_html(r#"<p>new</p><div id="divRplyFwdMsg">From: a</div><blockquote type="cite">old</blockquote>"#, false, &[]);
+        assert!(s.html.contains(r#"id="divRplyFwdMsg""#));
+        assert!(s.html.contains(r#"type="cite""#));
     }
 
     #[test]

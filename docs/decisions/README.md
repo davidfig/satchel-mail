@@ -22,3 +22,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0016 | [Name: Satchel Mail](0016-name.md) | Accepted |
 | 0017 | [OAuth with PKCE and a loopback redirect](0017-oauth.md) | Accepted |
 | 0018 | [Hosted (cloud) version](0018-hosted-version.md) | Proposed — on hold |
+| 0019 | [Conversations as a chat-style stream](0019-conversation-stream.md) | Accepted |

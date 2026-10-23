@@ -2,12 +2,12 @@
 
 import { api } from '../api';
 import { debounce, h, icon, replace } from '../lib/dom';
-import { avatarColor, displayName, formatAddress, fullDate, humanSize, initials, listDate, participantsLabel, timeRange } from '../lib/format';
-import { bind, confirmDialog, errorToast, modal, popupMenu, toast } from '../lib/ui';
+import { formatAddress, listDate, participantsLabel, shortName } from '../lib/format';
+import { bind, confirmDialog, errorToast, popupMenu, toast } from '../lib/ui';
 import { store } from '../state';
-import { transport } from '../transport';
-import type { Mailbox, MessageDetail, PartStat, Thread, ThreadQuery, ThreadSummary } from '../types';
+import type { Address, Mailbox, Thread, ThreadQuery, ThreadSummary } from '../types';
 import { openComposer } from './composer';
+import { Conversation, ReplyBox, mineFor, viewSource } from './conversation';
 import { ThreadWindow } from './thread-window';
 
 const ROW_H = 74;
@@ -28,6 +28,7 @@ export class MailView {
   /** Selected threads by id (kept even if their page is evicted). */
   private selected = new Map<string, ThreadSummary>();
   private openThread: Thread | null = null;
+  private replyBox: ReplyBox | null = null;
   private generation = 0;
 
   constructor() {
@@ -305,6 +306,7 @@ export class MailView {
 
   private renderEmptyReader() {
     this.openThread = null;
+    this.replyBox = null;
     replace(this.reader, h('div.reader-empty', icon('mail', 40), h('p', 'Select a conversation'), h('p.muted.small', 'j/k to move · enter to open · c to compose · / to search')));
   }
 
@@ -335,80 +337,28 @@ export class MailView {
 
   private renderThread(thread: Thread) {
     const labels = [...new Set(thread.messages.flatMap((m) => m.mailbox_ids))].map((id) => store.mailbox(id)).filter((m): m is Mailbox => !!m && m.role !== 'inbox');
-    const last = thread.messages.length - 1;
+    const mine = mineFor(thread);
+    const people = new Map<string, Address>();
+    for (const m of thread.messages) for (const a of [m.from, ...m.to, ...m.cc]) if (a && !mine(a)) people.set(a.email.toLowerCase(), a);
+    const convo = new Conversation(thread, (mode, id) => void this.reply(mode, id));
+    this.replyBox = new ReplyBox(thread);
     replace(
       this.reader,
       h('header.reader-head',
+        h('div.reader-title',
+          h('h2.reader-subject', thread.subject || '(no subject)'),
+          h('div.muted.small', [...[...people.values()].map(shortName), 'you'].join(', '))),
         h('div.reader-actions',
           h('button.icon-btn', { title: 'Archive (e)', 'aria-label': 'Archive', on: { click: () => void this.act('archive') } }, icon('archive')),
           h('button.icon-btn', { title: 'Delete (#)', 'aria-label': 'Delete', on: { click: () => void this.act('trash') } }, icon('trash')),
           h('button.icon-btn', { title: 'Mark unread (u)', 'aria-label': 'Mark unread', on: { click: () => void this.act('unread') } }, icon('mail')),
           h('button.icon-btn', { title: 'Move to… (v)', 'aria-label': 'Move', on: { click: (e: MouseEvent) => this.moveMenu(e.currentTarget as HTMLElement) } }, icon('folder')),
           h('button.icon-btn', { title: 'More', 'aria-label': 'More actions', on: { click: (e: MouseEvent) => this.moreMenu(e.currentTarget as HTMLElement, thread) } }, icon('more'))),
-        h('h2.reader-subject', thread.subject || '(no subject)'),
         labels.length > 0 && h('div.labels', labels.map((m) => h('span.label-chip', m.name)))),
-      h('div.messages', thread.messages.map((m, i) => this.renderMessage(m, i === last || !m.flags.seen))),
-      h('div.reply-bar',
-        h('button', { on: { click: () => void this.reply('reply') } }, icon('reply', 16), 'Reply'),
-        h('button', { on: { click: () => void this.reply('reply_all') } }, icon('replyAll', 16), 'Reply all'),
-        h('button', { on: { click: () => void this.reply('forward') } }, icon('forward', 16), 'Forward')),
+      convo.root,
+      this.replyBox.root,
     );
-    this.reader.scrollTop = 0;
-    const lastEl = this.reader.querySelector('.message.expanded:last-of-type');
-    if (thread.messages.length > 2) lastEl?.scrollIntoView({ block: 'start' });
-  }
-
-  private renderMessage(m: MessageDetail, expanded: boolean): HTMLElement {
-    const card = h(`article.message${expanded ? '.expanded' : ''}`);
-    const head = h('header.message-head', {
-      on: { click: (e: MouseEvent) => { if ((e.target as HTMLElement).closest('button')) return; card.classList.toggle('expanded'); if (card.classList.contains('expanded') && !card.querySelector('.message-body')) fill(); } },
-    },
-      h('span.avatar', { style: { background: avatarColor(m.from?.email ?? '') } }, initials(m.from)),
-      h('div.message-meta',
-        h('div.from', h('strong', displayName(m.from)), m.from && h('span.muted', ` <${m.from.email}>`)),
-        h('div.to.muted.small', `to ${[...m.to, ...m.cc].map((a) => (store.state.myEmails.has(a.email.toLowerCase()) ? 'me' : displayName(a))).join(', ') || '(no recipients)'}`),
-        h('div.collapsed-snippet.muted', m.snippet)),
-      h('time.muted.small', { datetime: m.date, title: fullDate(m.date) }, listDate(m.date)),
-      h('button.icon-btn', { title: 'Reply', 'aria-label': 'Reply to this message', on: { click: () => void this.reply('reply', m.id) } }, icon('reply', 16)),
-    );
-    card.appendChild(head);
-    const fill = () => {
-      const bodyWrap = h('div.message-body');
-      card.appendChild(bodyWrap);
-      if (m.body_pending) bodyWrap.appendChild(h('p.muted', 'Downloading message…'));
-      if (m.remote_images_blocked) {
-        bodyWrap.appendChild(
-          h('div.banner',
-            icon('image', 16),
-            h('span', 'Remote images are hidden to protect your privacy.'),
-            h('button.link', { on: { click: () => void this.loadImages(m, false, card) } }, 'Show once'),
-            h('button.link', { on: { click: () => void this.loadImages(m, true, card) } }, `Always for ${m.from?.email ?? 'sender'}`)),
-        );
-      }
-      if (m.invite) bodyWrap.appendChild(inviteCard(m));
-      bodyWrap.appendChild(m.html_body ? htmlFrame(m.html_body) : textBody(m.text_body));
-      const atts = m.attachments.filter((a) => !a.inline);
-      if (atts.length) {
-        bodyWrap.appendChild(
-          h('div.attachments',
-            atts.map((a) =>
-              h('button.attachment', { title: `Download ${a.filename}`, on: { click: () => void download(m.id, a.id) } },
-                icon('paperclip', 16), h('span.name', a.filename), h('span.muted.small', humanSize(a.size))),
-            )),
-        );
-      }
-    };
-    if (expanded) fill();
-    return card;
-  }
-
-  private async loadImages(m: MessageDetail, always: boolean, card: HTMLElement) {
-    try {
-      const fresh = await api.loadRemoteImages(m.id, always);
-      card.replaceWith(this.renderMessage(fresh, true));
-    } catch (e) {
-      errorToast(e);
-    }
+    convo.settle(this.reader);
   }
 
   private async reply(mode: 'reply' | 'reply_all' | 'forward', messageId?: string) {
@@ -447,6 +397,7 @@ export class MailView {
     popupMenu(anchor, [
       { label: 'Mark as unread', icon: 'mail', hint: 'u', run: () => void this.act('unread') },
       { label: 'Mark as spam', icon: 'junk', hint: '!', run: () => void this.act('spam') },
+      { label: 'Forward', icon: 'forward', hint: 'f', run: () => void this.reply('forward') },
       '-',
       { label: 'View source', icon: 'draft', run: () => void viewSource(lastMsg.id) },
     ]);
@@ -487,8 +438,8 @@ export class MailView {
     bind('shift+i', 'Mark read', () => void this.act('read'), s);
     bind('!', 'Mark as spam', () => void this.act('spam'), s);
     bind('s', 'Flag / unflag', () => { const t = this.targetThreads()[0]; if (t) void this.flagThread(t); }, s);
-    bind('r', 'Reply', () => void this.reply('reply'), s);
-    bind('a', 'Reply all', () => void this.reply('reply_all'), s);
+    bind('r', 'Reply', () => this.replyBox?.focus('reply'), s);
+    bind('a', 'Reply all', () => this.replyBox?.focus('reply_all'), s);
     bind('f', 'Forward', () => void this.reply('forward'), s);
     bind('v', 'Move to…', () => { const b = this.reader.querySelector<HTMLElement>('[aria-label="Move"]'); if (b) this.moveMenu(b); }, s);
     bind('/', 'Search', () => { this.searchInput.focus(); this.searchInput.select(); }, s);
@@ -496,155 +447,11 @@ export class MailView {
   }
 }
 
-function inviteCard(m: MessageDetail): HTMLElement {
-  const inv = m.invite!;
-  const when = `${new Date(inv.start).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} · ${timeRange(inv.start, inv.end, inv.all_day)}`;
-  if (inv.method === 'CANCEL') {
-    return h('div.invite.cancelled', icon('calendar', 20), h('div', h('strong', `Cancelled: ${inv.title}`), h('div.muted.small', when)));
-  }
-  if (inv.method !== 'REQUEST') {
-    return h('div.invite', icon('calendar', 20), h('div', h('strong', inv.title), h('div.muted.small', when)));
-  }
-  const card = h('div.invite');
-  const render = (status: PartStat | null) => {
-    replace(card,
-      icon('calendar', 22),
-      h('div.grow',
-        h('strong', inv.title),
-        h('div.muted.small', when),
-        inv.location && h('div.muted.small', icon('location', 12), ` ${inv.location}`),
-        inv.organizer && h('div.muted.small', `From ${inv.organizer.name ?? inv.organizer.email}`)),
-      h('div.rsvp-buttons',
-        (['accepted', 'tentative', 'declined'] as PartStat[]).map((r) =>
-          h(`button${status === r ? '.active' : ''}`, {
-            on: {
-              click: async () => {
-                try {
-                  const res = await api.respondToEmailInvite(m.id, r);
-                  render(r);
-                  toast(res.via === 'calendar' ? 'Response saved to your calendar' : 'Reply sent to the organizer');
-                } catch (e) {
-                  errorToast(e);
-                }
-              },
-            },
-          }, r === 'accepted' ? 'Yes' : r === 'declined' ? 'No' : 'Maybe'))));
-  };
-  render(inv.my_status);
-  return card;
-}
-
 function emptyMessage(): string {
   const s = store.state.source;
   if (!store.state.accounts.length) return 'No accounts yet — add one in Settings.';
   if (s.kind === 'search') return 'No matching conversations.';
   return s.kind === 'role' && s.role === 'inbox' ? 'Inbox zero. 🎉' : 'Nothing here.';
-}
-
-function linkified(line: string): HTMLElement {
-  const div = h(line.startsWith('>') ? 'div.quote' : 'div');
-  for (const p of line.split(/(https?:\/\/[^\s<>"]+)/g)) {
-    if (/^https?:\/\//.test(p)) div.appendChild(h('a', { href: p, rel: 'noopener noreferrer', target: '_blank', on: { click: (e: MouseEvent) => { e.preventDefault(); openExternal(p); } } }, p));
-    else if (p) div.appendChild(document.createTextNode(p));
-  }
-  if (!line) div.appendChild(h('br'));
-  return div;
-}
-
-const isAttribution = (l: string) => /^On .+wrote:\s*$/.test(l.trim()) || /^-{2,} ?(Original|Forwarded) [Mm]essage/.test(l.trim());
-
-/** Plain text body: linkified, with quoted history folded behind a toggle. */
-function textBody(text: string): HTMLElement {
-  const pre = h('div.text-body');
-  const lines = text.replace(/\s+$/, '').split('\n');
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (isAttribution(line) || line.startsWith('>')) {
-      const start = i;
-      while (i < lines.length && (lines[i].startsWith('>') || isAttribution(lines[i]) || (lines[i].trim() === '' && lines[i + 1]?.startsWith('>')))) i++;
-      // Only fold real history, not a single quoted line.
-      if (i - start >= 2 || isAttribution(lines[start])) {
-        const block = h('div.quoted', { hidden: true }, lines.slice(start, i).map(linkified));
-        pre.append(h('button.quote-toggle', { title: 'Show quoted text', 'aria-label': 'Show quoted text', on: { click: (e: MouseEvent) => { block.hidden = !block.hidden; (e.currentTarget as HTMLElement).classList.toggle('open'); } } }, '•••'), block);
-        continue;
-      }
-      i = start;
-    }
-    pre.appendChild(linkified(line));
-    i++;
-  }
-  return pre;
-}
-
-/** Sanitized HTML (from the core) in a script-less sandboxed iframe with a CSP. */
-function htmlFrame(html: string): HTMLElement {
-  const csp = "default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; font-src data:";
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>
-    html,body{margin:0;padding:0;background:transparent;color:#1d1d1f;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere}
-    img{max-width:100%;height:auto} table{max-width:100%} blockquote{border-left:3px solid #ccc;margin:0 0 0 .5em;padding-left:.75em;color:#555}
-    a{color:#2a62d9}
-  </style></head><body>${html}</body></html>`;
-  const frame = h('iframe.html-body', { sandbox: 'allow-same-origin allow-popups allow-popups-to-escape-sandbox', referrerpolicy: 'no-referrer', title: 'Message content' }) as HTMLIFrameElement;
-  frame.srcdoc = doc;
-  frame.addEventListener('load', () => {
-    const d = frame.contentDocument;
-    if (!d) return;
-    const fit = () => (frame.style.height = `${Math.min(d.documentElement.scrollHeight + 4, 20000)}px`);
-    fit();
-    new ResizeObserver(fit).observe(d.body);
-    d.addEventListener('click', (e) => {
-      const a = (e.target as HTMLElement).closest('a');
-      if (a?.href && /^(https?|mailto):/.test(a.href)) {
-        e.preventDefault();
-        if (a.href.startsWith('mailto:')) {
-          const email = decodeURIComponent(a.href.slice(7).split('?')[0]);
-          openComposer({ to: [{ email }] });
-        } else openExternal(a.href);
-      }
-    });
-  });
-  return h('div.html-wrap', frame);
-}
-
-export function openExternal(url: string) {
-  if (transport.kind === 'tauri') void transport.invoke('open_url', { url }).catch(() => window.open(url, '_blank', 'noopener'));
-  else window.open(url, '_blank', 'noopener,noreferrer');
-}
-
-async function download(messageId: string, attachmentId: string) {
-  try {
-    const a = await api.getAttachment(messageId, attachmentId);
-    await saveBase64(a.filename, a.mime_type, a.data_base64);
-  } catch (e) {
-    errorToast(e);
-  }
-}
-
-export async function saveBase64(filename: string, mime: string, b64: string) {
-  if (transport.kind === 'tauri') {
-    const path = await transport.invoke<string | null>('save_file', { filename, data_base64: b64 });
-    if (path) toast(`Saved to ${path}`, { kind: 'success' });
-    return;
-  }
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  const link = h('a', { href: url, download: filename });
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
-
-async function viewSource(messageId: string) {
-  try {
-    const { raw } = await api.getRaw(messageId);
-    modal('Message source', h('pre.source', raw), { wide: true });
-  } catch (e) {
-    errorToast(e);
-  }
 }
 
 export function addressList(list: { email: string; name?: string | null }[]) {

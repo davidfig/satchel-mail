@@ -36,7 +36,7 @@ for the layout and `docs/` for design and decisions.
 scripts/dev-servers reset                 # local Stalwart (IMAP/SMTP/JMAP/CalDAV) + fixtures
 cargo test --workspace                    # unit + engine integration tests
 cargo clippy --workspace                  # keep at zero warnings
-(cd ui && npx tsc --noEmit && npm run build)
+(cd ui && npx tsc --noEmit && npm test && npm run build)
 export SATCHEL_DATA_DIR=$PWD/.dev/test-data SATCHEL_SECRETS=file
 target/debug/satchel call '{"cmd":"list_threads","args":{"query":{"search":"from:bob"}}}'
 target/debug/satchel serve --ui ui/dist   # web UI on http://127.0.0.1:7781

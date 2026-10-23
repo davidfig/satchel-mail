@@ -59,6 +59,31 @@ async function fileToAttachment(f: File): Promise<OutgoingAttachment> {
   return { filename: f.name, mime_type: f.type || 'application/octet-stream', data_base64: btoa(bin) };
 }
 
+/** Sends after a short undo window; `restore` reopens the message for editing on undo or failure. */
+export function sendWithUndo(d: Draft, restore: () => void) {
+  let cancelled = false;
+  toast(`Sending in ${UNDO_SECONDS} seconds…`, {
+    ms: UNDO_SECONDS * 1000,
+    action: {
+      label: 'Undo',
+      run: () => {
+        cancelled = true;
+        restore();
+      },
+    },
+  });
+  setTimeout(async () => {
+    if (cancelled) return;
+    try {
+      await api.send(d);
+      toast('Sent', { kind: 'success' });
+    } catch (e) {
+      errorToast(e);
+      restore();
+    }
+  }, UNDO_SECONDS * 1000);
+}
+
 export function openComposer(initial: Partial<Draft> & { account_id?: string }, opts: { title?: string } = {}) {
   if (open) open.close();
   const accounts = store.state.accounts;
@@ -180,27 +205,7 @@ export function openComposer(initial: Partial<Draft> & { account_id?: string }, 
     if (dirty) await save();
     d.id = draft.id;
     close();
-    let cancelled = false;
-    toast(`Sending in ${UNDO_SECONDS} seconds…`, {
-      ms: UNDO_SECONDS * 1000,
-      action: {
-        label: 'Undo',
-        run: () => {
-          cancelled = true;
-          openComposer(d, opts);
-        },
-      },
-    });
-    setTimeout(async () => {
-      if (cancelled) return;
-      try {
-        await api.send(d);
-        toast('Sent', { kind: 'success' });
-      } catch (e) {
-        errorToast(e);
-        openComposer(d, opts);
-      }
-    }, UNDO_SECONDS * 1000);
+    sendWithUndo(d, () => openComposer(d, opts));
   };
   const onKey = (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {

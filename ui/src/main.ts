@@ -23,13 +23,17 @@ const UNIFIED: { role: MailboxRole; label: string; icon: string }[] = [
   { role: 'trash', label: 'Trash', icon: 'trash' },
 ];
 
+const COLLAPSED_KEY = 'satchel.sidebarCollapsed';
+
 class Shell {
   private sidebar = h('nav.sidebar', { 'aria-label': 'Navigation' });
   private content = h('main.content');
+  private app = h('div.app', this.sidebar, this.content);
   private views: Partial<Record<View, { root: HTMLElement; show?: () => void }>> = {};
 
   constructor() {
-    document.body.append(h('div.app', this.sidebar, this.content));
+    this.app.classList.toggle('collapsed', readCollapsed());
+    document.body.append(this.app);
     store.subscribe((_, changed) => {
       if (changed.has('view')) this.showView();
       if (['view', 'accounts', 'mailboxes', 'pendingProposals', 'source'].some((k) => changed.has(k as never))) this.renderSidebar();
@@ -37,6 +41,16 @@ class Shell {
     this.renderSidebar();
     this.showView();
     this.bindKeys();
+  }
+
+  private toggleSidebar() {
+    const collapsed = this.app.classList.toggle('collapsed');
+    try {
+      localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
+    } catch {
+      /* remembering is a convenience */
+    }
+    this.renderSidebar();
   }
 
   private view(v: View) {
@@ -59,7 +73,7 @@ class Shell {
 
   private navItem(view: View, label: string, ic: string, badge?: number) {
     const active = store.state.view === view;
-    return h(`button.nav-item${active ? '.active' : ''}`, { 'aria-current': active ? 'page' : undefined, on: { click: () => this.go(view) } },
+    return h(`button.nav-item${active ? '.active' : ''}`, { title: label, 'aria-label': label, 'aria-current': active ? 'page' : undefined, on: { click: () => this.go(view) } },
       icon(ic), h('span', label), badge ? h('span.badge', String(badge)) : null);
   }
 
@@ -76,17 +90,24 @@ class Shell {
     const { accounts, mailboxes, pendingProposals } = store.state;
     const unread = (role: MailboxRole) => mailboxes.filter((m) => m.role === role).reduce((n, m) => n + (role === 'drafts' ? m.total : m.unread), 0);
     const syncing = accounts.some((a) => a.sync.state === 'syncing');
+    const collapsed = this.app.classList.contains('collapsed');
     const errors = accounts.filter((a) => a.sync.state === 'error' || a.sync.state === 'offline');
     replace(
       this.sidebar,
-      h('div.brand', h('span.logo', '◆'), h('span', 'Satchel')),
-      h('button.primary.compose-btn', { on: { click: () => openComposer({}) } }, icon('compose', 16), 'Compose'),
+      h('div.brand', h('span.logo', '◆'), h('span.brand-name', 'Satchel'),
+        h('button.icon-btn.collapse-btn', {
+          title: `${collapsed ? 'Expand' : 'Collapse'} sidebar (${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl+'}\\)`,
+          'aria-label': collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+          'aria-expanded': String(!collapsed),
+          on: { click: () => this.toggleSidebar() },
+        }, icon(collapsed ? 'chevronRight' : 'chevronLeft', 16))),
+      h('button.primary.compose-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose', 16), h('span', 'Compose')),
       h('div.nav',
         this.navItem('mail', 'Mail', 'mail'),
         this.navItem('calendar', 'Calendar', 'calendar'),
         this.navItem('review', 'Review', 'sparkle', pendingProposals),
         this.navItem('settings', 'Settings', 'settings')),
-      store.state.view === 'mail' &&
+      store.state.view === 'mail' && !collapsed &&
         h('div.mailboxes',
           h('div.mb-section', accounts.length > 1 ? 'All accounts' : ''),
           UNIFIED.filter((u) => mailboxes.some((m) => m.role === u.role) || u.role === 'inbox').map((u) =>
@@ -120,6 +141,7 @@ class Shell {
     bind('g r', 'Go to Review queue', () => this.go('review'));
     bind('g ,', 'Go to Settings', () => this.go('settings'));
     bind('mod+k', 'Command palette', () => this.palette());
+    bind('mod+\\', 'Collapse or expand sidebar', () => this.toggleSidebar());
     bind('?', 'Keyboard shortcuts', () => showShortcuts());
   }
 
@@ -133,6 +155,7 @@ class Shell {
       { label: 'Open Settings', run: () => this.go('settings') },
       { label: 'Sync all accounts now', run: () => void api.syncNow(null) },
       { label: 'Toggle dark mode', run: () => toggleTheme() },
+      { label: 'Collapse or expand sidebar', run: () => this.toggleSidebar() },
       { label: 'Keyboard shortcuts', run: () => showShortcuts() },
     ];
     const input = h('input.palette-input', { type: 'text', placeholder: 'Type a command or search mail…', 'aria-label': 'Command' });
@@ -161,6 +184,14 @@ class Shell {
     const m = modal('Commands', h('div.palette', input, list));
     m.root.classList.add('palette-modal');
     render();
+  }
+}
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
   }
 }
 

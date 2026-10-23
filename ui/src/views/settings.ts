@@ -6,7 +6,7 @@ import { fullDate, relative } from '../lib/format';
 import { confirmDialog, errorToast, modal, toast } from '../lib/ui';
 import { applyTheme, store } from '../state';
 import type { AccountConfig, Agent, AgentPolicy, Credential, ProviderKind, Security, Settings } from '../types';
-import { openExternal } from './mail';
+import { openExternal } from './conversation';
 import { transport } from '../transport';
 
 type Section = 'accounts' | 'agents' | 'mirror' | 'privacy' | 'general' | 'activity';
