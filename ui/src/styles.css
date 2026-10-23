@@ -171,6 +171,10 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; m
 .empty-list { padding: 40px 20px; text-align: center; color: var(--text-3); }
 .thread-row { display: flex; gap: 10px; padding: 9px 12px 9px 10px; border-bottom: 1px solid var(--line); cursor: default; align-items: flex-start; overflow: hidden; position: relative; }
 .thread-row:hover { background: var(--hover); }
+.thread-row.placeholder { pointer-events: none; }
+.thread-row.placeholder .thread-main { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
+.ph { height: 10px; border-radius: 5px; background: var(--hover); }
+.ph.w40 { width: 40%; } .ph.w70 { width: 70%; } .ph.w90 { width: 90%; }
 .thread-row.cursor { box-shadow: inset 3px 0 0 var(--line-2); }
 .thread-row.active { background: var(--active); box-shadow: inset 3px 0 0 var(--accent); }
 .thread-row.selected { background: var(--accent-soft); }

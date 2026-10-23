@@ -285,7 +285,7 @@ M0–M6 are built; M7 (hosted version) is on hold pending a design discussion.
 | M3 AI surface | Done | MCP over stdio (24 tools), AI folder + file-drop proposals, Review queue, audit log, policies |
 | M4 Gmail / Graph / JMAP | Done | JMAP live against Stalwart; Gmail and Graph unit-tested only (need OAuth client ids — `docs/OAUTH.md`) |
 | M5 Calendar | Done | CalDAV live against Stalwart (sync-collection, PUT/DELETE, RSVP), emailed iMIP invites; Google/Graph unit-tested only |
-| M6 Ship | Partly | macOS `.app` bundles with the CLI sidecar; perf pass at 20k messages (sync 80 s, list/search ≈1 ms). Signing, notarization, update feed and provider verification need the owner's accounts/keys |
+| M6 Ship | Partly | macOS `.app` bundles with the CLI sidecar; perf pass at 100k messages (initial IMAP sync 83 s / 74 MB peak; list pages ≈2 ms, deep offsets ≤90 ms, counts ≈65 ms). Signing, notarization, update feed and provider verification need the owner's accounts/keys |
 
 ### Deviations from the plan above
 
@@ -296,4 +296,5 @@ M0–M6 are built; M7 (hosted version) is on hold pending a design discussion.
 - **Graph calendar:** synced as concrete instances (`calendarView/delta`, −180/+540 days), not series masters; attendees respond via accept/decline endpoints.
 - **Agents over HTTP:** `satchel serve` exposes `POST /api/agent/rpc` (bearer agent token) using the same command schema; MCP-over-HTTP is not implemented yet (stdio only).
 - **Proposal de-duplication** and **email-invite RSVP** (`RespondToEmailInvite`) were added.
+- **Large lists:** the thread list is a windowed cache addressed by offset, sized by `CountThreads`, holding at most 30 pages of 100; the scrollbar is compressed above 8M px so million-thread folders scroll. Refreshes re-read only the visible window and keep the top visible thread anchored. Agents page with keyset (`before` + `before_thread_id`). Full-text search considers the top 10,000 matching messages.
 - **Updater:** behind the `updater` feature; `scripts/release.sh` enables it when an update URL and signing key are provided.

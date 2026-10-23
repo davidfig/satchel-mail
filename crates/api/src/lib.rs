@@ -304,8 +304,14 @@ pub struct ThreadQuery {
     /// is:flagged, before:, after:, in:).
     pub search: Option<String>,
     pub limit: Option<u32>,
-    /// Pagination: only threads with last_date strictly before this.
+    /// Keyset paging: threads older than this `last_date`...
     pub before: Option<DateTime<Utc>>,
+    /// ...or at exactly that date with a smaller thread id (ties are common).
+    #[serde(default)]
+    pub before_id: Option<Id>,
+    /// Offset paging (random access for windowed lists).
+    #[serde(default)]
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -618,6 +624,8 @@ pub enum Command {
     // mail reads
     ListMailboxes { account_id: Option<Id> },
     ListThreads { query: ThreadQuery },
+    /// Total matching threads (for list sizing); ignores paging fields.
+    CountThreads { query: ThreadQuery },
     GetThread { thread_id: Id },
     GetMessage { message_id: Id },
     /// Raw RFC 822 source.
@@ -704,6 +712,7 @@ impl Command {
             Command::ListAccounts
                 | Command::ListMailboxes { .. }
                 | Command::ListThreads { .. }
+                | Command::CountThreads { .. }
                 | Command::GetThread { .. }
                 | Command::GetMessage { .. }
                 | Command::GetAttachment { .. }

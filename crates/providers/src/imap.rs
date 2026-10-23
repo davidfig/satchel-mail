@@ -281,14 +281,17 @@ impl ImapProvider {
         };
         let mut remote_flags: HashMap<u32, Flags> = HashMap::new();
         if sel.exists > 0 {
-            let fetches: Vec<Fetch> = s.uid_fetch("1:*", &query).await?.try_collect().await?;
-            for f in fetches {
+            // Stream: each response holds its read buffer, so collecting 100k of
+            // them first would keep hundreds of MB alive.
+            let mut stream = s.uid_fetch("1:*", &query).await?;
+            while let Some(f) = stream.try_next().await? {
                 let Some(uid) = f.uid else { continue };
                 let (flags, deleted) = flags_of(&f);
                 if !deleted {
                     remote_flags.insert(uid, flags);
                 }
             }
+            drop(stream);
         }
         // Full UID list for deletion detection.
         let all_uids: HashSet<u32> = if since.is_some() {
@@ -341,8 +344,8 @@ impl ImapProvider {
 
     async fn fetch_into(&self, s: &mut Session, ctx: &SyncCtx, mb: &RemoteMailbox, uv: u32, uids: &[u32], body: bool) -> Result<()> {
         let q = if body { "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])" } else { "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER])" };
-        let fetches: Vec<Fetch> = s.uid_fetch(uid_set(uids), q).await?.try_collect().await?;
-        for f in fetches {
+        let mut stream = s.uid_fetch(uid_set(uids), q).await?;
+        while let Some(f) = stream.try_next().await? {
             let Some(uid) = f.uid else { continue };
             let (flags, deleted) = flags_of(&f);
             if deleted {

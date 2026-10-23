@@ -45,6 +45,7 @@ export const api = {
 
   listMailboxes: (account_id: Id | null = null) => call<Mailbox[]>('list_mailboxes', { account_id }),
   listThreads: (query: ThreadQuery) => call<ThreadSummary[]>('list_threads', { query }),
+  countThreads: (query: ThreadQuery) => call<{ total: number }>('count_threads', { query }),
   getThread: (thread_id: Id) => call<Thread>('get_thread', { thread_id }),
   getMessage: (message_id: Id) => call<MessageDetail>('get_message', { message_id }),
   getRaw: (message_id: Id) => call<{ raw: string }>('get_raw_message', { message_id }),

@@ -8,9 +8,11 @@ import { store } from '../state';
 import { transport } from '../transport';
 import type { Mailbox, MessageDetail, PartStat, Thread, ThreadQuery, ThreadSummary } from '../types';
 import { openComposer } from './composer';
+import { ThreadWindow } from './thread-window';
 
 const ROW_H = 74;
-const PAGE = 100;
+// Browsers cap element heights (~17M px in WebKit); beyond this the scrollbar is scaled.
+const MAX_SCROLL_PX = 8_000_000;
 
 export class MailView {
   root = h('div.mail-view');
@@ -21,11 +23,10 @@ export class MailView {
   private rows = h('div.list-rows');
   private header = h('header.list-head');
   private searchInput = h('input.search', { type: 'search', placeholder: 'Search mail', 'aria-label': 'Search mail' });
-  private threads: ThreadSummary[] = [];
-  private exhausted = false;
-  private loading = false;
+  private list = new ThreadWindow(() => this.query(), () => this.renderRows(), (e) => errorToast(e));
   private cursor = -1;
-  private selected = new Set<string>();
+  /** Selected threads by id (kept even if their page is evicted). */
+  private selected = new Map<string, ThreadSummary>();
   private openThread: Thread | null = null;
   private generation = 0;
 
@@ -34,10 +35,7 @@ export class MailView {
     this.scroller.appendChild(this.spacer);
     this.listPane.append(this.header, this.scroller);
     this.root.append(this.listPane, this.reader);
-    this.scroller.addEventListener('scroll', () => {
-      this.renderRows();
-      if (this.scroller.scrollTop + this.scroller.clientHeight > this.threads.length * ROW_H - ROW_H * 10) void this.loadMore();
-    });
+    this.scroller.addEventListener('scroll', () => this.renderRows());
     new ResizeObserver(() => this.renderRows()).observe(this.scroller);
     this.searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -69,9 +67,9 @@ export class MailView {
     this.scroller.focus({ preventScroll: true });
   }
 
-  private query(before: string | null): ThreadQuery {
+  private query(): ThreadQuery {
     const s = store.state.source;
-    const q: ThreadQuery = { limit: PAGE, before };
+    const q: ThreadQuery = {};
     if (s.kind === 'role') q.role = s.role;
     else if (s.kind === 'mailbox') q.mailbox_id = s.mailbox_id;
     else q.search = s.query;
@@ -102,78 +100,95 @@ export class MailView {
   }
 
   async reload() {
-    const gen = ++this.generation;
-    this.threads = [];
-    this.exhausted = false;
+    ++this.generation;
     this.cursor = -1;
     this.selected.clear();
     this.scroller.scrollTop = 0;
     this.renderHeader();
-    this.renderRows();
-    await this.loadMore(gen);
-    if (store.state.selectedThread && this.threads.some((t) => t.thread_id === store.state.selectedThread)) {
-      this.cursor = this.threads.findIndex((t) => t.thread_id === store.state.selectedThread);
+    await this.list.reset();
+    const sel = store.state.selectedThread;
+    if (sel) {
+      this.cursor = this.list.indexOf(sel);
       this.renderRows();
     }
   }
 
-  /** Re-fetch the loaded range in place (after sync or local changes). */
+  // ---------------------------------------------------------------- geometry
+  // Rows live in a logical space of total * ROW_H pixels. When that exceeds what
+  // browsers can render, the scroll range is compressed by `scale`.
+
+  private scale(): number {
+    const logical = this.list.total * ROW_H;
+    const ch = this.scroller.clientHeight;
+    if (logical <= MAX_SCROLL_PX) return 1;
+    return (logical - ch) / Math.max(MAX_SCROLL_PX - ch, 1);
+  }
+
+  private logicalTop(): number {
+    return this.scroller.scrollTop * this.scale();
+  }
+
+  private visibleRange(pad = 5): [number, number] {
+    const top = this.logicalTop();
+    const first = Math.max(0, Math.floor(top / ROW_H) - pad);
+    const last = Math.min(this.list.total, Math.ceil((top + this.scroller.clientHeight) / ROW_H) + pad);
+    return [first, last];
+  }
+
+  private scrollToIndex(i: number, offset = 0) {
+    this.scroller.scrollTop = (i * ROW_H + offset) / this.scale();
+  }
+
+  /** Re-fetch the visible window in place (after sync or local changes), keeping
+   *  the top visible thread where it is. */
   async refresh() {
     const gen = this.generation;
-    try {
-      const want = Math.max(PAGE, this.threads.length);
-      const fresh = await api.listThreads({ ...this.query(null), limit: Math.min(want, 500) });
-      if (gen !== this.generation) return;
-      const cur = this.threads[this.cursor]?.thread_id;
-      this.threads = fresh;
-      this.exhausted = fresh.length < want;
-      if (cur) this.cursor = this.threads.findIndex((t) => t.thread_id === cur);
-      this.renderRows();
-      if (this.openThread) {
-        const still = this.threads.find((t) => t.thread_id === this.openThread!.thread_id);
-        if (still && still.message_count !== this.openThread.messages.length) void this.showThread(still.thread_id, false);
-      }
-    } catch (e) {
-      console.warn(e);
+    const top = this.logicalTop();
+    const anchorIdx = Math.floor(top / ROW_H);
+    const anchorId = this.scroller.scrollTop > 0 ? this.list.at(anchorIdx)?.thread_id : undefined;
+    const within = top - anchorIdx * ROW_H;
+    const cursorId = this.list.at(this.cursor)?.thread_id;
+    const [first, last] = this.visibleRange(20);
+    await this.list.refresh(first, last);
+    if (gen !== this.generation) return;
+    if (anchorId) {
+      const now = this.list.indexOf(anchorId);
+      if (now >= 0 && now !== anchorIdx) this.scrollToIndex(now, within);
     }
-  }
-
-  private async loadMore(gen = this.generation) {
-    if (this.loading || this.exhausted) return;
-    this.loading = true;
-    try {
-      const last = this.threads[this.threads.length - 1];
-      const page = await api.listThreads(this.query(last?.last_date ?? null));
-      if (gen !== this.generation) return;
-      const seen = new Set(this.threads.map((t) => t.thread_id));
-      this.threads.push(...page.filter((t) => !seen.has(t.thread_id)));
-      if (page.length < PAGE) this.exhausted = true;
-      this.renderRows();
-    } catch (e) {
-      errorToast(e);
-    } finally {
-      this.loading = false;
+    if (cursorId) {
+      const now = this.list.indexOf(cursorId);
+      this.cursor = now >= 0 ? now : Math.min(this.cursor, this.list.total - 1);
+    }
+    this.renderRows();
+    if (this.openThread) {
+      const still = this.list.find(this.openThread.thread_id);
+      if (still && still.message_count !== this.openThread.messages.length) void this.showThread(still.thread_id, false);
     }
   }
 
   private renderRows() {
-    this.spacer.style.height = `${Math.max(this.threads.length * ROW_H, 1)}px`;
-    if (!this.threads.length) {
-      replace(this.rows, h('div.empty-list', this.loading ? 'Loading…' : emptyMessage()));
+    const total = this.list.total;
+    this.spacer.style.height = `${Math.max(Math.min(total * ROW_H, MAX_SCROLL_PX), 1)}px`;
+    if (!total) {
+      replace(this.rows, h('div.empty-list', this.list.loaded ? emptyMessage() : 'Loading…'));
       this.rows.style.transform = '';
       return;
     }
-    const top = this.scroller.scrollTop;
-    const first = Math.max(0, Math.floor(top / ROW_H) - 5);
-    const last = Math.min(this.threads.length, Math.ceil((top + this.scroller.clientHeight) / ROW_H) + 5);
-    this.rows.style.transform = `translateY(${first * ROW_H}px)`;
+    const [first, last] = this.visibleRange();
+    this.list.ensure(first, last);
+    // Position the rendered slice relative to the (possibly compressed) scroll offset.
+    this.rows.style.transform = `translateY(${this.scroller.scrollTop + (first * ROW_H - this.logicalTop())}px)`;
     const me = store.state.myEmails;
-    replace(
-      this.rows,
-      this.threads.slice(first, last).map((t, i) => {
-        const idx = first + i;
-        const active = t.thread_id === store.state.selectedThread;
-        const row = h(
+    const out: HTMLElement[] = [];
+    for (let idx = first; idx < last; idx++) {
+      const t = this.list.at(idx);
+      if (!t) {
+        out.push(h('div.thread-row.placeholder', { style: { height: `${ROW_H}px` }, 'aria-hidden': 'true' }, h('div.thread-main', h('div.ph.w40'), h('div.ph.w70'), h('div.ph.w90'))));
+        continue;
+      }
+      const active = t.thread_id === store.state.selectedThread;
+      out.push(
+        h(
           `div.thread-row${t.unread_count ? '.unread' : ''}${active ? '.active' : ''}${idx === this.cursor ? '.cursor' : ''}${this.selected.has(t.thread_id) ? '.selected' : ''}`,
           {
             role: 'option',
@@ -182,7 +197,7 @@ export class MailView {
             on: {
               click: (e: MouseEvent) => {
                 if (e.metaKey || e.ctrlKey || e.shiftKey) {
-                  this.toggleSelect(t.thread_id);
+                  this.toggleSelect(t);
                   return;
                 }
                 this.cursor = idx;
@@ -206,22 +221,23 @@ export class MailView {
             'aria-pressed': t.flagged ? 'true' : 'false',
             on: { click: (e: MouseEvent) => { e.stopPropagation(); void this.flagThread(t); } },
           }, icon('star', 16)),
-        );
-        return row;
-      }),
-    );
+        ),
+      );
+    }
+    replace(this.rows, out);
   }
 
-  private toggleSelect(id: string) {
-    if (this.selected.has(id)) this.selected.delete(id);
-    else this.selected.add(id);
+  private toggleSelect(t: ThreadSummary) {
+    if (this.selected.has(t.thread_id)) this.selected.delete(t.thread_id);
+    else this.selected.set(t.thread_id, t);
     this.renderHeader();
     this.renderRows();
   }
 
   private targetThreads(): ThreadSummary[] {
-    if (this.selected.size) return this.threads.filter((t) => this.selected.has(t.thread_id));
-    const t = this.threads.find((x) => x.thread_id === store.state.selectedThread) ?? this.threads[this.cursor];
+    if (this.selected.size) return [...this.selected.values()];
+    const sel = store.state.selectedThread;
+    const t = (sel ? this.list.find(sel) : undefined) ?? this.list.at(this.cursor);
     return t ? [t] : [];
   }
 
@@ -255,13 +271,15 @@ export class MailView {
       }
       if (kind === 'archive' || kind === 'trash' || kind === 'spam') {
         const removed = new Set(threads.map((t) => t.thread_id));
-        const nextIdx = Math.min(this.cursor, this.threads.length - 1 - removed.size);
-        this.threads = this.threads.filter((t) => !removed.has(t.thread_id));
+        // The store already reflects the change; re-read the window and keep the
+        // cursor at the same position, which now holds the next thread.
+        const pos = Math.max(0, this.cursor >= 0 ? this.cursor : this.list.indexOf(threads[0].thread_id));
         this.selected.clear();
-        this.cursor = Math.max(0, nextIdx);
-        const next = this.threads[this.cursor];
         this.renderHeader();
+        await this.refresh();
+        this.cursor = Math.min(pos, this.list.total - 1);
         this.renderRows();
+        const next = this.list.at(this.cursor);
         if (next && store.state.selectedThread && removed.has(store.state.selectedThread)) void this.showThread(next.thread_id);
         else if (!next) this.renderEmptyReader();
         toast(kind === 'archive' ? 'Archived' : kind === 'spam' ? 'Marked as spam' : 'Moved to Trash');
@@ -303,7 +321,7 @@ export class MailView {
       const unread = thread.messages.filter((m) => !m.flags.seen).map((m) => m.id);
       if (markRead && unread.length) {
         await api.setFlags(unread, true, null);
-        const t = this.threads.find((x) => x.thread_id === threadId);
+        const t = this.list.find(threadId);
         if (t) {
           t.unread_count = 0;
           this.renderRows();
@@ -434,25 +452,34 @@ export class MailView {
     ]);
   }
 
-  private move(delta: number) {
-    if (!this.threads.length) return;
-    this.cursor = Math.max(0, Math.min(this.threads.length - 1, this.cursor + delta));
+  private async move(delta: number) {
+    if (!this.list.total) return;
+    this.cursor = Math.max(0, Math.min(this.list.total - 1, this.cursor + delta));
     const y = this.cursor * ROW_H;
-    if (y < this.scroller.scrollTop) this.scroller.scrollTop = y;
-    else if (y + ROW_H > this.scroller.scrollTop + this.scroller.clientHeight) this.scroller.scrollTop = y + ROW_H - this.scroller.clientHeight;
+    const top = this.logicalTop();
+    if (y < top) this.scrollToIndex(this.cursor);
+    else if (y + ROW_H > top + this.scroller.clientHeight) this.scrollToIndex(this.cursor, ROW_H - this.scroller.clientHeight);
     this.renderRows();
-    if (store.state.selectedThread) void this.showThread(this.threads[this.cursor].thread_id);
+    if (store.state.selectedThread) {
+      const t = await this.list.get(this.cursor);
+      if (t) void this.showThread(t.thread_id);
+    }
+  }
+
+  private async openAtCursor() {
+    const t = await this.list.get(this.cursor);
+    if (t) void this.showThread(t.thread_id);
   }
 
   private bindKeys() {
     const s = 'mail';
-    bind('j', 'Next conversation', () => this.move(1), s);
-    bind('ArrowDown', 'Next conversation', () => this.move(1), s);
-    bind('k', 'Previous conversation', () => this.move(-1), s);
-    bind('ArrowUp', 'Previous conversation', () => this.move(-1), s);
-    bind('Enter', 'Open conversation', () => { const t = this.threads[this.cursor]; if (t) void this.showThread(t.thread_id); }, s);
-    bind('o', 'Open conversation', () => { const t = this.threads[this.cursor]; if (t) void this.showThread(t.thread_id); }, s);
-    bind('x', 'Select conversation', () => { const t = this.threads[this.cursor]; if (t) this.toggleSelect(t.thread_id); }, s);
+    bind('j', 'Next conversation', () => void this.move(1), s);
+    bind('ArrowDown', 'Next conversation', () => void this.move(1), s);
+    bind('k', 'Previous conversation', () => void this.move(-1), s);
+    bind('ArrowUp', 'Previous conversation', () => void this.move(-1), s);
+    bind('Enter', 'Open conversation', () => void this.openAtCursor(), s);
+    bind('o', 'Open conversation', () => void this.openAtCursor(), s);
+    bind('x', 'Select conversation', () => { const t = this.list.at(this.cursor); if (t) this.toggleSelect(t); }, s);
     bind('e', 'Archive', () => void this.act('archive'), s);
     bind('#', 'Delete', () => void this.act('trash'), s);
     bind('Backspace', 'Delete', () => void this.act('trash'), s);

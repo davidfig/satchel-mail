@@ -1038,125 +1038,143 @@ impl Store {
         })
     }
 
-    /// List threads with structured filters. `ids` restricts to a candidate
-    /// set of message ids (from full-text search).
+    /// WHERE clause + params for a thread filter (excluding paging). `None`
+    /// means the filter can match nothing.
+    fn thread_where(c: &Connection, f: &ThreadFilter) -> Result<Option<(Vec<String>, Vec<rusqlite::types::Value>)>> {
+        let mut where_: Vec<String> = vec![];
+        let mut p: Vec<rusqlite::types::Value> = vec![];
+        use rusqlite::types::Value as V;
+        let mut msg_conds: Vec<String> = vec![];
+        // Small mailboxes: drive from the membership index (avoids scanning
+        // every thread). Large ones: walk threads newest-first and stop early.
+        let total_threads: i64 = c.query_row("SELECT COUNT(*) FROM threads", [], |r| r.get(0))?;
+        let size: i64 = match (&f.mailbox_id, f.role) {
+            (Some(mb), _) => c.query_row("SELECT total FROM mailboxes WHERE id=?", [mb], |r| r.get(0)).unwrap_or(0),
+            (None, Some(role)) => c.query_row("SELECT COALESCE(SUM(total),0) FROM mailboxes WHERE role=?", [role_str(role)], |r| r.get(0)).unwrap_or(0),
+            _ => 0,
+        };
+        let sparse = size * 10 < total_threads;
+        // Clauses (and their params) that precede the message-level EXISTS.
+        let mut pre_where: Vec<String> = vec![];
+        let mut pre_p: Vec<rusqlite::types::Value> = vec![];
+        if let Some(mb) = &f.mailbox_id {
+            if sparse {
+                pre_where.push("t.id IN (SELECT m2.thread_id FROM message_mailboxes mm2 JOIN messages m2 ON m2.id=mm2.message_id WHERE mm2.mailbox_id=?)".into());
+                pre_p.push(V::Text(mb.clone()));
+            } else {
+                msg_conds.push("EXISTS (SELECT 1 FROM message_mailboxes mm WHERE mm.message_id=m.id AND mm.mailbox_id=?)".into());
+                p.push(V::Text(mb.clone()));
+            }
+        }
+        if let Some(role) = f.role {
+            if sparse {
+                pre_where.push("t.id IN (SELECT m2.thread_id FROM message_mailboxes mm2 JOIN messages m2 ON m2.id=mm2.message_id WHERE mm2.mailbox_id IN (SELECT id FROM mailboxes WHERE role=?))".into());
+                pre_p.push(V::Text(role_str(role).into()));
+            } else {
+                msg_conds.push("EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND mb.role=?)".into());
+                p.push(V::Text(role_str(role).into()));
+            }
+        }
+        if let Some(names) = &f.in_mailbox_names {
+            let ph = vec!["?"; names.len()].join(",");
+            msg_conds.push(format!(
+                "EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND (lower(mb.name) IN ({ph}) OR mb.role IN ({ph})))"
+            ));
+            for n in names {
+                p.push(V::Text(n.to_lowercase()));
+            }
+            for n in names {
+                p.push(V::Text(n.to_lowercase()));
+            }
+        }
+        if f.exclude_trash_junk {
+            msg_conds.push("NOT EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND mb.role IN ('trash','junk'))".into());
+        }
+        if let Some(a) = &f.account_ids {
+            let ph = vec!["?"; a.len()].join(",");
+            msg_conds.push(format!("m.account_id IN ({ph})"));
+            for x in a {
+                p.push(V::Text(x.clone()));
+            }
+        }
+        if let Some(from) = &f.from {
+            msg_conds.push("(lower(m.from_email) LIKE ? OR lower(m.from_name) LIKE ?)".into());
+            let like = format!("%{}%", from.to_lowercase());
+            p.push(V::Text(like.clone()));
+            p.push(V::Text(like));
+        }
+        if let Some(to) = &f.to {
+            msg_conds.push("(lower(m.to_json) LIKE ? OR lower(m.cc_json) LIKE ?)".into());
+            let like = format!("%{}%", to.to_lowercase());
+            p.push(V::Text(like.clone()));
+            p.push(V::Text(like));
+        }
+        if let Some(s) = &f.subject {
+            msg_conds.push("lower(m.subject) LIKE ?".into());
+            p.push(V::Text(format!("%{}%", s.to_lowercase())));
+        }
+        if f.has_attachment {
+            msg_conds.push("m.has_attachments=1".into());
+        }
+        if f.unread {
+            msg_conds.push("m.seen=0".into());
+        }
+        if f.flagged {
+            msg_conds.push("m.flagged=1".into());
+        }
+        if let Some(d) = f.after {
+            msg_conds.push("m.date>=?".into());
+            p.push(V::Integer(d.timestamp_millis()));
+        }
+        if let Some(d) = f.msg_before {
+            msg_conds.push("m.date<?".into());
+            p.push(V::Integer(d.timestamp_millis()));
+        }
+        if let Some(ids) = &f.message_ids {
+            if ids.is_empty() {
+                return Ok(None);
+            }
+            let ph = vec!["?"; ids.len()].join(",");
+            msg_conds.push(format!("m.id IN ({ph})"));
+            for x in ids {
+                p.push(V::Text(x.clone()));
+            }
+        }
+        if !msg_conds.is_empty() {
+            where_.push(format!("EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=t.id AND {})", msg_conds.join(" AND ")));
+        }
+        pre_where.append(&mut where_);
+        pre_p.append(&mut p);
+        Ok(Some((pre_where, pre_p)))
+    }
+
+    /// List threads newest first. Paging is either keyset (`before` +
+    /// `before_id`, stable when threads share a timestamp) or by `offset` (random
+    /// access for the windowed list UI).
     pub fn list_threads(&self, f: &ThreadFilter) -> Result<Vec<ThreadSummary>> {
+        use rusqlite::types::Value as V;
         self.r(|c| {
-            let mut where_: Vec<String> = vec![];
-            let mut p: Vec<rusqlite::types::Value> = vec![];
-            use rusqlite::types::Value as V;
-            let mut msg_conds: Vec<String> = vec![];
-            // Small mailboxes: drive from the membership index (avoids scanning
-            // every thread). Large ones: walk threads newest-first and stop early.
-            let total_threads: i64 = c.query_row("SELECT COUNT(*) FROM threads", [], |r| r.get(0))?;
-            let size: i64 = match (&f.mailbox_id, f.role) {
-                (Some(mb), _) => c.query_row("SELECT total FROM mailboxes WHERE id=?", [mb], |r| r.get(0)).unwrap_or(0),
-                (None, Some(role)) => c.query_row("SELECT COALESCE(SUM(total),0) FROM mailboxes WHERE role=?", [role_str(role)], |r| r.get(0)).unwrap_or(0),
-                _ => 0,
-            };
-            let sparse = size * 10 < total_threads;
-            // Clauses (and their params) that precede the message-level EXISTS.
-            let mut pre_where: Vec<String> = vec![];
-            let mut pre_p: Vec<rusqlite::types::Value> = vec![];
-            if let Some(mb) = &f.mailbox_id {
-                if sparse {
-                    pre_where.push("t.id IN (SELECT m2.thread_id FROM message_mailboxes mm2 JOIN messages m2 ON m2.id=mm2.message_id WHERE mm2.mailbox_id=?)".into());
-                    pre_p.push(V::Text(mb.clone()));
-                } else {
-                    msg_conds.push("EXISTS (SELECT 1 FROM message_mailboxes mm WHERE mm.message_id=m.id AND mm.mailbox_id=?)".into());
-                    p.push(V::Text(mb.clone()));
-                }
-            }
-            if let Some(role) = f.role {
-                if sparse {
-                    pre_where.push("t.id IN (SELECT m2.thread_id FROM message_mailboxes mm2 JOIN messages m2 ON m2.id=mm2.message_id WHERE mm2.mailbox_id IN (SELECT id FROM mailboxes WHERE role=?))".into());
-                    pre_p.push(V::Text(role_str(role).into()));
-                } else {
-                    msg_conds.push("EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND mb.role=?)".into());
-                    p.push(V::Text(role_str(role).into()));
-                }
-            }
-            if let Some(names) = &f.in_mailbox_names {
-                let ph = vec!["?"; names.len()].join(",");
-                msg_conds.push(format!(
-                    "EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND (lower(mb.name) IN ({ph}) OR mb.role IN ({ph})))"
-                ));
-                for n in names {
-                    p.push(V::Text(n.to_lowercase()));
-                }
-                for n in names {
-                    p.push(V::Text(n.to_lowercase()));
-                }
-            }
-            if f.exclude_trash_junk {
-                msg_conds.push("NOT EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND mb.role IN ('trash','junk'))".into());
-            }
-            if let Some(a) = &f.account_ids {
-                let ph = vec!["?"; a.len()].join(",");
-                msg_conds.push(format!("m.account_id IN ({ph})"));
-                for x in a {
-                    p.push(V::Text(x.clone()));
-                }
-            }
-            if let Some(from) = &f.from {
-                msg_conds.push("(lower(m.from_email) LIKE ? OR lower(m.from_name) LIKE ?)".into());
-                let like = format!("%{}%", from.to_lowercase());
-                p.push(V::Text(like.clone()));
-                p.push(V::Text(like));
-            }
-            if let Some(to) = &f.to {
-                msg_conds.push("(lower(m.to_json) LIKE ? OR lower(m.cc_json) LIKE ?)".into());
-                let like = format!("%{}%", to.to_lowercase());
-                p.push(V::Text(like.clone()));
-                p.push(V::Text(like));
-            }
-            if let Some(s) = &f.subject {
-                msg_conds.push("lower(m.subject) LIKE ?".into());
-                p.push(V::Text(format!("%{}%", s.to_lowercase())));
-            }
-            if f.has_attachment {
-                msg_conds.push("m.has_attachments=1".into());
-            }
-            if f.unread {
-                msg_conds.push("m.seen=0".into());
-            }
-            if f.flagged {
-                msg_conds.push("m.flagged=1".into());
-            }
-            if let Some(d) = f.after {
-                msg_conds.push("m.date>=?".into());
-                p.push(V::Integer(d.timestamp_millis()));
-            }
-            if let Some(d) = f.msg_before {
-                msg_conds.push("m.date<?".into());
-                p.push(V::Integer(d.timestamp_millis()));
-            }
-            if let Some(ids) = &f.message_ids {
-                if ids.is_empty() {
-                    return Ok(vec![]);
-                }
-                let ph = vec!["?"; ids.len()].join(",");
-                msg_conds.push(format!("m.id IN ({ph})"));
-                for x in ids {
-                    p.push(V::Text(x.clone()));
-                }
-            }
-            if !msg_conds.is_empty() {
-                where_.push(format!("EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=t.id AND {})", msg_conds.join(" AND ")));
-            }
+            let Some((mut where_, mut p)) = Self::thread_where(c, f)? else { return Ok(vec![]) };
             if let Some(b) = f.before {
-                where_.push("t.last_date<?".into());
-                p.push(V::Integer(b.timestamp_millis()));
+                match &f.before_id {
+                    Some(id) => {
+                        where_.push("(t.last_date<? OR (t.last_date=? AND t.id<?))".into());
+                        p.push(V::Integer(b.timestamp_millis()));
+                        p.push(V::Integer(b.timestamp_millis()));
+                        p.push(V::Text(id.clone()));
+                    }
+                    None => {
+                        where_.push("t.last_date<?".into());
+                        p.push(V::Integer(b.timestamp_millis()));
+                    }
+                }
             }
-            pre_where.append(&mut where_);
-            let where_ = pre_where;
-            pre_p.append(&mut p);
-            let mut p = pre_p;
             let sql = format!(
-                "SELECT t.* FROM threads t {} ORDER BY t.last_date DESC LIMIT ?",
+                "SELECT t.* FROM threads t {} ORDER BY t.last_date DESC, t.id DESC LIMIT ? OFFSET ?",
                 if where_.is_empty() { String::new() } else { format!("WHERE {}", where_.join(" AND ")) }
             );
             p.push(V::Integer(f.limit as i64));
+            p.push(V::Integer(f.offset as i64));
             let mut s = c.prepare(&sql)?;
             let mut rows = s.query_map(params_from_iter(p.iter()), Self::thread_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
             let mut ms = c.prepare_cached(
@@ -1166,6 +1184,18 @@ impl Store {
                 t.mailbox_ids = ms.query_map([&t.thread_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
             }
             Ok(rows)
+        })
+    }
+
+    /// Number of threads a filter matches (ignores paging).
+    pub fn count_threads(&self, f: &ThreadFilter) -> Result<u32> {
+        self.r(|c| {
+            let Some((where_, p)) = Self::thread_where(c, f)? else { return Ok(0) };
+            let sql = format!(
+                "SELECT COUNT(*) FROM threads t {}",
+                if where_.is_empty() { String::new() } else { format!("WHERE {}", where_.join(" AND ")) }
+            );
+            Ok(c.query_row(&sql, params_from_iter(p.iter()), |r| r.get(0))?)
         })
     }
 
@@ -1826,6 +1856,9 @@ pub struct ThreadFilter {
     pub msg_before: Option<DateTime<Utc>>,
     pub message_ids: Option<Vec<String>>,
     pub before: Option<DateTime<Utc>>,
+    /// Tie-breaker for `before`: threads at exactly `before` with a smaller id.
+    pub before_id: Option<String>,
+    pub offset: u32,
     pub limit: u32,
 }
 
@@ -1871,5 +1904,41 @@ mod tests {
         // Newest first: the unrelated message is the most recent.
         assert_eq!(list[0].thread_id, s.thread_of(&u).unwrap().unwrap());
         assert_eq!(list[1].thread_id, tc);
+    }
+
+    #[test]
+    fn paging_with_identical_timestamps() {
+        let s = Store::open_in_memory().unwrap();
+        let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+        let mb = s.upsert_mailbox(&acc.id, "INBOX", "Inbox", "INBOX", MailboxRole::Inbox, false).unwrap();
+        let when = Utc::now();
+        for i in 0..7 {
+            let mut r = rec(&format!("r{i}"), &format!("m{i}"), None, &format!("s{i}"), 0);
+            r.date = when;
+            s.upsert_message(&acc.id, &r, &[(mb.clone(), None)]).unwrap();
+        }
+        // Keyset: page size 2 must still visit all 7 threads exactly once.
+        let mut seen = vec![];
+        let mut f = ThreadFilter { mailbox_id: Some(mb.clone()), limit: 2, ..Default::default() };
+        loop {
+            let page = s.list_threads(&f).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            let last = page.last().unwrap();
+            f.before = Some(last.last_date);
+            f.before_id = Some(last.thread_id.clone());
+            seen.extend(page.into_iter().map(|t| t.thread_id));
+        }
+        let mut uniq = seen.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(seen.len(), 7);
+        assert_eq!(uniq.len(), 7);
+        // Offset paging agrees with the total order and the count.
+        let all = s.list_threads(&ThreadFilter { mailbox_id: Some(mb.clone()), limit: 100, ..Default::default() }).unwrap();
+        let third = s.list_threads(&ThreadFilter { mailbox_id: Some(mb.clone()), limit: 2, offset: 4, ..Default::default() }).unwrap();
+        assert_eq!(third[0].thread_id, all[4].thread_id);
+        assert_eq!(s.count_threads(&ThreadFilter { mailbox_id: Some(mb), ..Default::default() }).unwrap(), 7);
     }
 }

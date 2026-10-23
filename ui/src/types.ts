@@ -149,6 +149,8 @@ export interface ThreadQuery {
   search?: string | null;
   limit?: number | null;
   before?: ISODate | null;
+  before_id?: Id | null;
+  offset?: number | null;
 }
 
 export interface OutgoingAttachment {

@@ -199,6 +199,10 @@ impl Engine {
                 ok(mbs)
             }
             Command::ListThreads { query } => ok(self.list_threads(caller, &query)?),
+            Command::CountThreads { query } => {
+                let f = self.thread_filter(caller, &query)?;
+                ok(json!({ "total": self.store.count_threads(&f)? }))
+            }
             Command::GetThread { thread_id } => {
                 let t = self.store.get_thread_summary(&thread_id)?.ok_or_else(|| not_found("thread"))?;
                 self.check_account(caller, &t.account_id)?;
@@ -519,7 +523,20 @@ impl Engine {
     // -- mail reads ---------------------------------------------------------------
 
     fn list_threads(&self, caller: &Caller, q: &ThreadQuery) -> Result<Vec<ThreadSummary>> {
-        let mut f = ThreadFilter { mailbox_id: q.mailbox_id.clone(), role: q.role, before: q.before, limit: q.limit.unwrap_or(50).min(500), ..Default::default() };
+        let f = self.thread_filter(caller, q)?;
+        self.store.list_threads(&f)
+    }
+
+    fn thread_filter(&self, caller: &Caller, q: &ThreadQuery) -> Result<ThreadFilter> {
+        let mut f = ThreadFilter {
+            mailbox_id: q.mailbox_id.clone(),
+            role: q.role,
+            before: q.before,
+            before_id: q.before_id.clone(),
+            offset: q.offset.unwrap_or(0),
+            limit: q.limit.unwrap_or(50).min(500),
+            ..Default::default()
+        };
         if let Some(mb) = &q.mailbox_id {
             let m = self.store.get_mailbox(mb)?.ok_or_else(|| not_found("mailbox"))?;
             self.check_account(caller, &m.account_id)?;
@@ -552,10 +569,10 @@ impl Engine {
                 f.exclude_trash_junk = true;
             }
             if !p.text.trim().is_empty() {
-                f.message_ids = Some(self.search.search(&p.text, 2000)?);
+                f.message_ids = Some(self.search.search(&p.text, 10_000)?);
             }
         }
-        self.store.list_threads(&f)
+        Ok(f)
     }
 
     async fn raw_for(&self, id: &str) -> Result<Option<Vec<u8>>> {

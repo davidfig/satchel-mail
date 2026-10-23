@@ -102,6 +102,8 @@ CREATE TABLE IF NOT EXISTS threads (
     participants_json  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS threads_date ON threads(last_date);
+-- Keyset paging: (last_date, id) gives a total order.
+CREATE INDEX IF NOT EXISTS threads_date_id ON threads(last_date, id);
 CREATE INDEX IF NOT EXISTS threads_account_date ON threads(account_id, last_date);
 
 -- Per-account sync cursors (historyId, deltaLink, JMAP state, modseq...).

@@ -102,6 +102,8 @@ impl SatchelMcp {
                     search: s("query"),
                     limit: a.get("limit").and_then(Value::as_u64).map(|n| n.min(200) as u32).or(Some(25)),
                     before,
+                    before_id: s("before_thread_id"),
+                    offset: None,
                 };
                 self.run(Command::ListThreads { query: q }).await
             }
@@ -325,7 +327,8 @@ fn tools() -> Vec<Tool> {
                 "role": { "type": "string", "enum": ["inbox", "sent", "drafts", "archive", "trash", "junk", "flagged", "all", "important"] },
                 "account_id": { "type": "string" },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
-                "before": { "type": "string", "description": "RFC 3339; page through older results." }
+                "before": { "type": "string", "description": "Paging: the last_date of the last thread you received (RFC 3339)." },
+                "before_thread_id": { "type": "string", "description": "Paging: the thread_id of that last thread (avoids skipping threads with the same date)." }
             }), &[]),
         )),
         ro(Tool::new("get_thread", "Read a whole conversation as plain text, oldest first, quoted history removed.", schema(json!({ "thread_id": { "type": "string" } }), &["thread_id"]))),
