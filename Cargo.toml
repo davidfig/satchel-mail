@@ -1,0 +1,46 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/api",
+  "crates/core",
+  "crates/mime",
+  "crates/ical",
+  "crates/providers",
+  "crates/mcp",
+  "crates/cli",
+  "apps/desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+rust-version = "1.90"
+
+[workspace.dependencies]
+satchel-api = { path = "crates/api" }
+satchel-core = { path = "crates/core" }
+satchel-mime = { path = "crates/mime" }
+satchel-ical = { path = "crates/ical" }
+satchel-providers = { path = "crates/providers" }
+satchel-mcp = { path = "crates/mcp" }
+
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+base64 = "0.22"
+blake3 = "1.8.7"
+chrono = { version = "0.4.45", features = ["serde"] }
+chrono-tz = "0.10.4"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+directories = "6.0.0"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.29.0", features = ["v4", "v7", "serde"] }
+
+[profile.dev.package."*"]
+opt-level = 2

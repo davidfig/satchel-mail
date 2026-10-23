@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Satchel Mail",
+  "version": "0.1.0",
+  "identifier": "app.satchel.mail",
+  "build": {
+    "frontendDist": "../../ui/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm --prefix ../ui run dev",
+    "beforeBuildCommand": "npm --prefix ../ui run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Satchel Mail",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 560,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: https: http: blob:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob: data: about:; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "deb", "appimage", "msi", "nsis"],
+    "category": "Productivity",
+    "shortDescription": "Email and calendar with an AI review queue",
+    "longDescription": "Satchel Mail syncs your email and calendars locally, exposes them to AI agents through MCP and a readable folder, and lets agents propose replies and changes that you approve.",
+    "copyright": "© 2026 Satchel Mail",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "externalBin": ["binaries/satchel"],
+    "macOS": { "minimumSystemVersion": "11.0", "entitlements": null, "signingIdentity": null },
+    "windows": { "webviewInstallMode": { "type": "embedBootstrapper" } }
+  }
+}

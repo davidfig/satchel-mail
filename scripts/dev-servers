@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+# Local test servers for Satchel Mail development.
+#
+# Runs Stalwart natively (no Docker) on localhost-only ports. Stalwart provides
+# every protocol we test against: IMAP, SMTP submission, JMAP and CalDAV.
+#
+#   scripts/dev-servers install   download stalwart + stalwart-cli into .dev/bin
+#   scripts/dev-servers init      first-time configuration (accounts, ports)
+#   scripts/dev-servers start     start in the background
+#   scripts/dev-servers stop
+#   scripts/dev-servers status
+#   scripts/dev-servers reset     stop, restore the clean template, start, seed
+#   scripts/dev-servers seed      load fixture mail and calendar events
+#
+# Ports (all 127.0.0.1):
+#   IMAP+STARTTLS 2143   IMAPS 2993   SMTP 2525 (inbound)
+#   Submission+STARTTLS 2587   Submissions 2465
+#   HTTP (JMAP, CalDAV, admin) 8480   HTTPS 8443
+#
+# Test accounts: alice / bob / carol @satchel.test, password "test-pass-<name>".
+# The server uses a self-signed certificate; clients must allow invalid certs.
+
+set -euo pipefail
+
+STALWART_VERSION="v0.16.27"
+CLI_VERSION="v1.0.13"
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEV="$ROOT/.dev"
+BIN="$DEV/bin"
+SRV="$DEV/stalwart"
+TEMPLATE="$DEV/stalwart-template.tgz"
+PIDFILE="$SRV/stalwart.pid"
+ADMIN="admin:devpass"
+
+export STALWART_USER=admin STALWART_PASSWORD=devpass
+
+arch() {
+  case "$(uname -m)" in
+    arm64|aarch64) echo aarch64 ;;
+    x86_64) echo x86_64 ;;
+    *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;;
+  esac
+}
+
+os_triple() {
+  case "$(uname -s)" in
+    Darwin) echo "$(arch)-apple-darwin" ;;
+    Linux) echo "$(arch)-unknown-linux-gnu" ;;
+    *) echo "unsupported OS" >&2; exit 1 ;;
+  esac
+}
+
+cmd_install() {
+  mkdir -p "$BIN"
+  local triple; triple="$(os_triple)"
+  if [[ ! -x "$BIN/stalwart" ]]; then
+    echo "Downloading Stalwart $STALWART_VERSION ($triple)..."
+    local tmp; tmp="$(mktemp -d)"
+    curl -fL --retry 5 -C - -o "$tmp/stalwart.tgz" \
+      "https://github.com/stalwartlabs/stalwart/releases/download/$STALWART_VERSION/stalwart-$triple.tar.gz"
+    tar xzf "$tmp/stalwart.tgz" -C "$tmp"
+    mv "$tmp/stalwart" "$BIN/stalwart"
+    chmod +x "$BIN/stalwart"
+  fi
+  if [[ ! -x "$BIN/stalwart-cli" ]]; then
+    echo "Downloading stalwart-cli $CLI_VERSION..."
+    local tmp; tmp="$(mktemp -d)"
+    curl -fL --retry 5 -o "$tmp/cli.tar.xz" \
+      "https://github.com/stalwartlabs/cli/releases/download/$CLI_VERSION/stalwart-cli-$triple.tar.xz"
+    tar xJf "$tmp/cli.tar.xz" -C "$tmp"
+    find "$tmp" -name stalwart-cli -type f -exec mv {} "$BIN/stalwart-cli" \;
+    chmod +x "$BIN/stalwart-cli"
+  fi
+  if [[ "$(uname -s)" == Darwin ]]; then
+    xattr -d com.apple.quarantine "$BIN/stalwart" "$BIN/stalwart-cli" 2>/dev/null || true
+  fi
+  echo "Installed: $("$BIN/stalwart" --version | head -1)"
+}
+
+running() {
+  [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+wait_for_port() {
+  local port=$1
+  for _ in $(seq 1 60); do
+    if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then return 0; fi
+    sleep 0.25
+  done
+  echo "timed out waiting for port $port" >&2
+  return 1
+}
+
+launch() {
+  mkdir -p "$SRV/logs"
+  # exec so the recorded pid is the server itself, and nothing keeps our stdout open.
+  (cd "$SRV" && exec env STALWART_RECOVERY_ADMIN="$ADMIN" nohup "$BIN/stalwart" --config="$SRV/config.json") \
+     </dev/null >"$SRV/run.log" 2>&1 &
+  echo $! >"$PIDFILE"
+}
+
+cmd_start() {
+  [[ -x "$BIN/stalwart" ]] || cmd_install
+  [[ -f "$SRV/config.json" ]] || cmd_init
+  if running; then echo "already running (pid $(cat "$PIDFILE"))"; return; fi
+  launch
+  wait_for_port 8480
+  wait_for_port 2143
+  echo "Stalwart running (pid $(cat "$PIDFILE")). JMAP/CalDAV: http://127.0.0.1:8480"
+}
+
+cmd_stop() {
+  # Match by command line too: after bootstrap the server can outlive its pidfile.
+  local pattern="$BIN/stalwart --config=$SRV/config.json"
+  if running; then kill "$(cat "$PIDFILE")" 2>/dev/null || true; fi
+  pkill -f "$pattern" 2>/dev/null || true
+  for _ in $(seq 1 40); do pgrep -f "$pattern" >/dev/null || break; sleep 0.25; done
+  pkill -9 -f "$pattern" 2>/dev/null || true
+  rm -f "$PIDFILE"
+}
+
+cmd_status() {
+  if running; then echo "running (pid $(cat "$PIDFILE"))"; else echo "stopped"; fi
+}
+
+cli() { "$BIN/stalwart-cli" --url "${STALWART_URL:-http://127.0.0.1:8480}" "$@"; }
+
+# Reproduces the one-time setup from scratch: bootstrap, localhost listeners,
+# test accounts. Afterwards a template is saved so `reset` is fast.
+cmd_init() {
+  [[ -x "$BIN/stalwart" ]] || cmd_install
+  cmd_stop
+  rm -rf "$SRV"
+  mkdir -p "$SRV/data" "$SRV/logs"
+
+  echo "Bootstrapping..."
+  launch
+  wait_for_port 8080
+  STALWART_URL=http://127.0.0.1:8080 cli update Bootstrap --json "$(cat <<EOF
+{"serverHostname":"localhost","defaultDomain":"satchel.test","requestTlsCertificate":false,
+ "generateDkimKeys":false,
+ "dataStore":{"@type":"RocksDb","path":"$SRV/data/","blobSize":16834,"bufferSize":134217728,"poolWorkers":null,"cacheSize":134217728},
+ "tracer":{"@type":"Log","path":"$SRV/logs/","prefix":"stalwart","rotate":"daily","ansi":false,"multiline":false,
+           "enable":true,"level":"info","lossy":false,"events":{},"eventsPolicy":"exclude"}}
+EOF
+)" >/dev/null
+  for _ in $(seq 1 40); do [[ -f "$SRV/config.json" ]] && break; sleep 0.25; done
+  cmd_stop
+
+  echo "Configuring listeners and accounts..."
+  launch
+  wait_for_port 8080
+  export STALWART_URL=http://127.0.0.1:8080
+  # Rebind default listeners to localhost-only dev ports; drop the ones we don't use.
+  local id name proto
+  while IFS=$'\t' read -r id name; do
+    case "$name" in
+      http)        cli update NetworkListener "$id" --json '{"bind":{"127.0.0.1:8480":true}}' >/dev/null ;;
+      https)       cli update NetworkListener "$id" --json '{"bind":{"127.0.0.1:8443":true}}' >/dev/null ;;
+      imaps)       cli update NetworkListener "$id" --json '{"bind":{"127.0.0.1:2993":true}}' >/dev/null ;;
+      submissions) cli update NetworkListener "$id" --json '{"bind":{"127.0.0.1:2465":true}}' >/dev/null ;;
+      smtp)        cli update NetworkListener "$id" --json '{"bind":{"127.0.0.1:2525":true}}' >/dev/null ;;
+      *)           cli delete NetworkListener --ids "$id" >/dev/null ;;
+    esac
+  done < <(cli query NetworkListener --json | python3 -I -c 'import json,sys
+for l in sys.stdin:
+    o=json.loads(l); print(o["id"]+"\t"+o["name"])')
+  cli create NetworkListener --json '{"name":"imap","bind":{"127.0.0.1:2143":true},"protocol":"imap","tlsImplicit":false}' >/dev/null
+  cli create NetworkListener --json '{"name":"submission","bind":{"127.0.0.1:2587":true},"protocol":"smtp","tlsImplicit":false}' >/dev/null
+
+  local domain_id
+  domain_id="$(cli query Domain --json | python3 -I -c 'import json,sys; print(json.loads(sys.stdin.readline())["id"])')"
+  for u in alice bob carol; do
+    cli create Account --json "{\"@type\":\"User\",\"name\":\"$u\",\"domainId\":\"$domain_id\",\"description\":\"Test user $u\",\"credentials\":{\"0\":{\"@type\":\"Password\",\"secret\":\"test-pass-$u\"}},\"roles\":{\"@type\":\"User\"}}" >/dev/null
+  done
+  unset STALWART_URL
+  cmd_stop
+  tar czf "$TEMPLATE" -C "$SRV" config.json data
+  echo "Initialized. Template saved to $TEMPLATE"
+}
+
+cmd_reset() {
+  cmd_stop
+  if [[ ! -f "$TEMPLATE" ]]; then cmd_init; fi
+  rm -rf "$SRV/data"
+  tar xzf "$TEMPLATE" -C "$SRV"
+  cmd_start
+  cmd_seed
+}
+
+cmd_seed() {
+  running || cmd_start
+  python3 -I "$ROOT/scripts/seed.py" "$@"
+}
+
+case "${1:-}" in
+  install) cmd_install ;;
+  init) cmd_init ;;
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  status) cmd_status ;;
+  reset) cmd_reset ;;
+  seed) shift; cmd_seed "$@" ;;
+  *) sed -n '2,24p' "$0"; exit 1 ;;
+esac

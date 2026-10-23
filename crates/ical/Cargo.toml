@@ -1,0 +1,13 @@
+[package]
+name = "satchel-ical"
+description = "iCalendar parsing/building and recurrence expansion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+satchel-api.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+rrule = "0.14.0"
+uuid.workspace = true

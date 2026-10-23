@@ -1,0 +1,411 @@
+//! OAuth 2.0 for installed apps: authorization code + PKCE with a loopback
+//! redirect (RFC 8252), plus refresh-token handling.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Context, Result, anyhow, bail};
+use base64::Engine as _;
+use satchel_api::*;
+use satchel_core::provider::{CredentialHandle, OAuthDone};
+use serde::Deserialize;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Mutex;
+
+#[derive(Clone, Debug)]
+pub struct OAuthApp {
+    pub provider: ProviderKind,
+    pub auth_url: String,
+    pub token_url: String,
+    pub client_id: String,
+    /// Desktop clients' secrets are not confidential (RFC 8252 §8.5) but some
+    /// providers (Google) still require them.
+    pub client_secret: Option<String>,
+    pub scopes: Vec<String>,
+    pub extra_auth_params: Vec<(String, String)>,
+}
+
+impl OAuthApp {
+    pub fn google() -> Option<Self> {
+        let client_id = std::env::var("SATCHEL_GOOGLE_CLIENT_ID").ok().or_else(|| option_env!("SATCHEL_GOOGLE_CLIENT_ID").map(String::from))?;
+        let client_secret = std::env::var("SATCHEL_GOOGLE_CLIENT_SECRET").ok().or_else(|| option_env!("SATCHEL_GOOGLE_CLIENT_SECRET").map(String::from));
+        Some(Self {
+            provider: ProviderKind::Gmail,
+            auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
+            token_url: "https://oauth2.googleapis.com/token".into(),
+            client_id,
+            client_secret,
+            scopes: vec![
+                "openid".into(),
+                "email".into(),
+                "profile".into(),
+                "https://mail.google.com/".into(),
+                "https://www.googleapis.com/auth/calendar".into(),
+            ],
+            extra_auth_params: vec![("access_type".into(), "offline".into()), ("prompt".into(), "consent".into())],
+        })
+    }
+
+    pub fn microsoft() -> Option<Self> {
+        let client_id = std::env::var("SATCHEL_MS_CLIENT_ID").ok().or_else(|| option_env!("SATCHEL_MS_CLIENT_ID").map(String::from))?;
+        let tenant = std::env::var("SATCHEL_MS_TENANT").unwrap_or_else(|_| "common".into());
+        Some(Self {
+            provider: ProviderKind::Graph,
+            auth_url: format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize"),
+            token_url: format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"),
+            client_id,
+            client_secret: None,
+            scopes: vec![
+                "offline_access".into(),
+                "openid".into(),
+                "email".into(),
+                "profile".into(),
+                "https://graph.microsoft.com/Mail.ReadWrite".into(),
+                "https://graph.microsoft.com/Mail.Send".into(),
+                "https://graph.microsoft.com/Calendars.ReadWrite".into(),
+                "https://graph.microsoft.com/User.Read".into(),
+            ],
+            extra_auth_params: vec![("prompt".into(), "select_account".into())],
+        })
+    }
+
+    pub fn for_kind(kind: ProviderKind) -> Option<Self> {
+        match kind {
+            ProviderKind::Gmail => Self::google(),
+            ProviderKind::Graph => Self::microsoft(),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_in: Option<i64>,
+    #[allow(dead_code)]
+    id_token: Option<String>,
+}
+
+fn random_b64(n: usize) -> String {
+    use std::io::Read;
+    let mut b = vec![0u8; n];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let _ = f.read_exact(&mut b);
+    } else {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        for (i, x) in b.iter_mut().enumerate() {
+            *x = (t >> (i % 16 * 8)) as u8 ^ i as u8;
+        }
+    }
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
+}
+
+fn sha256_b64(s: &str) -> String {
+    // Minimal SHA-256 for the PKCE challenge (avoids another dependency).
+    let digest = sha256(s.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
+}
+
+fn sha256(data: &[u8]) -> [u8; 32] {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    let mut msg = data.to_vec();
+    let bitlen = (data.len() as u64) * 8;
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bitlen.to_be_bytes());
+    for chunk in msg.chunks(64) {
+        let mut w = [0u32; 64];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes([chunk[i * 4], chunk[i * 4 + 1], chunk[i * 4 + 2], chunk[i * 4 + 3]]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+        }
+        let mut v = h;
+        for i in 0..64 {
+            let s1 = v[4].rotate_right(6) ^ v[4].rotate_right(11) ^ v[4].rotate_right(25);
+            let ch = (v[4] & v[5]) ^ (!v[4] & v[6]);
+            let t1 = v[7].wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
+            let s0 = v[0].rotate_right(2) ^ v[0].rotate_right(13) ^ v[0].rotate_right(22);
+            let maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
+            let t2 = s0.wrapping_add(maj);
+            v = [t1.wrapping_add(t2), v[0], v[1], v[2], v[3].wrapping_add(t1), v[4], v[5], v[6]];
+        }
+        for i in 0..8 {
+            h[i] = h[i].wrapping_add(v[i]);
+        }
+    }
+    let mut out = [0u8; 32];
+    for (i, x) in h.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&x.to_be_bytes());
+    }
+    out
+}
+
+fn now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
+}
+
+fn query_param(q: &str, key: &str) -> Option<String> {
+    q.split('&').find_map(|kv| {
+        let (k, v) = kv.split_once('=')?;
+        (k == key).then(|| urlencoding::decode(&v.replace('+', " ")).map(|s| s.into_owned()).unwrap_or_default())
+    })
+}
+
+/// Begin a sign-in. Returns the URL to open; `done` runs after the redirect.
+pub fn start(app: OAuthApp, done: OAuthDone) -> Result<String> {
+    let std_listener = std::net::TcpListener::bind("127.0.0.1:0").context("cannot open a local port for sign-in")?;
+    std_listener.set_nonblocking(true)?;
+    let port = std_listener.local_addr()?.port();
+    let redirect = format!("http://127.0.0.1:{port}/callback");
+    let verifier = random_b64(48);
+    let state = random_b64(16);
+    let mut url = url::Url::parse(&app.auth_url)?;
+    {
+        let mut q = url.query_pairs_mut();
+        q.append_pair("client_id", &app.client_id)
+            .append_pair("response_type", "code")
+            .append_pair("redirect_uri", &redirect)
+            .append_pair("scope", &app.scopes.join(" "))
+            .append_pair("state", &state)
+            .append_pair("code_challenge", &sha256_b64(&verifier))
+            .append_pair("code_challenge_method", "S256");
+        for (k, v) in &app.extra_auth_params {
+            q.append_pair(k, v);
+        }
+    }
+    let auth_url = url.to_string();
+    tokio::spawn(async move {
+        let res = tokio::time::timeout(Duration::from_secs(600), finish(app, std_listener, redirect, verifier, state)).await;
+        let res = match res {
+            Ok(r) => r,
+            Err(_) => Err(anyhow!("sign-in timed out")),
+        };
+        done(res);
+    });
+    Ok(auth_url)
+}
+
+async fn finish(app: OAuthApp, listener: std::net::TcpListener, redirect: String, verifier: String, state: String) -> Result<(AccountConfig, Credential)> {
+    let listener = tokio::net::TcpListener::from_std(listener)?;
+    let (code, mut sock) = loop {
+        let (mut sock, _) = listener.accept().await?;
+        let mut buf = vec![0u8; 8192];
+        let n = sock.read(&mut buf).await?;
+        let req = String::from_utf8_lossy(&buf[..n]).to_string();
+        let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+        let Some(q) = path.strip_prefix("/callback?") else {
+            let _ = sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+            continue;
+        };
+        if query_param(q, "state").as_deref() != Some(state.as_str()) {
+            respond(&mut sock, "Sign-in failed", "The response didn't match this sign-in attempt. Please try again from Satchel Mail.").await;
+            bail!("OAuth state mismatch");
+        }
+        if let Some(err) = query_param(q, "error") {
+            let desc = query_param(q, "error_description").unwrap_or_default();
+            respond(&mut sock, "Sign-in cancelled", "You can close this tab.").await;
+            bail!("{err}: {desc}");
+        }
+        let code = query_param(q, "code").context("no authorization code")?;
+        break (code, sock);
+    };
+    let http = crate::net::http_client(false)?;
+    let mut form = vec![
+        ("grant_type", "authorization_code".to_string()),
+        ("code", code),
+        ("redirect_uri", redirect),
+        ("client_id", app.client_id.clone()),
+        ("code_verifier", verifier),
+    ];
+    if let Some(s) = &app.client_secret {
+        form.push(("client_secret", s.clone()));
+    }
+    let resp = http.post(&app.token_url).form(&form).send().await?;
+    let status = resp.status();
+    let body = resp.text().await?;
+    if !status.is_success() {
+        respond(&mut sock, "Sign-in failed", "The provider rejected the sign-in. Please try again.").await;
+        return Err(crate::net::http_error(status, &body, "token exchange"));
+    }
+    let tok: TokenResponse = serde_json::from_str(&body)?;
+    let (email, name) = identity(&http, app.provider, &tok.access_token).await?;
+    respond(&mut sock, "You're signed in", "Return to Satchel Mail — your account is syncing. You can close this tab.").await;
+    let cred = Credential::OAuth { access_token: tok.access_token, refresh_token: tok.refresh_token, expires_at: tok.expires_in.map(|e| now() + e) };
+    let config = match app.provider {
+        ProviderKind::Gmail => AccountConfig::Gmail { email, display_name: name },
+        ProviderKind::Graph => AccountConfig::Graph { email, display_name: name },
+        _ => bail!("unsupported OAuth provider"),
+    };
+    Ok((config, cred))
+}
+
+async fn respond(sock: &mut tokio::net::TcpStream, title: &str, msg: &str) {
+    let html = format!(
+        "<!doctype html><meta charset=utf-8><title>{title}</title><body style=\"font:16px -apple-system,sans-serif;display:grid;place-items:center;height:90vh;color:#333\"><div style=text-align:center><h1 style=font-weight:600>{title}</h1><p>{msg}</p></div>"
+    );
+    let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{html}", html.len());
+    let _ = sock.write_all(resp.as_bytes()).await;
+    let _ = sock.shutdown().await;
+}
+
+async fn identity(http: &reqwest::Client, kind: ProviderKind, token: &str) -> Result<(String, String)> {
+    match kind {
+        ProviderKind::Gmail => {
+            let v: serde_json::Value = http.get("https://openidconnect.googleapis.com/v1/userinfo").bearer_auth(token).send().await?.error_for_status()?.json().await?;
+            Ok((v["email"].as_str().context("no email in profile")?.to_string(), v["name"].as_str().unwrap_or_default().to_string()))
+        }
+        ProviderKind::Graph => {
+            let v: serde_json::Value = http.get("https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName").bearer_auth(token).send().await?.error_for_status()?.json().await?;
+            let email = v["mail"].as_str().or(v["userPrincipalName"].as_str()).context("no email in profile")?;
+            Ok((email.to_string(), v["displayName"].as_str().unwrap_or_default().to_string()))
+        }
+        _ => bail!("unsupported"),
+    }
+}
+
+/// Supplies fresh access tokens, refreshing and persisting as needed.
+pub struct TokenSource {
+    app: Option<OAuthApp>,
+    creds: CredentialHandle,
+    http: reqwest::Client,
+    lock: Arc<Mutex<()>>,
+}
+
+impl TokenSource {
+    pub fn new(app: Option<OAuthApp>, creds: CredentialHandle) -> Result<Self> {
+        Ok(Self { app, creds, http: crate::net::http_client(false)?, lock: Arc::new(Mutex::new(())) })
+    }
+
+    pub async fn token(&self) -> Result<String> {
+        let _g = self.lock.lock().await;
+        match self.creds.get()? {
+            Credential::OAuth { access_token, refresh_token, expires_at } => {
+                if expires_at.is_none_or(|e| e > now() + 90) {
+                    return Ok(access_token);
+                }
+                let rt = refresh_token.clone().ok_or_else(|| anyhow::Error::new(ApiError::new(ErrorCode::Auth, "session expired; sign in again")))?;
+                self.refresh(&rt).await
+            }
+            Credential::Password { password } => Ok(password),
+        }
+    }
+
+    /// Force a refresh (after a 401).
+    pub async fn refresh_now(&self) -> Result<String> {
+        let _g = self.lock.lock().await;
+        match self.creds.get()? {
+            Credential::OAuth { refresh_token: Some(rt), .. } => self.refresh(&rt).await,
+            _ => Err(anyhow::Error::new(ApiError::new(ErrorCode::Auth, "session expired; sign in again"))),
+        }
+    }
+
+    async fn refresh(&self, refresh_token: &str) -> Result<String> {
+        let app = self.app.as_ref().ok_or_else(|| anyhow!("OAuth client is not configured"))?;
+        let mut form = vec![
+            ("grant_type", "refresh_token".to_string()),
+            ("refresh_token", refresh_token.to_string()),
+            ("client_id", app.client_id.clone()),
+        ];
+        if let Some(s) = &app.client_secret {
+            form.push(("client_secret", s.clone()));
+        }
+        if app.provider == ProviderKind::Graph {
+            form.push(("scope", app.scopes.join(" ")));
+        }
+        let resp = self.http.post(&app.token_url).form(&form).send().await?;
+        let status = resp.status();
+        let body = resp.text().await?;
+        if !status.is_success() {
+            let mut e = crate::net::http_error(status, &body, "token refresh");
+            if status.as_u16() == 400 && body.contains("invalid_grant") {
+                e = anyhow::Error::new(ApiError::new(ErrorCode::Auth, "access was revoked; sign in again"));
+            }
+            return Err(e);
+        }
+        let tok: TokenResponse = serde_json::from_str(&body)?;
+        let cred = Credential::OAuth {
+            access_token: tok.access_token.clone(),
+            refresh_token: tok.refresh_token.or_else(|| Some(refresh_token.to_string())),
+            expires_at: tok.expires_in.map(|e| now() + e),
+        };
+        self.creds.set(&cred)?;
+        Ok(tok.access_token)
+    }
+}
+
+/// An authenticated JSON HTTP client that retries once on 401 after a refresh
+/// and backs off on 429/503.
+pub struct ApiClient {
+    pub http: reqwest::Client,
+    pub tokens: TokenSource,
+}
+
+impl ApiClient {
+    pub async fn send(&self, build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder, what: &str) -> Result<reqwest::Response> {
+        let mut token = self.tokens.token().await?;
+        let mut refreshed = false;
+        let mut backoff = Duration::from_millis(500);
+        for _ in 0..6 {
+            let resp = build(&self.http, &token).send().await.with_context(|| format!("{what}: request failed"))?;
+            let st = resp.status();
+            if st.as_u16() == 401 && !refreshed {
+                token = self.tokens.refresh_now().await?;
+                refreshed = true;
+                continue;
+            }
+            if st.as_u16() == 429 || st.as_u16() == 503 {
+                let wait = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .map(Duration::from_secs)
+                    .unwrap_or(backoff);
+                tokio::time::sleep(wait.min(Duration::from_secs(60))).await;
+                backoff *= 2;
+                continue;
+            }
+            if !st.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                return Err(crate::net::http_error(st, &body, what));
+            }
+            return Ok(resp);
+        }
+        Err(anyhow::Error::new(ApiError::new(ErrorCode::RateLimited, format!("{what}: rate limited"))))
+    }
+
+    pub async fn json(&self, build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder, what: &str) -> Result<serde_json::Value> {
+        let r = self.send(build, what).await?;
+        let text = r.text().await?;
+        if text.trim().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+        Ok(serde_json::from_str(&text)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn sha256_known() {
+        let h = super::sha256(b"abc");
+        assert_eq!(h[..4], [0xba, 0x78, 0x16, 0xbf]);
+        // RFC 7636 appendix B example
+        assert_eq!(super::sha256_b64("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+    }
+}
