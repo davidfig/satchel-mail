@@ -16,14 +16,10 @@ blake3.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 directories.workspace = true
-futures.workspace = true
 keyring = { version = "4.2.0", optional = true }
-rand = "0.9"
 rusqlite = { version = "0.40.2", features = ["bundled", "chrono", "serde_json"] }
 serde.workspace = true
 serde_json.workspace = true
-tantivy = "0.27.0"
-thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true

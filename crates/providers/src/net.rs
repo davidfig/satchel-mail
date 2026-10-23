@@ -156,3 +156,25 @@ pub fn http_error(status: reqwest::StatusCode, body: &str, what: &str) -> anyhow
     let snippet: String = body.chars().take(300).collect();
     anyhow::Error::new(ApiError::new(code, format!("{what}: HTTP {status}: {snippet}")))
 }
+
+/// Percent-encode a value for use as a URL path segment or query value
+/// (everything but RFC 3986 unreserved characters).
+pub fn enc(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn encodes() {
+        assert_eq!(super::enc("a b@c/d+é"), "a%20b%40c%2Fd%2B%C3%A9");
+    }
+}

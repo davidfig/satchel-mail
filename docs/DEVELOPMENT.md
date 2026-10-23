@@ -57,15 +57,19 @@ The desktop app and CLI store credentials in the OS keychain
 ## Data directory
 
 ```
-satchel.db      SQLite (WAL): accounts, mailboxes, messages, threads, events, ops, proposals, audit
+satchel.db      SQLite (WAL): accounts, mailboxes, messages, threads, events, ops, proposals, audit,
+                and the FTS5 full-text index
 blobs/          raw RFC 822 messages, content-addressed (BLAKE3)
-index/          tantivy full-text index
 engine.lock     held by the process that owns sync
 ```
 
 Default location: `~/Library/Application Support/app.Satchel.Satchel-Mail`
 (macOS), `%APPDATA%\Satchel\Satchel Mail\data` (Windows), `~/.local/share/satchelmail`
 (Linux), or `$SATCHEL_DATA_DIR`.
+
+## Decisions
+
+Design decisions are recorded one per file in [decisions/](decisions/README.md). Add one for any significant change.
 
 ## Code map
 

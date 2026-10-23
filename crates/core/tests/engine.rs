@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use satchel_api::*;
 use satchel_core::blobs::MemBlobStore;
 use satchel_core::provider::*;
-use satchel_core::search::SearchIndex;
 use satchel_core::secrets::MemSecretStore;
 use satchel_core::store::{MessageRef, Store};
 use satchel_core::{Caller, Engine, EngineOptions, Mode};
@@ -105,7 +104,6 @@ async fn setup() -> (Arc<Engine>, Arc<Fake>, String, tempfile::TempDir) {
     let engine = Engine::with_parts(
         Arc::new(Store::open_in_memory().unwrap()),
         Arc::new(MemBlobStore::default()),
-        Arc::new(SearchIndex::in_memory().unwrap()),
         EngineOptions {
             data_dir: dir.path().to_path_buf(),
             mode: Mode::Full,
@@ -253,4 +251,40 @@ async fn draft_warnings_and_staleness() {
     let audit: Vec<AuditEntry> = serde_json::from_value(engine.handle(&Caller::User, Command::ListAudit { limit: Some(50) }).await.unwrap()).unwrap();
     assert!(audit.iter().any(|e| e.action == "proposal_approved"));
     let _ = json!(null);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn full_text_search_combines_with_filters() {
+    let (engine, _fake, account, _dir) = setup().await;
+    while engine.index_batch(500).unwrap() > 0 {}
+    let search = |q: &str| {
+        let engine = engine.clone();
+        let q = q.to_string();
+        async move {
+            let v = engine.handle(&Caller::User, Command::ListThreads { query: ThreadQuery { search: Some(q.clone()), ..Default::default() } }).await.unwrap();
+            let n = engine.handle(&Caller::User, Command::CountThreads { query: ThreadQuery { search: Some(q), ..Default::default() } }).await.unwrap();
+            (inbox_threads(v), n["total"].as_u64().unwrap())
+        }
+    };
+    let (t, n) = search("kickoff").await;
+    assert_eq!((t.len(), n), (1, 1), "subject match groups into one thread");
+    let (t, _) = search("\"body of invoice\"").await;
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].subject, "Invoice");
+    let (_, n) = search("kick").await;
+    assert_eq!(n, 1, "prefix match");
+    let (_, n) = search("from:carol kickoff").await;
+    assert_eq!(n, 1);
+    let (_, n) = search("from:bill kickoff").await;
+    assert_eq!(n, 0);
+    let (_, n) = search("nothing-like-this").await;
+    assert_eq!(n, 0);
+    let (_, n) = search("evil").await;
+    assert_eq!(n, 1, "participants are searchable");
+
+    // Deleting a message removes it from search (via the delete trigger).
+    let invoice = engine.store().message_id_by_remote(&account, "r3").unwrap().unwrap();
+    engine.store().delete_message(&invoice).unwrap();
+    let (_, n) = search("invoice").await;
+    assert_eq!(n, 0);
 }

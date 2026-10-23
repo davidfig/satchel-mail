@@ -32,7 +32,7 @@ We **do** use libraries for wire formats and protocols, because hand-writing the
 | IMAP client | `async-imap` (or `imap-codec` + own client) | Protocol grammar; we still own the sync logic |
 | SMTP submission | `lettre` | Auth mechanisms, STARTTLS |
 | iCalendar parse/build | `calcard` (Stalwart) or `icalendar` | RRULE/timezones are notoriously hard |
-| Full-text search | `tantivy` | Mature Lucene-like engine |
+| Full-text search | SQLite FTS5 (in `rusqlite`) | Same store and query as every filter; no extra dependency (see decisions/0014) |
 | Storage | `rusqlite` (SQLite, WAL, FTS fallback) | — |
 | HTML sanitizing | `ammonia` | Security-critical |
 | OAuth 2 | `oauth2` | PKCE, refresh flows |
@@ -57,7 +57,7 @@ Gmail API, Microsoft Graph, JMAP and CalDAV clients are thin REST/XML layers —
 │  │      │                                            ▼             │    │
 │  │  Store (SQLite + blob dir) ◄── Sync engine ◄── Provider adapters│    │
 │  │      │                                  (Gmail, Graph, IMAP,    │    │
-│  │  Search index (tantivy)                  JMAP, CalDAV, GCal)    │    │
+│  │  Full-text search (SQLite FTS5)          JMAP, CalDAV, GCal)    │    │
 │  │      │                                                          │    │
 │  │  AI mirror writer (files on disk)                               │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
@@ -96,7 +96,6 @@ satchel-mail/
   satchel.db             # SQLite: accounts, folders, messages, threads, events, ops, proposals
   blobs/ab/cdef…eml      # raw RFC 822 messages, content-addressed (BLAKE3)
   attachments/…          # extracted on demand, content-addressed
-  index/                 # tantivy
 ~/Satchel/                                   (user-visible AI mirror, §6.1)
 ```
 
@@ -258,7 +257,7 @@ Order is chosen so every milestone is testable end-to-end against local test ser
 |---|---|---|
 | M0 | Skeleton | Workspace, Tauri shell, Transport, `api` schema, CI, SQLite migrations, `scripts/dev-servers` running local Stalwart |
 | M1 | Read-only IMAP mail | Add IMAP account, initial + delta sync, IDLE, thread list + reading pane, sanitized rendering |
-| M2 | Full mail client (IMAP/SMTP) | Compose/reply/forward, drafts, flags/move/archive via ops log, offline queue, tantivy search |
+| M2 | Full mail client (IMAP/SMTP) | Compose/reply/forward, drafts, flags/move/archive via ops log, offline queue, full-text search |
 | M3 | AI surface | Filesystem mirror, MCP server (read + propose), Review queue UI, audit log, agent policies |
 | M4 | Gmail + Graph + JMAP mail | All three adapters, labels model, OAuth flows, keychain |
 | M5 | Calendar | CalDAV, Google Calendar, Graph calendar, JMAP/CalDAV for Fastmail; calendar views, editor, invites; calendar proposals |
@@ -289,6 +288,8 @@ M0–M6 are built; M7 (hosted version) is on hold pending a design discussion.
 
 ### Deviations from the plan above
 
+Each decision, including these, has its own record in [docs/decisions/](decisions/README.md).
+
 - **Test servers:** Stalwart alone (it also serves CalDAV and JMAP), so Radicale isn't used.
 - **Store:** SQLite behind one module (`core/src/store.rs`) that contains all SQL; it is not yet a trait. `BlobStore` and `SecretStore` are traits. Extracting `Store` is the first M7 task.
 - **IMAP identity:** `<uidvalidity>:<uid>:<mailbox>`. After a move we re-identify the copy by Message-ID among UIDs ≥ the target's previous UIDNEXT, so local ids survive moves we perform (async-imap doesn't expose OBJECTID).
@@ -296,5 +297,6 @@ M0–M6 are built; M7 (hosted version) is on hold pending a design discussion.
 - **Graph calendar:** synced as concrete instances (`calendarView/delta`, −180/+540 days), not series masters; attendees respond via accept/decline endpoints.
 - **Agents over HTTP:** `satchel serve` exposes `POST /api/agent/rpc` (bearer agent token) using the same command schema; MCP-over-HTTP is not implemented yet (stdio only).
 - **Proposal de-duplication** and **email-invite RSVP** (`RespondToEmailInvite`) were added.
-- **Large lists:** the thread list is a windowed cache addressed by offset, sized by `CountThreads`, holding at most 30 pages of 100; the scrollbar is compressed above 8M px so million-thread folders scroll. Refreshes re-read only the visible window and keep the top visible thread anchored. Agents page with keyset (`before` + `before_thread_id`). Full-text search considers the top 10,000 matching messages.
+- **Large lists:** the thread list is a windowed cache addressed by offset, sized by `CountThreads`, holding at most 30 pages of 100; the scrollbar is compressed above 8M px so million-thread folders scroll. Refreshes re-read only the visible window and keep the top visible thread anchored. Agents page with keyset (`before` + `before_thread_id`).
+- **Search:** SQLite FTS5 instead of a tantivy index, so text search, filters, counts and paging are one query with no result cap; headers are searchable before bodies download.
 - **Updater:** behind the `updater` feature; `scripts/release.sh` enables it when an update URL and signing key are provided.

@@ -87,20 +87,6 @@ struct TokenResponse {
     id_token: Option<String>,
 }
 
-fn random_b64(n: usize) -> String {
-    use std::io::Read;
-    let mut b = vec![0u8; n];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut b);
-    } else {
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        for (i, x) in b.iter_mut().enumerate() {
-            *x = (t >> (i % 16 * 8)) as u8 ^ i as u8;
-        }
-    }
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
-}
-
 fn sha256_b64(s: &str) -> String {
     // Minimal SHA-256 for the PKCE challenge (avoids another dependency).
     let digest = sha256(s.as_bytes());
@@ -160,10 +146,7 @@ fn now() -> i64 {
 }
 
 fn query_param(q: &str, key: &str) -> Option<String> {
-    q.split('&').find_map(|kv| {
-        let (k, v) = kv.split_once('=')?;
-        (k == key).then(|| urlencoding::decode(&v.replace('+', " ")).map(|s| s.into_owned()).unwrap_or_default())
-    })
+    url::form_urlencoded::parse(q.as_bytes()).find(|(k, _)| k == key).map(|(_, v)| v.into_owned())
 }
 
 /// Begin a sign-in. Returns the URL to open; `done` runs after the redirect.
@@ -172,8 +155,8 @@ pub fn start(app: OAuthApp, done: OAuthDone) -> Result<String> {
     std_listener.set_nonblocking(true)?;
     let port = std_listener.local_addr()?.port();
     let redirect = format!("http://127.0.0.1:{port}/callback");
-    let verifier = random_b64(48);
-    let state = random_b64(16);
+    let verifier = satchel_core::random_token(48);
+    let state = satchel_core::random_token(16);
     let mut url = url::Url::parse(&app.auth_url)?;
     {
         let mut q = url.query_pairs_mut();

@@ -870,19 +870,32 @@ impl Store {
         })
     }
 
+    /// Messages whose search entry is missing or out of date (headers are
+    /// indexed right away; bodies once downloaded).
     pub fn unindexed(&self, limit: u32) -> Result<Vec<String>> {
         self.r(|c| {
-            let mut s = c.prepare("SELECT id FROM messages WHERE indexed=0 AND blob_hash IS NOT NULL LIMIT ?")?;
+            let mut s = c.prepare("SELECT id FROM messages WHERE indexed=0 LIMIT ?")?;
             let rows = s.query_map([limit], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
             Ok(rows)
         })
     }
 
-    pub fn mark_indexed(&self, ids: &[String]) -> Result<()> {
+    /// Write search entries. A message is marked indexed only if its body
+    /// didn't change while we were reading it.
+    pub fn index_messages(&self, docs: &[SearchDoc]) -> Result<()> {
         self.w(|c| {
             let tx = c.transaction()?;
-            for id in ids {
-                tx.execute("UPDATE messages SET indexed=1 WHERE id=?", [id])?;
+            {
+                let mut rowid = tx.prepare_cached("SELECT rowid FROM messages WHERE id=?")?;
+                let mut del = tx.prepare_cached("DELETE FROM message_fts WHERE rowid=?")?;
+                let mut ins = tx.prepare_cached("INSERT INTO message_fts (rowid, subject, participants, body, attachments) VALUES (?,?,?,?,?)")?;
+                let mut mark = tx.prepare_cached("UPDATE messages SET indexed=1 WHERE id=? AND blob_hash IS ?")?;
+                for d in docs {
+                    let Some(r): Option<i64> = rowid.query_row([&d.id], |r| r.get(0)).optional()? else { continue };
+                    del.execute([r])?;
+                    ins.execute(params![r, d.subject, d.participants, d.body, d.attachments])?;
+                    mark.execute(params![d.id, d.blob_hash])?;
+                }
             }
             tx.commit()?;
             Ok(())
@@ -911,8 +924,11 @@ impl Store {
         })
     }
 
+    /// Drop and rebuild the search index (also required after any VACUUM,
+    /// which can renumber message rowids).
     pub fn reset_indexed(&self) -> Result<()> {
         self.w(|c| {
+            c.execute("DELETE FROM message_fts", [])?;
             c.execute("UPDATE messages SET indexed=0", [])?;
             Ok(())
         })
@@ -1129,6 +1145,25 @@ impl Store {
         if let Some(d) = f.msg_before {
             msg_conds.push("m.date<?".into());
             p.push(V::Integer(d.timestamp_millis()));
+        }
+        if let Some(q) = &f.fts {
+            // Selective text (few matches): start from the text index. Broad text:
+            // walk threads newest-first and stop early. Either way the text and the
+            // other filters must hold for the same message.
+            let probe: i64 = c.query_row(
+                "SELECT COUNT(*) FROM (SELECT rowid FROM message_fts WHERE message_fts MATCH ? LIMIT 5001)",
+                [q],
+                |r| r.get(0),
+            )?;
+            if probe == 0 {
+                return Ok(None);
+            }
+            if probe <= 5000 {
+                pre_where.push("t.id IN (SELECT m3.thread_id FROM messages m3 WHERE m3.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?))".into());
+                pre_p.push(V::Text(q.clone()));
+            }
+            msg_conds.push("m.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)".into());
+            p.push(V::Text(q.clone()));
         }
         if let Some(ids) = &f.message_ids {
             if ids.is_empty() {
@@ -1839,6 +1874,18 @@ pub struct StoredMessage {
     pub version: i64,
 }
 
+/// One message's searchable text.
+#[derive(Debug, Clone, Default)]
+pub struct SearchDoc {
+    pub id: String,
+    pub subject: String,
+    pub participants: String,
+    pub body: String,
+    pub attachments: String,
+    /// The body version this entry was built from.
+    pub blob_hash: Option<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ThreadFilter {
     pub mailbox_id: Option<String>,
@@ -1855,6 +1902,8 @@ pub struct ThreadFilter {
     pub after: Option<DateTime<Utc>>,
     pub msg_before: Option<DateTime<Utc>>,
     pub message_ids: Option<Vec<String>>,
+    /// FTS5 MATCH expression (see `search::fts_query`).
+    pub fts: Option<String>,
     pub before: Option<DateTime<Utc>>,
     /// Tie-breaker for `before`: threads at exactly `before` with a smaller id.
     pub before_id: Option<String>,

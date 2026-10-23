@@ -15,13 +15,14 @@ sent, moved or scheduled until you approve it in the Review queue.
 - **AI surface:** MCP server (`satchel mcp`) with 24 read + propose tools, an
   AI-readable folder (`~/Satchel/`), per-agent access policies, an audit log.
 
-See [docs/DESIGN.md](docs/DESIGN.md) for the architecture.
+See [docs/DESIGN.md](docs/DESIGN.md) for the architecture and
+[docs/decisions/](docs/decisions/README.md) for the decisions behind it.
 
 ## Layout
 
 ```
 crates/api        command/event schema shared by every host and client
-crates/core       store (SQLite), sync engine, op queue, proposals, search, AI mirror
+crates/core       store (SQLite + FTS5), sync engine, op queue, proposals, AI mirror
 crates/mime       MIME parse/build, HTML sanitizing, quoting
 crates/ical       iCalendar parse/serialize, recurrence expansion, iMIP
 crates/providers  IMAP/SMTP, JMAP, Gmail, Google Calendar, Microsoft Graph, CalDAV, OAuth

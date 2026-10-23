@@ -188,7 +188,7 @@ impl GmailProvider {
         let mut ids = vec![];
         let mut token = page;
         loop {
-            let mut url = format!("{GMAIL}/messages?maxResults=500&includeSpamTrash=true&q={}", urlencoding::encode(q));
+            let mut url = format!("{GMAIL}/messages?maxResults=500&includeSpamTrash=true&q={}", crate::net::enc(q));
             if let Some(t) = &token {
                 url.push_str(&format!("&pageToken={t}"));
             }
@@ -579,12 +579,12 @@ impl GoogleCalendarProvider {
         let mut page: Option<String> = None;
         let mut next_sync = None;
         loop {
-            let mut url = format!("{GCAL}/calendars/{}/events?maxResults=2500&showDeleted=true", urlencoding::encode(cal));
+            let mut url = format!("{GCAL}/calendars/{}/events?maxResults=2500&showDeleted=true", crate::net::enc(cal));
             if let Some(t) = &token {
-                url.push_str(&format!("&syncToken={}", urlencoding::encode(t)));
+                url.push_str(&format!("&syncToken={}", crate::net::enc(t)));
             }
             if let Some(p) = &page {
-                url.push_str(&format!("&pageToken={}", urlencoding::encode(p)));
+                url.push_str(&format!("&pageToken={}", crate::net::enc(p)));
             }
             let v = match self.api.json(|h, t| h.get(&url).bearer_auth(t), "list events").await {
                 Ok(v) => v,
@@ -652,14 +652,14 @@ impl CalendarProvider for GoogleCalendarProvider {
         match op {
             CalendarOp::Put { calendar_remote_id, event_remote_id, ics, .. } => {
                 let body = ics_to_google(ics).context("invalid event")?;
-                let cal = urlencoding::encode(calendar_remote_id).into_owned();
+                let cal = crate::net::enc(calendar_remote_id);
                 let v = match event_remote_id {
                     None => {
                         let url = format!("{GCAL}/calendars/{cal}/events?sendUpdates=all");
                         self.api.json(|h, t| h.post(&url).bearer_auth(t).json(&body), "create event").await?
                     }
                     Some(id) => {
-                        let url = format!("{GCAL}/calendars/{cal}/events/{}?sendUpdates=all", urlencoding::encode(id));
+                        let url = format!("{GCAL}/calendars/{cal}/events/{}?sendUpdates=all", crate::net::enc(id));
                         let mut patch = body.clone();
                         if let Some(o) = patch.as_object_mut() {
                             o.remove("iCalUID");
@@ -671,7 +671,7 @@ impl CalendarProvider for GoogleCalendarProvider {
                 out.event_etag = v["etag"].as_str().map(String::from);
             }
             CalendarOp::Delete { calendar_remote_id, event_remote_id, .. } => {
-                let url = format!("{GCAL}/calendars/{}/events/{}?sendUpdates=all", urlencoding::encode(calendar_remote_id), urlencoding::encode(event_remote_id));
+                let url = format!("{GCAL}/calendars/{}/events/{}?sendUpdates=all", crate::net::enc(calendar_remote_id), crate::net::enc(event_remote_id));
                 match self.api.send(|h, t| h.delete(&url).bearer_auth(t), "delete event").await {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("HTTP 410") || e.to_string().contains("HTTP 404") => {}

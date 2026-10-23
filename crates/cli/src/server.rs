@@ -16,7 +16,6 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use base64::Engine as _;
 use satchel_api::{Request as ApiRequest, Response as ApiResponse};
 use satchel_core::{Caller, Engine};
 use tower_http::services::{ServeDir, ServeFile};
@@ -28,27 +27,8 @@ struct AppState {
     port: u16,
 }
 
-fn random_token() -> String {
-    let mut b = [0u8; 24];
-    getrandom(&mut b);
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
-}
-
-fn getrandom(buf: &mut [u8]) {
-    use std::io::Read;
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom")
-        && f.read_exact(buf).is_ok() {
-            return;
-        }
-    // Fallback: time + address entropy (non-Unix dev only).
-    let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    for (i, b) in buf.iter_mut().enumerate() {
-        *b = ((seed >> ((i % 16) * 8)) as u8) ^ (i as u8).wrapping_mul(31);
-    }
-}
-
 pub async fn serve(engine: Arc<Engine>, port: u16, ui: Option<PathBuf>) -> Result<()> {
-    let session = std::env::var("SATCHEL_SESSION_TOKEN").unwrap_or_else(|_| random_token());
+    let session = std::env::var("SATCHEL_SESSION_TOKEN").unwrap_or_else(|_| satchel_core::random_token(24));
     let state = AppState { engine, session: session.clone(), port };
     let mut app = Router::new()
         .route("/api/rpc", post(rpc))

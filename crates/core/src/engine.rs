@@ -15,7 +15,6 @@ use tracing::{debug, info, warn};
 
 use crate::blobs::{BlobStore, FsBlobStore};
 use crate::provider::{CredentialHandle, ProviderFactory, Providers, SyncCtx};
-use crate::search::{IndexDoc, SearchIndex};
 use crate::secrets::SecretStore;
 use crate::store::Store;
 
@@ -37,7 +36,7 @@ impl Caller {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Owns sync, the op queue, the search index writer and the mirror.
+    /// Owns sync, the op queue, the search indexer and the mirror.
     Full,
     /// Read + propose only (e.g. an MCP process running beside the app).
     Agent,
@@ -62,7 +61,6 @@ pub struct Engine {
     pub(crate) store: Arc<Store>,
     pub(crate) blobs: Arc<dyn BlobStore>,
     pub(crate) secrets: Arc<dyn SecretStore>,
-    pub(crate) search: Arc<SearchIndex>,
     pub(crate) factory: Arc<dyn ProviderFactory>,
     pub(crate) events: broadcast::Sender<CoreEvent>,
     pub(crate) runtimes: Mutex<HashMap<String, AccountRuntime>>,
@@ -87,27 +85,26 @@ impl Engine {
         std::fs::create_dir_all(&opts.data_dir)?;
         let store = Arc::new(Store::open(&opts.data_dir.join("satchel.db"))?);
         let blobs: Arc<dyn BlobStore> = Arc::new(FsBlobStore::new(opts.data_dir.join("blobs"))?);
-        let search = Arc::new(match SearchIndex::open(&opts.data_dir.join("index"), opts.mode == Mode::Full) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!("search index unavailable ({e}); rebuilding");
-                let dir = opts.data_dir.join("index");
-                let _ = std::fs::remove_dir_all(&dir);
-                store.reset_indexed()?;
-                SearchIndex::open(&dir, opts.mode == Mode::Full)?
-            }
-        });
-        Self::with_parts(store, blobs, search, opts)
+        // Search moved from a tantivy index to SQLite FTS5: drop the old
+        // directory and build the new index once.
+        let legacy = opts.data_dir.join("index");
+        if opts.mode == Mode::Full && legacy.exists() {
+            let _ = std::fs::remove_dir_all(&legacy);
+        }
+        if opts.mode == Mode::Full && store.get_setting::<String>("search_index")?.as_deref() != Some("fts5-v1") {
+            store.reset_indexed()?;
+            store.set_setting("search_index", &"fts5-v1")?;
+        }
+        Self::with_parts(store, blobs, opts)
     }
 
-    pub fn with_parts(store: Arc<Store>, blobs: Arc<dyn BlobStore>, search: Arc<SearchIndex>, opts: EngineOptions) -> Result<Arc<Self>> {
+    pub fn with_parts(store: Arc<Store>, blobs: Arc<dyn BlobStore>, opts: EngineOptions) -> Result<Arc<Self>> {
         let settings: Settings = store.get_setting("settings")?.unwrap_or_default();
         let (events, _) = broadcast::channel(1024);
         let engine = Arc::new(Self {
             store,
             blobs,
             secrets: opts.secrets,
-            search,
             factory: opts.factory,
             events,
             runtimes: Mutex::new(HashMap::new()),
@@ -358,10 +355,15 @@ impl Engine {
         loop {
             tokio::time::sleep(Duration::from_millis(1500)).await;
             let Some(e) = this.upgrade() else { return };
-            let e2 = e.clone();
-            let r = tokio::task::spawn_blocking(move || e2.index_batch(400)).await;
-            if let Ok(Err(err)) = r {
-                warn!("indexer: {err:#}");
+            // Drain the backlog in batches; only sleep once caught up.
+            loop {
+                let e2 = e.clone();
+                match tokio::task::spawn_blocking(move || e2.index_batch(1000)).await {
+                    Ok(Ok(1000)) => continue,
+                    Ok(Err(err)) => warn!("indexer: {err:#}"),
+                    _ => {}
+                }
+                break;
             }
         }
     }
@@ -375,19 +377,18 @@ impl Engine {
         for id in &ids {
             let Some(m) = self.store.message_row(id)? else { continue };
             let raw = m.blob_hash.as_ref().and_then(|h| self.blobs.get(h).ok().flatten());
-            let body = raw.as_deref().and_then(satchel_mime::parse).map(|p| p.text).unwrap_or_default();
-            let from = m.summary.from.as_ref().map(|a| a.display()).unwrap_or_default();
-            let to = m.summary.to.iter().chain(m.cc.iter()).map(|a| a.display()).collect::<Vec<_>>().join(" ");
-            let atts = m.attachments.iter().map(|a| a.filename.clone()).collect::<Vec<_>>().join(" ");
-            docs.push((m.summary.id.clone(), m.summary.account_id.clone(), m.summary.subject.clone(), from, to, body, atts));
+            let body = raw.as_deref().and_then(satchel_mime::parse).map(|p| p.text).unwrap_or_else(|| m.summary.snippet.clone());
+            let participants = m.summary.from.iter().chain(m.summary.to.iter()).chain(m.cc.iter()).map(|a| a.display()).collect::<Vec<_>>().join(" ");
+            docs.push(crate::store::SearchDoc {
+                id: m.summary.id.clone(),
+                subject: m.summary.subject.clone(),
+                participants,
+                body,
+                attachments: m.attachments.iter().map(|a| a.filename.clone()).collect::<Vec<_>>().join(" "),
+                blob_hash: m.blob_hash.clone(),
+            });
         }
-        let idocs: Vec<IndexDoc> = docs
-            .iter()
-            .map(|d| IndexDoc { id: &d.0, account_id: &d.1, subject: &d.2, from: &d.3, to: &d.4, body: &d.5, attachment_names: &d.6 })
-            .collect();
-        self.search.add(&idocs)?;
-        self.search.commit()?;
-        self.store.mark_indexed(&ids)?;
+        self.store.index_messages(&docs)?;
         Ok(ids.len())
     }
 

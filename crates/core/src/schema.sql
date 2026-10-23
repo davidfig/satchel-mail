@@ -216,3 +216,14 @@ CREATE TABLE IF NOT EXISTS mirror_paths (
     thread_id  TEXT PRIMARY KEY,
     path       TEXT NOT NULL
 );
+
+-- Full-text search over messages (contentless: text lives in blobs/messages).
+-- Keyed by messages.rowid; never VACUUM without rebuilding this index.
+CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+    subject, participants, body, attachments,
+    content='', contentless_delete=1,
+    tokenize='unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+    DELETE FROM message_fts WHERE rowid = old.rowid;
+END;

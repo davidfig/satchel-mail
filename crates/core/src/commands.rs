@@ -425,10 +425,7 @@ impl Engine {
             }
             Command::CreateAgent { name, policy } => {
                 self.require_user(caller)?;
-                use rand::RngCore;
-                let mut bytes = [0u8; 24];
-                rand::rng().fill_bytes(&mut bytes);
-                let token = format!("stk_{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes));
+                let token = format!("stk_{}", crate::random_token(24));
                 let agent = self.store.insert_agent(&name, &Self::hash_token(&token), &policy)?;
                 self.store.audit("user", "agent_created", &json!({ "agent": name }))?;
                 ok(json!({ "agent": agent, "token": token }))
@@ -568,9 +565,7 @@ impl Engine {
             } else if q.mailbox_id.is_none() && q.role.is_none() {
                 f.exclude_trash_junk = true;
             }
-            if !p.text.trim().is_empty() {
-                f.message_ids = Some(self.search.search(&p.text, 10_000)?);
-            }
+            f.fts = crate::search::fts_query(&p.text);
         }
         Ok(f)
     }
@@ -908,7 +903,6 @@ impl Engine {
                 }
                 for r in &in_trash {
                     self.store.delete_message(&r.id)?;
-                    self.search.delete(&r.id);
                 }
                 self.enqueue(&account, "expunge", json!({ "refs": in_trash }), actor)?;
             }
