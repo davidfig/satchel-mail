@@ -37,6 +37,18 @@ scripts/          dev-servers (local Stalwart), seed fixtures, release build
 
 Requirements: Rust 1.90+, Node 20+, Python 3 (for fixtures).
 
+`scripts/run` builds and starts everything (`scripts/run --help`); the same
+commands are pnpm scripts in the root `package.json`:
+
+```bash
+pnpm app              # desktop app on your real data (OAuth client ids from .env)
+pnpm web              # web UI on http://127.0.0.1:7781, real data
+pnpm web:test         # web UI against the local test servers and .dev/test-data
+pnpm servers:reset    # restore and reseed the local test servers
+```
+
+The steps by hand:
+
 ```bash
 scripts/dev-servers reset        # install + start local Stalwart, seed test mail and events
 (cd ui && npm install && npm run build)

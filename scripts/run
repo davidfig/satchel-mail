@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Build and run Satchel Mail.
+#
+#   scripts/run                  desktop app (Tauri dev, UI hot reload) on your real data
+#   scripts/run web              web UI + API on http://127.0.0.1:7781
+#   scripts/run [web] --test     use the local Stalwart test servers and .dev/test-data
+#   scripts/run [web] --data DIR use DIR as the data directory (keychain secrets)
+#
+# Real data lives in the default data directory with secrets in the OS
+# keychain. OAuth client ids for Gmail / Microsoft (see docs/OAUTH.md) are read
+# from .env in the repo root if it exists, e.g.
+#
+#   SATCHEL_GOOGLE_CLIENT_ID=...
+#   SATCHEL_GOOGLE_CLIENT_SECRET=...
+#   SATCHEL_MS_CLIENT_ID=...
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+mode=desktop
+test=0
+data=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    desktop|web) mode="$1" ;;
+    --test) test=1 ;;
+    --data) data="${2:?--data needs a directory}"; shift ;;
+    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown argument: $1 (see scripts/run --help)" >&2; exit 1 ;;
+  esac
+  shift
+done
+
+if [[ -f .env ]]; then
+  set -a; source .env; set +a
+fi
+
+# Never let a leftover test environment point the app at the wrong data.
+unset SATCHEL_DATA_DIR SATCHEL_SECRETS
+if (( test )); then
+  export SATCHEL_DATA_DIR="$ROOT/.dev/test-data" SATCHEL_SECRETS=file
+  if [[ "$(scripts/dev-servers status)" != running* ]]; then
+    scripts/dev-servers start
+  fi
+elif [[ -n "$data" ]]; then
+  mkdir -p "$data"
+  export SATCHEL_DATA_DIR="$(cd "$data" && pwd)"
+fi
+echo "Data directory: ${SATCHEL_DATA_DIR:-default}"
+
+cargo build --bin satchel
+[[ -d ui/node_modules ]] || (cd ui && npm ci)
+
+case "$mode" in
+  web)
+    (cd ui && npm run build)
+    exec target/debug/satchel serve --ui ui/dist
+    ;;
+  desktop)
+    # Tauri runs the CLI as a sidecar named for the host triple.
+    triple="$(rustc -vV | sed -n 's/host: //p')"
+    cp target/debug/satchel "apps/desktop/binaries/satchel-$triple"
+    cd apps/desktop
+    exec ../../ui/node_modules/.bin/tauri dev
+    ;;
+esac
