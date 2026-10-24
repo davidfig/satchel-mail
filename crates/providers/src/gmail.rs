@@ -670,8 +670,9 @@ impl CalendarProvider for GoogleCalendarProvider {
                 out.event_remote_id = v["id"].as_str().map(String::from);
                 out.event_etag = v["etag"].as_str().map(String::from);
             }
-            CalendarOp::Delete { calendar_remote_id, event_remote_id, .. } => {
-                let url = format!("{GCAL}/calendars/{}/events/{}?sendUpdates=all", crate::net::enc(calendar_remote_id), crate::net::enc(event_remote_id));
+            CalendarOp::Delete { calendar_remote_id, event_remote_id, notify, .. } => {
+                let send = if *notify { "all" } else { "none" };
+                let url = format!("{GCAL}/calendars/{}/events/{}?sendUpdates={send}", crate::net::enc(calendar_remote_id), crate::net::enc(event_remote_id));
                 match self.api.send(|h, t| h.delete(&url).bearer_auth(t), "delete event").await {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("HTTP 410") || e.to_string().contains("HTTP 404") => {}

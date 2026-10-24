@@ -519,6 +519,8 @@ impl CalendarProvider for GraphCalendarProvider {
                     }
                 }
             }
+            // Deleting as an attendee only removes our copy; Graph sends a
+            // response only through accept/decline, so `notify` needs nothing here.
             CalendarOp::Delete { event_remote_id, .. } => {
                 match self.api.send(|h, t| with_prefs(h.delete(format!("{ME}/events/{event_remote_id}"))).bearer_auth(t), "delete event").await {
                     Ok(_) => {}

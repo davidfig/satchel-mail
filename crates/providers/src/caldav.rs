@@ -396,9 +396,13 @@ impl CalendarProvider for CalDavProvider {
                 out.event_etag = resp.headers().get("etag").and_then(|v| v.to_str().ok()).map(String::from);
                 out.event_remote_id = Some(href);
             }
-            CalendarOp::Delete { event_remote_id, etag, .. } => {
+            CalendarOp::Delete { event_remote_id, etag, notify, .. } => {
                 let url = self.url(event_remote_id)?;
                 let mut rb = self.http.delete(&url);
+                if !notify {
+                    // RFC 6638 §8.1: otherwise the server tells the organizer we declined.
+                    rb = rb.header("Schedule-Reply", "F");
+                }
                 if let Some(e) = etag {
                     rb = rb.header("If-Match", e.as_str());
                 }

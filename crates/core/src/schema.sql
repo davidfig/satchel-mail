@@ -68,6 +68,7 @@ CREATE INDEX IF NOT EXISTS messages_msgid ON messages(account_id, message_id_hdr
 CREATE INDEX IF NOT EXISTS messages_date ON messages(account_id, date);
 CREATE INDEX IF NOT EXISTS messages_unindexed ON messages(indexed) WHERE indexed = 0;
 CREATE INDEX IF NOT EXISTS messages_unmirrored ON messages(mirrored) WHERE mirrored = 0;
+CREATE INDEX IF NOT EXISTS messages_from ON messages(account_id, from_email COLLATE NOCASE);
 
 -- Mailbox membership; uid is the IMAP UID (or NULL for label-based providers).
 CREATE TABLE IF NOT EXISTS message_mailboxes (
@@ -204,6 +205,14 @@ CREATE TABLE IF NOT EXISTS audit (
     actor       TEXT NOT NULL,
     action      TEXT NOT NULL,
     detail_json TEXT NOT NULL
+);
+
+-- Standing spam decisions by sender address (stored lowercase). Enforced
+-- after every sync, so server filters can't put the sender back.
+CREATE TABLE IF NOT EXISTS sender_rules (
+    email       TEXT PRIMARY KEY,
+    verdict     TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS settings (

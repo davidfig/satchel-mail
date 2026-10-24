@@ -8,9 +8,11 @@ pub mod engine;
 pub mod error;
 pub mod mirror;
 mod ops;
+pub mod proposal_file;
 pub mod provider;
 pub mod search;
 pub mod secrets;
+mod spam;
 pub mod store;
 
 pub use engine::{Caller, Engine, EngineOptions, Mode, default_data_dir};

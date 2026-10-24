@@ -7,6 +7,12 @@ import type { ApiError, CoreEvent } from './types';
 export interface Transport {
   invoke<T>(cmd: string, args?: unknown): Promise<T>;
   subscribe(fn: (e: CoreEvent) => void): () => void;
+  /** Sets the window title (the browser tab on the web). */
+  setTitle(title: string): void;
+  /** Whether we may show system notifications; `ask` prompts the user if undecided. */
+  canNotify(ask: boolean): Promise<boolean>;
+  /** Shows a system notification. `onClick` runs only where the platform reports clicks (the web). */
+  notify(title: string, body: string, onClick?: () => void): void;
   readonly kind: 'tauri' | 'http';
 }
 
@@ -45,6 +51,25 @@ class TauriTransport implements Transport {
       );
     }
     return () => this.listeners.delete(fn);
+  }
+
+  setTitle(title: string) {
+    // The sidebar re-renders often; skip the IPC round trip when nothing changed.
+    if (document.title === title) return;
+    document.title = title;
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().setTitle(title));
+  }
+
+  async canNotify(ask: boolean) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const granted = await invoke<boolean | null>('plugin:notification|is_permission_granted');
+    if (granted !== null || !ask) return granted === true;
+    return (await invoke<string>('plugin:notification|request_permission')) === 'granted';
+  }
+
+  notify(title: string, body: string) {
+    // Desktop notifications don't report clicks; clicking one brings the app forward.
+    void import('@tauri-apps/api/core').then(({ invoke }) => invoke('plugin:notification|notify', { options: { title, body } }));
   }
 }
 
@@ -105,6 +130,25 @@ class HttpTransport implements Transport {
     this.listeners.add(fn);
     if (!this.ws) this.connect();
     return () => this.listeners.delete(fn);
+  }
+
+  setTitle(title: string) {
+    document.title = title;
+  }
+
+  async canNotify(ask: boolean) {
+    if (!('Notification' in window)) return false;
+    if (Notification.permission === 'default' && ask) await Notification.requestPermission();
+    return Notification.permission === 'granted';
+  }
+
+  notify(title: string, body: string, onClick?: () => void) {
+    const n = new Notification(title, { body, tag: 'satchel-new-mail' });
+    n.onclick = () => {
+      window.focus();
+      onClick?.();
+      n.close();
+    };
   }
 }
 

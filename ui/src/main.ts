@@ -4,6 +4,7 @@ import { api } from './api';
 import { transport } from './transport';
 import { h, icon, replace } from './lib/dom';
 import { relative } from './lib/format';
+import { installTooltips } from './lib/tooltip';
 import { bind, errorToast, installShortcuts, modal, setScope, shortcutList } from './lib/ui';
 import { type MailSource, type View, applyTheme, store } from './state';
 import type { Account, Mailbox, MailboxRole } from './types';
@@ -24,18 +25,23 @@ const UNIFIED: { role: MailboxRole; label: string; icon: string }[] = [
 ];
 
 const COLLAPSED_KEY = 'satchel.sidebarCollapsed';
+const SECTIONS_KEY = 'satchel.sidebarClosedSections';
+const LOCATION_KEY = 'satchel.lastLocation';
 
 class Shell {
   private sidebar = h('nav.sidebar', { 'aria-label': 'Navigation' });
   private content = h('main.content');
   private app = h('div.app', this.sidebar, this.content);
   private views: Partial<Record<View, { root: HTMLElement; show?: () => void }>> = {};
+  /** Sidebar sections the user has shrunk: 'all' or an account id. */
+  private closedSections = new Set(readJson<string[]>(SECTIONS_KEY) ?? []);
 
   constructor() {
     this.app.classList.toggle('collapsed', readCollapsed());
     document.body.append(this.app);
     store.subscribe((_, changed) => {
       if (changed.has('view')) this.showView();
+      if (changed.has('view') || changed.has('source')) writeJson(LOCATION_KEY, { view: store.state.view, source: store.state.source });
       if (['view', 'accounts', 'mailboxes', 'pendingProposals', 'source'].some((k) => changed.has(k as never))) this.renderSidebar();
     });
     this.renderSidebar();
@@ -51,6 +57,19 @@ class Shell {
       /* remembering is a convenience */
     }
     this.renderSidebar();
+  }
+
+  private toggleSection(id: string) {
+    if (!this.closedSections.delete(id)) this.closedSections.add(id);
+    writeJson(SECTIONS_KEY, [...this.closedSections]);
+    this.renderSidebar();
+  }
+
+  /** A section header that expands or shrinks the items under it. */
+  private sectionHeader(id: string, ...label: (Node | string | null)[]) {
+    const open = !this.closedSections.has(id);
+    return h('button.mb-section.mb-toggle', { 'aria-expanded': String(open), on: { click: () => this.toggleSection(id) } },
+      icon(open ? 'chevronDown' : 'chevronRight', 12), ...label);
   }
 
   private view(v: View) {
@@ -92,9 +111,11 @@ class Shell {
     const syncing = accounts.some((a) => a.sync.state === 'syncing');
     const collapsed = this.app.classList.contains('collapsed');
     const errors = accounts.filter((a) => a.sync.state === 'error' || a.sync.state === 'offline');
+    const inboxUnread = unread('inbox');
+    transport.setTitle(inboxUnread > 0 ? `(${inboxUnread}) satchel.email` : 'satchel.email');
     replace(
       this.sidebar,
-      h('div.brand', h('span.logo', '◆'), h('span.brand-name', 'Satchel'),
+      h('div.brand', h('img.logo', { src: '/favicon.svg', alt: '' }), h('span.brand-name', 'satchel.email'),
         h('button.icon-btn.collapse-btn', {
           title: `${collapsed ? 'Expand' : 'Collapse'} sidebar (${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl+'}\\)`,
           'aria-label': collapsed ? 'Expand sidebar' : 'Collapse sidebar',
@@ -109,9 +130,10 @@ class Shell {
         this.navItem('settings', 'Settings', 'settings')),
       store.state.view === 'mail' && !collapsed &&
         h('div.mailboxes',
-          h('div.mb-section', accounts.length > 1 ? 'All accounts' : ''),
-          UNIFIED.filter((u) => mailboxes.some((m) => m.role === u.role) || u.role === 'inbox').map((u) =>
-            this.sourceItem({ kind: 'role', role: u.role, label: u.label }, u.icon, unread(u.role))),
+          accounts.length > 1 ? this.sectionHeader('all', h('span', 'All accounts')) : h('div.mb-section'),
+          (accounts.length < 2 || !this.closedSections.has('all')) &&
+            UNIFIED.filter((u) => mailboxes.some((m) => m.role === u.role) || u.role === 'inbox').map((u) =>
+              this.sourceItem({ kind: 'role', role: u.role, label: u.label }, u.icon, unread(u.role))),
           accounts.map((a) => this.accountSection(a, mailboxes.filter((m) => m.account_id === a.id)))),
       h('div.sidebar-foot',
         errors.length
@@ -125,10 +147,11 @@ class Shell {
     const custom = boxes.filter((m) => m.role === 'custom');
     if (!custom.length && store.state.accounts.length < 2) return null;
     const dot = a.sync.state === 'error' || a.sync.state === 'offline' ? '.err' : a.sync.state === 'syncing' ? '.busy' : '';
+    const open = !this.closedSections.has(a.id);
     return h('div.account-section',
-      h('div.mb-section', h('span.acct-dot', { style: { background: a.color } }), h('span', a.email), h(`span.state-dot${dot}`)),
-      store.state.accounts.length > 1 && boxes.filter((m) => m.role === 'inbox').map((m) => this.sourceItem({ kind: 'mailbox', mailbox_id: m.id, label: 'Inbox' }, 'inbox', m.unread)),
-      custom.map((m) => this.sourceItem({ kind: 'mailbox', mailbox_id: m.id, label: m.path }, m.is_label ? 'label' : 'folder', m.unread)));
+      this.sectionHeader(a.id, h('span.acct-dot', { style: { background: a.color } }), h('span.acct-email', a.email), h(`span.state-dot${dot}`)),
+      open && store.state.accounts.length > 1 && boxes.filter((m) => m.role === 'inbox').map((m) => this.sourceItem({ kind: 'mailbox', mailbox_id: m.id, label: 'Inbox' }, 'inbox', m.unread)),
+      open && custom.map((m) => this.sourceItem({ kind: 'mailbox', mailbox_id: m.id, label: m.path }, m.is_label ? 'label' : 'folder', m.unread)));
   }
 
   private bindKeys() {
@@ -187,6 +210,30 @@ class Shell {
   }
 }
 
+function readJson<T>(key: string): T | null {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? 'null') as T | null;
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* remembering is a convenience */
+  }
+}
+
+/** Reopen where the user left off, unless that mailbox has since gone away. */
+function restoreLocation() {
+  const last = readJson<{ view: View; source: MailSource }>(LOCATION_KEY);
+  if (!last || !['mail', 'calendar', 'review', 'settings'].includes(last.view)) return;
+  const source = last.source?.kind === 'mailbox' && !store.mailbox(last.source.mailbox_id) ? store.state.source : last.source ?? store.state.source;
+  store.set({ view: last.view, source });
+}
+
 function readCollapsed(): boolean {
   try {
     return localStorage.getItem(COLLAPSED_KEY) === '1';
@@ -217,6 +264,7 @@ function showShortcuts() {
 
 async function boot() {
   installShortcuts();
+  installTooltips();
   if (transport.kind === 'tauri' && /Mac/.test(navigator.platform)) {
     // Overlay title bar: leave room for the window controls and make the strip draggable.
     document.body.classList.add('tauri-mac');
@@ -228,6 +276,7 @@ async function boot() {
     document.body.append(h('div.fatal', h('h1', 'Can’t reach Satchel Mail'), h('p', e instanceof Error ? e.message : String(e)), h('button.primary', { on: { click: () => location.reload() } }, 'Retry')));
     return;
   }
+  if (store.state.accounts.length) restoreLocation();
   new Shell();
   if (!store.state.accounts.length) store.set({ view: 'settings' });
 }

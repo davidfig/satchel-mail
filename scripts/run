@@ -3,7 +3,7 @@
 #
 #   scripts/run                  desktop app (Tauri dev, UI hot reload) on your real data
 #   scripts/run web              web UI + API on http://127.0.0.1:7781
-#   scripts/run dev              web UI with hot reload on http://localhost:5173
+#   scripts/run dev              web UI with hot reload on http://localhost:7780
 #   scripts/run [mode] --test    use the local Stalwart test servers and .dev/test-data
 #   scripts/run [mode] --data DIR use DIR as the data directory (keychain secrets)
 #

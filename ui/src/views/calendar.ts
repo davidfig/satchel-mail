@@ -104,7 +104,7 @@ export class CalendarView {
     replace(
       this.root,
       h('aside.cal-side',
-        h('button.primary', { on: { click: () => this.edit(null) } }, icon('plus', 16), 'New event'),
+        h('button.primary', { title: 'Create an event', on: { click: () => this.edit(null) } }, icon('plus', 16), 'New event'),
         this.miniMonth(),
         h('div.cal-list',
           h('div.mb-section', 'Calendars'),
@@ -117,12 +117,12 @@ export class CalendarView {
               c.read_only && h('span.muted.small', ' (read-only)'))))),
       h('section.cal-main',
         h('header.cal-head',
-          h('button', { on: { click: () => { this.anchor = startOfDay(new Date()); void this.load(); } } }, 'Today'),
-          h('button.icon-btn', { 'aria-label': 'Previous', on: { click: () => this.step(-1) } }, icon('chevronLeft')),
-          h('button.icon-btn', { 'aria-label': 'Next', on: { click: () => this.step(1) } }, icon('chevronRight')),
+          h('button', { title: 'Go to today (t)', on: { click: () => { this.anchor = startOfDay(new Date()); void this.load(); } } }, 'Today'),
+          h('button.icon-btn', { title: 'Previous (k)', on: { click: () => this.step(-1) } }, icon('chevronLeft')),
+          h('button.icon-btn', { title: 'Next (j)', on: { click: () => this.step(1) } }, icon('chevronRight')),
           h('h1', this.title()),
           h('span.spacer'),
-          h('div.segmented', { role: 'tablist' }, modes.map((m) => h(`button${this.mode === m ? '.active' : ''}`, { role: 'tab', on: { click: () => this.setMode(m) } }, m[0].toUpperCase() + m.slice(1))))),
+          h('div.segmented', { role: 'tablist' }, modes.map((m) => h(`button${this.mode === m ? '.active' : ''}`, { role: 'tab', title: `${m[0].toUpperCase() + m.slice(1)} view (${m[0]})`, on: { click: () => this.setMode(m) } }, m[0].toUpperCase() + m.slice(1))))),
         body),
     );
     const grid = this.root.querySelector('.time-scroll');
@@ -137,7 +137,7 @@ export class CalendarView {
     const cells = [];
     for (let i = 0; i < 42; i++) {
       const d = addDays(start, i);
-      cells.push(h(`button.mini-day${d.getMonth() !== a.getMonth() ? '.other' : ''}${sameDay(d, today) ? '.today' : ''}${sameDay(d, a) ? '.sel' : ''}`, { on: { click: () => { this.anchor = d; void this.load(); } } }, String(d.getDate())));
+      cells.push(h(`button.mini-day${d.getMonth() !== a.getMonth() ? '.other' : ''}${sameDay(d, today) ? '.today' : ''}${sameDay(d, a) ? '.sel' : ''}`, { title: d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }), on: { click: () => { this.anchor = d; void this.load(); } } }, String(d.getDate())));
     }
     return h('div.mini-month',
       h('div.mini-head', a.toLocaleDateString([], { month: 'long', year: 'numeric' })),
@@ -239,7 +239,7 @@ export class CalendarView {
         const evs = this.eventsOn(d).sort((a, b) => Number(b.event.all_day) - Number(a.event.all_day) || a.start.localeCompare(b.start));
         return h(`div.month-cell${d.getMonth() !== this.anchor.getMonth() ? '.other' : ''}${sameDay(d, today) ? '.today' : ''}`,
           { on: { dblclick: () => this.edit(null, new Date(d.getFullYear(), d.getMonth(), d.getDate(), 9)) } },
-          h('button.month-date', { on: { click: () => { this.anchor = d; this.setMode('day'); } } }, String(d.getDate())),
+          h('button.month-date', { title: 'Open this day', on: { click: () => { this.anchor = d; this.setMode('day'); } } }, String(d.getDate())),
           evs.slice(0, 4).map((o) => this.chip(o)),
           evs.length > 4 && h('span.more.muted.small', `+${evs.length - 4} more`));
       }));

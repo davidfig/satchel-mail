@@ -1,6 +1,6 @@
 # 0007. MCP over stdio as the agent interface, plus an AI folder
 
-- **Status:** Accepted
+- **Status:** Superseded by 0022
 - **Date:** 2026-10-23
 
 ## Context

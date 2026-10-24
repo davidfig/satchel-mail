@@ -36,7 +36,7 @@ Current third-party dependencies and why:
 | quick-xml | WebDAV/CalDAV XML |
 | rmcp | MCP protocol |
 | axum, tower-http, clap, tracing-subscriber | local HTTP server + static files, CLI parsing, logging |
-| tauri + plugins (opener, dialog, single-instance, updater) | desktop shell |
+| tauri + plugins (opener, dialog, notification, single-instance, updater) | desktop shell; notification shows new-mail alerts in the macOS, Windows and Linux notification centers (0025) |
 | @tauri-apps/api; dev: vite, typescript, @tauri-apps/cli, linkedom | UI ↔ Tauri bridge; build tools; linkedom gives `node --test` a DOM for the UI's quote-detection tests (small, no native code; a test-only stand-in for the browser's DOMParser) |
 
 Removed: tantivy (see 0014), rand, urlencoding, bytes, thiserror.

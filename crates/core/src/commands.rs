@@ -290,6 +290,31 @@ impl Engine {
                 self.set_labels(&message_ids, &add, &remove, &caller.actor())?;
                 ok(json!({ "ok": true }))
             }
+            Command::MarkSpam { message_ids } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                ok(self.mark_spam(&message_ids, &caller.actor())?)
+            }
+            Command::MarkNotSpam { message_ids } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                ok(self.mark_not_spam(&message_ids, &caller.actor())?)
+            }
+            Command::ListSenderRules => {
+                self.require_user(caller)?;
+                ok(self.store.list_sender_rules()?)
+            }
+            Command::SetSenderRule { email, verdict } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                self.set_sender_rule(&email, verdict)?;
+                ok(json!({ "ok": true }))
+            }
+            Command::Unsubscribe { message_id } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                ok(self.unsubscribe(&message_id).await?)
+            }
             Command::SaveDraft { draft } => {
                 self.require_full()?;
                 ok(json!({ "draft_id": self.save_draft(draft, true)? }))
@@ -413,6 +438,7 @@ impl Engine {
                 self.require_user(caller)?;
                 let (p, _) = self.store.get_proposal(&proposal_id)?.ok_or_else(|| not_found("proposal"))?;
                 self.store.set_proposal_status(&proposal_id, ProposalStatus::Rejected, note.as_deref(), None)?;
+                self.proposal_decided(&proposal_id, false);
                 self.store.audit("user", "proposal_rejected", &json!({ "proposal": proposal_id, "agent": p.agent_name, "summary": p.summary, "note": note }))?;
                 self.emit(CoreEvent::ProposalsChanged);
                 ok(json!({ "ok": true }))
@@ -570,7 +596,7 @@ impl Engine {
         Ok(f)
     }
 
-    async fn raw_for(&self, id: &str) -> Result<Option<Vec<u8>>> {
+    pub(crate) async fn raw_for(&self, id: &str) -> Result<Option<Vec<u8>>> {
         let m = self.store.message_row(id)?.ok_or_else(|| not_found("message"))?;
         if let Some(h) = &m.blob_hash
             && let Some(b) = self.blobs.get(h)? {
@@ -601,10 +627,14 @@ impl Engine {
         let sender = m.summary.from.as_ref().map(|a| a.email.to_lowercase()).unwrap_or_default();
         let allow_remote = force_remote || settings.remote_image_senders.iter().any(|s| s == &sender);
         let mut invite = None;
+        let mut warnings = vec![];
+        let mut unsubscribe = None;
         let (text, html, blocked, attachments) = match &raw {
             Some(r) => {
                 let p = satchel_mime::parse(r).unwrap_or_default();
                 invite = self.invite_from(&m.summary.account_id, &p.calendar_parts);
+                warnings = self.message_warnings(&m, &p, invite.as_ref());
+                unsubscribe = p.unsubscribe.clone();
                 let (html, blocked) = match &p.html {
                     Some(h) => {
                         let inline = satchel_mime::inline_data_urls(r);
@@ -631,6 +661,9 @@ impl Engine {
             attachments,
             body_pending: raw.is_none(),
             invite,
+            warnings,
+            unsubscribe,
+            sender_verdict: self.store.sender_rule(&sender).ok().flatten(),
         })
     }
 
@@ -774,7 +807,7 @@ impl Engine {
 
     // -- mail writes ---------------------------------------------------------------
 
-    fn group_by_account(&self, ids: &[String]) -> Result<HashMap<String, Vec<MessageRef>>> {
+    pub(crate) fn group_by_account(&self, ids: &[String]) -> Result<HashMap<String, Vec<MessageRef>>> {
         let mut out: HashMap<String, Vec<MessageRef>> = HashMap::new();
         for id in ids {
             let r = self.store.message_ref(id)?.ok_or_else(|| not_found("message"))?;
@@ -783,7 +816,7 @@ impl Engine {
         Ok(out)
     }
 
-    fn uses_labels(&self, account_id: &str) -> bool {
+    pub(crate) fn uses_labels(&self, account_id: &str) -> bool {
         self.providers_for(account_id).ok().and_then(|p| p.mail.as_ref().map(|m| m.uses_labels())).unwrap_or(false)
     }
 
@@ -839,7 +872,7 @@ impl Engine {
         Ok(())
     }
 
-    fn labels_inner(&self, account: &str, refs: Vec<MessageRef>, add: &[String], remove: &[String], actor: &str) -> Result<()> {
+    pub(crate) fn labels_inner(&self, account: &str, refs: Vec<MessageRef>, add: &[String], remove: &[String], actor: &str) -> Result<()> {
         let to_remote = |ids: &[String]| -> Result<Vec<String>> {
             ids.iter().map(|i| self.store.mailbox_remote_id(i)?.ok_or_else(|| not_found("mailbox"))).collect()
         };
@@ -1249,6 +1282,15 @@ impl Engine {
         Ok(p)
     }
 
+    /// Keep the proposal's file in the AI folder, if it came from one, current.
+    fn proposal_decided(&self, id: &str, edited: bool) {
+        let mirror = self.settings().mirror;
+        if mirror.enabled
+            && let Ok(Some((p, _))) = self.store.get_proposal(id) {
+                crate::proposal_file::update_status(&mirror, &p, edited);
+            }
+    }
+
     async fn approve_proposal(&self, id: &str, edited: Option<ProposalAction>) -> Result<Value> {
         let (p, versions) = self.store.get_proposal(id)?.ok_or_else(|| not_found("proposal"))?;
         if !matches!(p.status, ProposalStatus::Pending | ProposalStatus::Stale) {
@@ -1266,6 +1308,7 @@ impl Engine {
                 };
                 if current != Some(*v) {
                     self.store.set_proposal_status(id, ProposalStatus::Stale, Some("Target changed after the proposal was made"), None)?;
+                    self.proposal_decided(id, false);
                     self.emit(CoreEvent::ProposalsChanged);
                     return Err(err(ErrorCode::Conflict, "the message or event changed since this was proposed; review it again"));
                 }
@@ -1303,10 +1346,12 @@ impl Engine {
         match applied {
             Ok(()) => {
                 self.store.set_proposal_status(id, ProposalStatus::Applied, None, edited.as_ref())?;
+                self.proposal_decided(id, edited.is_some());
                 self.store.audit("user", "proposal_approved", &json!({ "proposal": id, "agent": p.agent_name, "summary": p.summary, "edited": edited.is_some() }))?;
             }
             Err(e) => {
                 self.store.set_proposal_status(id, ProposalStatus::Failed, Some(&format!("{e:#}")), None)?;
+                self.proposal_decided(id, false);
                 self.emit(CoreEvent::ProposalsChanged);
                 return Err(e);
             }

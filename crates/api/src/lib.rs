@@ -244,6 +244,9 @@ pub struct Attachment {
     pub size: u64,
     pub inline: bool,
     pub content_id: Option<String>,
+    /// Executable or script-like content (HTML pages, programs, macro documents).
+    #[serde(default)]
+    pub risky: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,6 +270,64 @@ pub struct MessageDetail {
     /// Calendar invitation carried by this message (iMIP), if any.
     #[serde(default)]
     pub invite: Option<Invite>,
+    /// Signs this message may be phishing or unsafe, computed by the core.
+    #[serde(default)]
+    pub warnings: Vec<MessageWarning>,
+    /// How to unsubscribe, from the List-Unsubscribe header.
+    #[serde(default)]
+    pub unsubscribe: Option<Unsubscribe>,
+    /// The user's standing verdict on the sender, if any.
+    #[serde(default)]
+    pub sender_verdict: Option<SenderVerdict>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WarningKind {
+    /// SPF/DKIM/DMARC checks by the receiving server failed.
+    AuthFailed,
+    /// The display name matches someone you correspond with, but the address doesn't.
+    Impersonation,
+    /// Replies would go to a different domain than the sender's.
+    ReplyTo,
+    /// A link's text shows one domain but it goes to another.
+    DeceptiveLink,
+    RiskyAttachment,
+    /// A calendar invitation from someone you've never written to.
+    UnknownInviter,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageWarning {
+    pub kind: WarningKind,
+    pub message: String,
+}
+
+/// Unsubscribe methods a message offers (RFC 2369 / RFC 8058).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Unsubscribe {
+    /// https URL to open, or to POST to when `one_click`.
+    pub url: Option<String>,
+    pub mailto: Option<String>,
+    /// The sender supports RFC 8058 one-click unsubscribe at `url`.
+    pub one_click: bool,
+}
+
+/// A standing decision about every message from one address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SenderVerdict {
+    /// Always goes to Spam.
+    Spam,
+    /// Never goes to Spam.
+    NotSpam,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SenderRule {
+    pub email: String,
+    pub verdict: SenderVerdict,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -528,6 +589,9 @@ pub struct Agent {
     pub last_used: Option<DateTime<Utc>>,
     pub policy: AgentPolicy,
     pub revoked: bool,
+    /// Built into Satchel (the AI folder), not created by the user.
+    #[serde(default)]
+    pub builtin: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -539,6 +603,9 @@ pub struct MirrorSettings {
     pub since_days: Option<u32>,
     pub include_eml: bool,
     pub include_attachments: bool,
+    /// Turn files in `proposals/inbox/` into proposals without an agent token.
+    #[serde(default = "yes")]
+    pub accept_proposals: bool,
 }
 
 impl Default for MirrorSettings {
@@ -550,6 +617,7 @@ impl Default for MirrorSettings {
             since_days: Some(365),
             include_eml: false,
             include_attachments: false,
+            accept_proposals: true,
         }
     }
 }
@@ -566,6 +634,13 @@ pub struct Settings {
     pub initial_sync_days: u32,
     /// Seconds between polls for providers without push.
     pub poll_interval_secs: u32,
+    /// Show a desktop notification when new mail arrives in an inbox.
+    #[serde(default = "yes")]
+    pub notify_new_mail: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -577,6 +652,7 @@ impl Default for Settings {
             theme: "system".into(),
             initial_sync_days: 90,
             poll_interval_secs: 120,
+            notify_new_mail: true,
         }
     }
 }
@@ -640,6 +716,17 @@ pub enum Command {
     Archive { message_ids: Vec<Id> },
     Trash { message_ids: Vec<Id> },
     SetLabels { message_ids: Vec<Id>, add: Vec<Id>, remove: Vec<Id> },
+    /// Move to Spam and send all future mail from these senders there.
+    MarkSpam { message_ids: Vec<Id> },
+    /// Move back to the inbox and never send these senders to Spam again.
+    MarkNotSpam { message_ids: Vec<Id> },
+    ListSenderRules,
+    /// Set or (with `verdict: null`) remove the rule for one address.
+    SetSenderRule { email: String, verdict: Option<SenderVerdict> },
+    /// Unsubscribe using the message's List-Unsubscribe header. Returns
+    /// {via: "one_click" | "email" | "browser", url?}; "browser" means the
+    /// client should open `url`.
+    Unsubscribe { message_id: Id },
     SaveDraft { draft: Draft },
     DeleteDraft { draft_id: Id },
     ListDrafts,
@@ -797,5 +884,17 @@ pub enum CoreEvent {
     /// Another process changed the database.
     DataChanged,
     Notice { level: String, message: String },
+    /// Unread mail just arrived in an inbox (not on first sync or backfill).
+    NewMail { account_id: Id, messages: Vec<NewMail> },
+}
+
+/// One arrival, enough for a desktop notification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewMail {
+    pub message_id: Id,
+    pub thread_id: Id,
+    pub from: Option<Address>,
+    pub subject: String,
+    pub snippet: String,
 }
 

@@ -6,7 +6,7 @@ const api = process.env.SATCHEL_API ?? 'http://127.0.0.1:7781';
 export default defineConfig({
   clearScreen: false,
   server: {
-    port: 5173,
+    port: 7780,
     strictPort: true,
     proxy: {
       '/api': {

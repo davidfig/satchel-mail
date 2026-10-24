@@ -89,6 +89,17 @@ fn parse_sync_state(s: &str) -> SyncState {
     }
 }
 
+fn verdict_str(v: SenderVerdict) -> &'static str {
+    match v {
+        SenderVerdict::Spam => "spam",
+        SenderVerdict::NotSpam => "not_spam",
+    }
+}
+
+fn parse_verdict(s: &str) -> SenderVerdict {
+    if s == "spam" { SenderVerdict::Spam } else { SenderVerdict::NotSpam }
+}
+
 pub fn proposal_status_str(s: ProposalStatus) -> &'static str {
     match s {
         ProposalStatus::Pending => "pending",
@@ -218,6 +229,9 @@ impl Store {
             &name,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )?;
+        // Shared-cache connections take table locks and fail with "table is
+        // locked" instead of waiting; letting the reader skip them avoids that.
+        r.execute_batch("PRAGMA read_uncommitted=1;")?;
         Ok(Self { write: Mutex::new(w), read: Mutex::new(r) })
     }
 
@@ -948,6 +962,95 @@ impl Store {
         })
     }
 
+    /// Addresses the user has written to (or replied to), with the names
+    /// they appear under. Used to spot impersonation.
+    pub fn correspondents(&self) -> Result<Vec<(String, Option<String>)>> {
+        self.r(|c| {
+            let mut s = c.prepare(
+                "WITH sent AS (SELECT m.to_json, m.cc_json FROM messages m JOIN accounts a ON a.id = m.account_id AND m.from_email = a.email COLLATE NOCASE)
+                 SELECT lower(json_extract(j.value, '$.email')), json_extract(j.value, '$.name') FROM sent, json_each(sent.to_json) j
+                 UNION
+                 SELECT lower(json_extract(j.value, '$.email')), json_extract(j.value, '$.name') FROM sent, json_each(sent.cc_json) j
+                 UNION
+                 SELECT lower(m.from_email), m.from_name FROM messages m WHERE m.answered = 1 AND m.from_email IS NOT NULL",
+            )?;
+            let rows = s
+                .query_map([], |r| Ok((r.get::<_, Option<String>>(0)?, r.get(1)?)))?
+                .filter_map(|r| match r {
+                    Ok((Some(e), n)) => Some(Ok((e, n))),
+                    Ok((None, _)) => None,
+                    Err(e) => Some(Err(e)),
+                })
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Sender rules
+    // -----------------------------------------------------------------------
+
+    pub fn set_sender_rule(&self, email: &str, verdict: Option<SenderVerdict>) -> Result<()> {
+        let email = email.trim().to_lowercase();
+        self.w(|c| {
+            match verdict {
+                Some(v) => c.execute(
+                    "INSERT INTO sender_rules (email, verdict, created_at) VALUES (?,?,?)
+                     ON CONFLICT(email) DO UPDATE SET verdict=excluded.verdict, created_at=excluded.created_at",
+                    params![email, verdict_str(v), now_ms()],
+                )?,
+                None => c.execute("DELETE FROM sender_rules WHERE email=?", [email])?,
+            };
+            Ok(())
+        })
+    }
+
+    pub fn sender_rule(&self, email: &str) -> Result<Option<SenderVerdict>> {
+        self.r(|c| {
+            let v: Option<String> = c.query_row("SELECT verdict FROM sender_rules WHERE email=?", [email.trim().to_lowercase()], |r| r.get(0)).optional()?;
+            Ok(v.as_deref().map(parse_verdict))
+        })
+    }
+
+    pub fn list_sender_rules(&self) -> Result<Vec<SenderRule>> {
+        self.r(|c| {
+            let mut s = c.prepare("SELECT email, verdict, created_at FROM sender_rules ORDER BY created_at DESC")?;
+            let rows = s
+                .query_map([], |r| Ok(SenderRule { email: r.get(0)?, verdict: parse_verdict(&r.get::<_, String>(1)?), created_at: ms_to_dt(r.get(2)?) }))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Recent messages with attachments from senders marked as spam: the ones
+    /// that may carry an invitation the server put on the calendar.
+    pub fn spam_rule_messages_with_attachments(&self, account_id: &str, since: DateTime<Utc>) -> Result<Vec<String>> {
+        self.r(|c| {
+            let mut s = c.prepare(
+                "SELECT m.id FROM sender_rules r JOIN messages m ON m.account_id=?1 AND m.from_email = r.email COLLATE NOCASE
+                 WHERE r.verdict='spam' AND m.has_attachments=1 AND m.date >= ?2",
+            )?;
+            let rows = s.query_map(params![account_id, since.timestamp_millis()], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Messages a sender rule says are in the wrong place: spam senders still
+    /// in the inbox, and not-spam senders in Junk.
+    pub fn misplaced_by_rules(&self, account_id: &str) -> Result<Vec<(String, SenderVerdict)>> {
+        self.r(|c| {
+            let mut s = c.prepare(
+                "SELECT m.id, r.verdict FROM sender_rules r JOIN messages m ON m.account_id=?1 AND m.from_email = r.email COLLATE NOCASE
+                 WHERE EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id
+                               WHERE mm.message_id=m.id AND mb.role = CASE r.verdict WHEN 'spam' THEN 'inbox' ELSE 'junk' END)",
+            )?;
+            let rows = s
+                .query_map([account_id], |r| Ok((r.get::<_, String>(0)?, parse_verdict(&r.get::<_, String>(1)?))))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
     // -----------------------------------------------------------------------
     // Threads
     // -----------------------------------------------------------------------
@@ -1631,11 +1734,9 @@ impl Store {
         })
     }
 
-    pub fn delete_event(&self, id: &str) -> Result<()> {
-        self.w(|c| {
-            c.execute("DELETE FROM events WHERE id=?", [id])?;
-            Ok(())
-        })
+    /// Returns whether the event existed (so concurrent deletes push one op).
+    pub fn delete_event(&self, id: &str) -> Result<bool> {
+        self.w(|c| Ok(c.execute("DELETE FROM events WHERE id=?", [id])? > 0))
     }
 
     pub fn delete_event_by_remote(&self, calendar_id: &str, remote_id: &str) -> Result<()> {
@@ -1669,6 +1770,7 @@ impl Store {
             last_used: r.get::<_, Option<i64>>("last_used")?.map(ms_to_dt),
             policy: serde_json::from_str(&r.get::<_, String>("policy_json")?).unwrap_or_default(),
             revoked: r.get("revoked")?,
+            builtin: r.get::<_, String>("token_hash")?.starts_with("builtin:"),
         })
     }
 
@@ -1686,6 +1788,17 @@ impl Store {
 
     pub fn agent_by_token_hash(&self, hash: &str) -> Result<Option<Agent>> {
         self.r(|c| Ok(c.query_row("SELECT * FROM agents WHERE token_hash=? AND revoked=0", [hash], Self::agent_row).optional()?))
+    }
+
+    /// A built-in agent with no token (e.g. the AI folder), created on first use.
+    /// Its `token_hash` is a marker no real token hashes to.
+    pub fn builtin_agent(&self, key: &str, name: &str, policy: &AgentPolicy) -> Result<Agent> {
+        let marker = format!("builtin:{key}");
+        let found = self.r(|c| Ok(c.query_row("SELECT * FROM agents WHERE token_hash=?", [&marker], Self::agent_row).optional()?))?;
+        match found {
+            Some(a) => Ok(a),
+            None => self.insert_agent(name, &marker, policy),
+        }
     }
 
     pub fn update_agent(&self, id: &str, name: Option<&str>, policy: Option<&AgentPolicy>) -> Result<()> {

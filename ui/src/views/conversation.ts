@@ -3,7 +3,7 @@
 import { api } from '../api';
 import { h, icon, replace } from '../lib/dom';
 import { avatarColor, displayName, fullDate, humanSize, initials, shortName, timeRange } from '../lib/format';
-import { errorToast, modal, popupMenu, toast } from '../lib/ui';
+import { confirmDialog, errorToast, modal, popupMenu, toast } from '../lib/ui';
 import { store } from '../state';
 import { transport } from '../transport';
 import type { Address, Draft, MessageDetail, PartStat, Proposal, ReplyMode, Thread } from '../types';
@@ -30,7 +30,8 @@ export class Conversation {
   private newMarker: HTMLElement | null = null;
   private mine: Mine;
 
-  constructor(private thread: Thread, private onReply: (mode: ReplyMode, messageId: string) => void) {
+  /** `spam`: the thread is in Spam, so links ask first and invitations can't be answered. */
+  constructor(private thread: Thread, private onReply: (mode: ReplyMode, messageId: string) => void, private opts: { spam?: boolean } = {}) {
     this.mine = mineFor(thread);
     this.render();
   }
@@ -77,7 +78,7 @@ export class Conversation {
       else this.root.append(...out);
       if (fold && i === fold.start - 1) {
         this.fold = foldBox;
-        const pill = h('button.convo-pill', { on: { click: () => this.unfold() } }, `${fold.end - fold.start} earlier messages`);
+        const pill = h('button.convo-pill', { title: 'Show the earlier messages', on: { click: () => this.unfold() } }, `${fold.end - fold.start} earlier messages`);
         this.root.append(pill, foldBox);
       }
     }
@@ -123,9 +124,11 @@ export class Conversation {
       body.append(h('button.bubble-quote', { title: 'Jump to this message', on: { click: () => this.jumpTo(parent) } },
         h('strong', `${this.mine(parent.from) ? 'You' : shortName(parent.from)}: `), parent.snippet));
     }
-    if (m.invite) body.append(inviteCard(m));
+    const warned = warnings(m);
+    if (warned) body.append(warned);
+    if (m.invite) body.append(inviteCard(m, !!this.opts.spam));
     if (m.body_pending) body.append(h('p.muted', 'Downloading message…'));
-    else body.append(textBody(m.text_body));
+    else body.append(textBody(m.text_body, this.cautious(m)));
     const atts = attachments(m);
     if (atts) body.append(atts);
 
@@ -154,24 +157,32 @@ export class Conversation {
         h('div.banner',
           icon('image', 16),
           h('span', 'Remote images are hidden to protect your privacy.'),
-          h('button.link', { on: { click: () => void this.loadImages(m, false, card) } }, 'Show once'),
-          h('button.link', { on: { click: () => void this.loadImages(m, true, card) } }, `Always for ${m.from?.email ?? 'sender'}`)),
+          h('button.link', { title: 'Load remote images for this message only', on: { click: () => void this.loadImages(m, false, card) } }, 'Show once'),
+          h('button.link', { title: 'Always load remote images from this sender', on: { click: () => void this.loadImages(m, true, card) } }, `Always for ${m.from?.email ?? 'sender'}`)),
       );
     }
-    if (m.invite) card.append(inviteCard(m));
-    const frameHost = h('div', htmlFrame(formatted.html));
+    const warned = warnings(m);
+    if (warned) card.append(warned);
+    if (m.invite) card.append(inviteCard(m, !!this.opts.spam));
+    const cautious = this.cautious(m);
+    const frameHost = h('div', htmlFrame(formatted.html, cautious));
     card.append(frameHost);
     if (formatted.quoted) {
       const full = formatted.quoted;
       card.append(h('button.quote-toggle', {
         title: 'Show quoted text',
         'aria-label': 'Show quoted text',
-        on: { click: (e: MouseEvent) => { replace(frameHost, htmlFrame(full)); (e.currentTarget as HTMLElement).remove(); } },
+        on: { click: (e: MouseEvent) => { replace(frameHost, htmlFrame(full, cautious)); (e.currentTarget as HTMLElement).remove(); } },
       }, '•••'));
     }
     const atts = attachments(m);
     if (atts) card.append(atts);
     return card;
+  }
+
+  /** Links in spam or in messages with warnings ask before opening. */
+  private cautious(m: MessageDetail): boolean {
+    return !!this.opts.spam || !!m.warnings?.length;
   }
 
   private async loadImages(m: MessageDetail, always: boolean, card: HTMLElement) {
@@ -195,8 +206,25 @@ function attachments(m: MessageDetail): HTMLElement | null {
   if (!atts.length) return null;
   return h('div.attachments',
     atts.map((a) =>
-      h('button.attachment', { title: `Download ${a.filename}`, on: { click: () => void download(m.id, a.id) } },
-        icon('paperclip', 16), h('span.name', a.filename), h('span.muted.small', humanSize(a.size)))));
+      h(`button.attachment${a.risky ? '.risky' : ''}`, {
+        title: a.risky ? `${a.filename} can run code or imitate a sign-in page` : `Download ${a.filename}`,
+        on: {
+          click: async () => {
+            if (a.risky && !(await confirmDialog('Download a risky file?', `${a.filename} can run code or imitate a sign-in page when opened. Only download it if you were expecting it from this sender.`, 'Download anyway', true))) return;
+            void download(m.id, a.id);
+          },
+        },
+      }, icon(a.risky ? 'warning' : 'paperclip', 16), h('span.name', a.filename), h('span.muted.small', humanSize(a.size)))));
+}
+
+/** The core's phishing and safety warnings for one message. */
+function warnings(m: MessageDetail): HTMLElement | null {
+  const list = m.warnings ?? [];
+  if (!list.length) return null;
+  return h('div.banner.warn.msg-warnings', { role: 'note' },
+    icon('warning', 16),
+    h('div.grow', h('strong', list.some((w) => w.kind !== 'unknown_inviter' && w.kind !== 'risky_attachment') ? 'This might be a scam' : 'Be careful'),
+      list.map((w) => h('div', w.message))));
 }
 
 /** "Bob added Dan" / "Carol removed you": who joined or left between two messages. */
@@ -281,7 +309,7 @@ export class ReplyBox {
       h('div.reply-foot',
         h('button.icon-btn', { title: 'Open in full composer', 'aria-label': 'Open in full composer', on: { click: () => this.expand() } }, icon('compose', 16)),
         h('span.spacer'),
-        h('button.discard', { hidden: true, on: { click: () => void this.discard() } }, 'Discard'),
+        h('button.discard', { hidden: true, title: 'Throw away this reply draft', on: { click: () => void this.discard() } }, 'Discard'),
         h('button.primary', { title: 'Send (⌘↩)', on: { click: () => void this.send() } }, 'Send')),
     );
     void this.init();
@@ -336,7 +364,7 @@ export class ReplyBox {
     const all = [...(this.base?.to ?? []), ...(this.base?.cc ?? [])];
     const label = this.proposal ? 'To' : this.mode === 'reply_all' ? 'Reply all' : 'Reply';
     this.to.textContent = `${label} · ${all.map(shortName).join(', ') || 'no recipients'}`;
-    this.to.title = this.proposal ? all.map(displayName).join(', ') : 'Switch between reply and reply all';
+    this.to.dataset.tooltip = this.proposal ? all.map(displayName).join(', ') : 'Switch between reply and reply all';
   }
 
   private draft(): Draft | null {
@@ -401,9 +429,13 @@ export class ReplyBox {
 
 // ------------------------------------------------------------ message bodies
 
-function inviteCard(m: MessageDetail): HTMLElement {
+function inviteCard(m: MessageDetail, inSpam: boolean): HTMLElement {
   const inv = m.invite!;
   const when = `${new Date(inv.start).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} · ${timeRange(inv.start, inv.end, inv.all_day)}`;
+  if (inSpam && inv.method === 'REQUEST') {
+    // Any reply, even a decline, confirms the address to a spammer.
+    return h('div.invite.muted-invite', icon('calendar', 20), h('div', h('strong', inv.title), h('div.muted.small', when), h('div.muted.small', 'Invitations in Spam can’t be answered. Move this to the Inbox first if it’s real.')));
+  }
   if (inv.method === 'CANCEL') {
     return h('div.invite.cancelled', icon('calendar', 20), h('div', h('strong', `Cancelled: ${inv.title}`), h('div.muted.small', when)));
   }
@@ -439,12 +471,26 @@ function inviteCard(m: MessageDetail): HTMLElement {
   return card;
 }
 
-function linkified(line: string): HTMLElement {
+/** Open a link from a message; `cautious` ones show where they really go first. */
+async function openLink(url: string, cautious: boolean) {
+  if (cautious) {
+    let host = url;
+    try {
+      host = new URL(url).host;
+    } catch {
+      /* show the raw link */
+    }
+    if (!(await confirmDialog('Open this link?', `It goes to ${host}. Mail in Spam or with warnings often hides where links lead, so check that's where you meant to go.`, 'Open link'))) return;
+  }
+  openExternal(url);
+}
+
+function linkified(line: string, cautious: boolean): HTMLElement {
   const div = h(line.startsWith('>') ? 'div.quote' : 'div');
   for (const p of line.split(/(https?:\/\/[^\s<>"]+)/g)) {
     if (/^https?:\/\//.test(p)) {
       const [url, rest] = trimUrl(p);
-      div.appendChild(h('a', { href: url, rel: 'noopener noreferrer', target: '_blank', on: { click: (e: MouseEvent) => { e.preventDefault(); openExternal(url); } } }, url));
+      div.appendChild(h('a', { href: url, rel: 'noopener noreferrer', target: '_blank', on: { click: (e: MouseEvent) => { e.preventDefault(); void openLink(url, cautious); } } }, url));
       if (rest) div.appendChild(document.createTextNode(rest));
     } else if (p) div.appendChild(document.createTextNode(p));
   }
@@ -453,7 +499,7 @@ function linkified(line: string): HTMLElement {
 }
 
 /** Plain text body: linkified, with quoted history folded behind a toggle. */
-function textBody(text: string): HTMLElement {
+function textBody(text: string, cautious: boolean): HTMLElement {
   const pre = h('div.text-body');
   const lines = text.replace(/\r\n?/g, '\n').replace(/\s+$/, '').split('\n');
   let i = 0;
@@ -465,20 +511,20 @@ function textBody(text: string): HTMLElement {
       // Fold real history or a trailing quote, not a single quoted line mid-reply.
       if (i - start >= 2 || isAttribution(lines[start]) || lines.slice(i).every((l) => !l.trim())) {
         while (pre.lastElementChild?.matches('div') && !pre.lastElementChild.textContent?.trim()) pre.lastElementChild.remove();
-        const block = h('div.quoted', { hidden: true }, lines.slice(start, i).map(linkified));
+        const block = h('div.quoted', { hidden: true }, lines.slice(start, i).map((l) => linkified(l, cautious)));
         pre.append(h('button.quote-toggle', { title: 'Show quoted text', 'aria-label': 'Show quoted text', on: { click: (e: MouseEvent) => { block.hidden = !block.hidden; (e.currentTarget as HTMLElement).classList.toggle('open'); } } }, '•••'), block);
         continue;
       }
       i = start;
     }
-    pre.appendChild(linkified(line));
+    pre.appendChild(linkified(line, cautious));
     i++;
   }
   return pre;
 }
 
 /** Sanitized HTML (from the core) in a script-less sandboxed iframe with a CSP. */
-function htmlFrame(html: string): HTMLElement {
+function htmlFrame(html: string, cautious: boolean): HTMLElement {
   const csp = "default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; font-src data:";
   const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>
     html,body{margin:0;padding:0;background:transparent;color:#1d1d1f;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere}
@@ -500,7 +546,7 @@ function htmlFrame(html: string): HTMLElement {
         if (a.href.startsWith('mailto:')) {
           const email = decodeURIComponent(a.href.slice(7).split('?')[0]);
           openComposer({ to: [{ email }] });
-        } else openExternal(a.href);
+        } else void openLink(a.href, cautious);
       }
     });
   });

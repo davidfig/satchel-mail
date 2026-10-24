@@ -10,7 +10,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, TimeZone, Utc};
 use mail_parser::{MessageParser, MimeHeaders};
-use satchel_api::{Address, Attachment};
+use satchel_api::{Address, Attachment, Unsubscribe};
+
+mod safety;
+pub use safety::{auth_failure, base_domain, deceptive_links, email_domain, is_risky_attachment, parse_mailto, parse_unsubscribe};
 
 /// A parsed message, independent of any provider.
 #[derive(Debug, Clone, Default)]
@@ -31,6 +34,9 @@ pub struct Parsed {
     /// Raw text/calendar parts (iMIP invitations).
     pub calendar_parts: Vec<String>,
     pub snippet: String,
+    /// The topmost Authentication-Results header (added by the receiving server).
+    pub auth_results: Option<String>,
+    pub unsubscribe: Option<Unsubscribe>,
 }
 
 impl Parsed {
@@ -114,6 +120,7 @@ pub fn parse(raw: &[u8]) -> Option<Parsed> {
                 .attachment_name()
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| default_filename(&mime_type, i)),
+            risky: !inline && is_risky_attachment(part.attachment_name().unwrap_or(""), &mime_type),
             mime_type,
             size: part.contents().len() as u64,
             inline,
@@ -135,6 +142,12 @@ pub fn parse(raw: &[u8]) -> Option<Parsed> {
         .and_then(|d| Utc.timestamp_opt(d.to_timestamp(), 0).single());
 
     let snippet = make_snippet(&text);
+    let header = |name: &str| {
+        msg.headers_raw()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.split_whitespace().collect::<Vec<_>>().join(" "))
+    };
+    let unsubscribe = header("List-Unsubscribe").and_then(|lu| parse_unsubscribe(&lu, header("List-Unsubscribe-Post").as_deref()));
     Some(Parsed {
         subject: msg.subject().unwrap_or("").trim().to_string(),
         from: convert_addresses(msg.from()).into_iter().next(),
@@ -151,6 +164,8 @@ pub fn parse(raw: &[u8]) -> Option<Parsed> {
         attachments,
         calendar_parts,
         snippet,
+        auth_results: header("Authentication-Results"),
+        unsubscribe,
     })
 }
 

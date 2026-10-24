@@ -3,6 +3,7 @@
 import { api } from './api';
 import { transport } from './transport';
 import type { Account, CoreEvent, Mailbox, MailboxRole, Settings } from './types';
+import { notifyNewMail } from './lib/notify';
 import { toast } from './lib/ui';
 
 export type View = 'mail' | 'calendar' | 'review' | 'settings';
@@ -105,6 +106,9 @@ class Store {
           break;
         case 'notice':
           toast(e.message, { kind: e.level === 'error' ? 'error' : 'info' });
+          break;
+        case 'new_mail':
+          void notifyNewMail(e.messages);
           break;
       }
       for (const l of this.eventListeners) l(e);

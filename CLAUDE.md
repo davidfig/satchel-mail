@@ -1,8 +1,8 @@
 # Satchel Mail — notes for Claude
 
 Local-first email + calendar client. A Rust core syncs accounts into SQLite;
-the desktop app (Tauri) and `satchel serve` host it; AI agents read through MCP
-or the `~/Satchel/` folder and can only **propose** changes. See `README.md`
+the desktop app (Tauri) and `satchel serve` host it; AI agents work through the
+`~/Satchel/` folder (or MCP) and can only **propose** changes. See `README.md`
 for the layout and `docs/` for design and decisions.
 
 ## Ground rules
@@ -19,14 +19,28 @@ for the layout and `docs/` for design and decisions.
   `docs/decisions/README.md`). If a change overturns a decision, mark the old
   record "Superseded by NNNN" instead of editing history away.
 - **Agents never act directly.** Agent callers may only read and create
-  proposals (`Command::allowed_for_agent`). Never add an MCP tool or agent
-  command that sends, deletes, or changes settings.
+  proposals (`Command::allowed_for_agent`); the user's per-agent policy decides
+  whether a proposal applies on arrival or waits in Review (0023). Never add
+  an MCP tool or agent command that sends, deletes, or changes settings, and
+  never let agents read-write their own policy.
+- **Files first for agents.** The AI folder (`~/Satchel/`, `mirror.rs`) is the
+  main agent interface; MCP is the second door (0022). New agent features
+  should work through the folder, not only through MCP.
 - **One command surface.** Everything the UI, CLI and MCP do goes through
   `satchel_api::Command` → `Engine::handle`. Don't add host-specific backdoors.
 - **All SQL lives in `crates/core/src/store.rs`** (and `schema.sql`), so the
   store can be ported to Postgres for the hosted version.
 - **UI is vanilla TypeScript** (no framework). Only `ui/src/transport.ts` may
   touch Tauri APIs.
+- **Reuse UI components; don't rebuild them.** Shared pieces live in
+  `ui/src/lib/` (`dom.ts` helpers and icons, `ui.ts` toasts/modals/menus/
+  shortcuts, `tooltip.ts`) and are styled once in `styles.css` with the
+  tokens. Use them instead of one-off versions, and when a view needs
+  something new that another view could use, add it to `lib/` first. Never
+  use native browser UI where we have our own: tooltips come from
+  `title: '…'` in `h()` (rendered by `tooltip.ts`, never the browser's), and
+  every button has one, with its shortcut in parentheses if it has one. See
+  `docs/decisions/0021-shared-ui-components.md`.
 - Email content is untrusted: sanitize HTML in the core, render it in the
   sandboxed iframe, never `innerHTML` untrusted text.
 

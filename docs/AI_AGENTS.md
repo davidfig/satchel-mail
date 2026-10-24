@@ -1,33 +1,89 @@
 # AI agents
 
-Agents get read access and the ability to **propose** changes. Every proposal
-lands in the Review queue; the user approves (optionally after editing),
-rejects with a note the agent can read, or ignores it. Agents can never send
-mail, delete anything, or change settings.
+Give your AI access to your Satchel folder (`~/Satchel/`) and it can read your
+mail and calendars, find patterns, and propose changes — drafts, archiving,
+labels, events. Agents only ever *propose*; how much happens without asking is
+up to you ([0022](decisions/0022-files-first-agents.md),
+[0023](decisions/0023-agent-autonomy-levels.md)).
 
-## Connecting
+Proposals you review land in the Review queue: approve (optionally after
+editing), reject with a note the agent can read, or ignore. Agents can never
+delete anything permanently, change settings, or create server-side rules.
 
-1. Satchel Mail → Settings → AI agents → **Connect an agent**. Choose which
-   accounts it may read, how much history, and whether it may read calendars
-   and binary attachments.
-2. Copy the token (shown once) and the setup command, e.g. Claude Code:
+> **Status:** the folder (Markdown or JSON proposals, no token needed) and MCP
+> work today, with every proposal reviewed by hand. Autonomy levels are
+> accepted but not built yet; they're marked *planned* below.
 
-   ```bash
-   claude mcp add satchel --env SATCHEL_AGENT_TOKEN=stk_… -- satchel mcp
-   ```
+## The AI folder
 
-   Claude Desktop / other MCP clients:
+Turn it on in Settings → AI folder (default `~/Satchel/`), choose which
+accounts and how much history to include, then point your agent at it — for
+Claude Code, open it as a working directory or add it with `--add-dir`.
 
-   ```json
-   { "mcpServers": { "satchel": { "command": "satchel", "args": ["mcp"], "env": { "SATCHEL_AGENT_TOKEN": "stk_…" } } } }
-   ```
+Give agents the AI folder, **not** Satchel's data directory. The data
+directory holds the database and, on headless setups, credentials; write
+access there gets around every safeguard.
 
-   The desktop app shows the absolute path of its bundled `satchel` binary.
+```
+README.md                                  how to read and propose (for the agent)
+mail/<account>/INDEX.md, <mailbox>.md      newest threads first
+mail/<account>/threads/<yyyy-mm>/<slug>-<id>/thread.md, meta.json
+calendar/AGENDA.md, calendar/<account>/<calendar>/<uid>.ics
+proposals/inbox/                           drop proposal files here
+proposals/processed/                       results (tokens stripped)
+```
 
+What's in the folder is what your AI sees: the folder's settings are its scope.
+
+### Proposing changes
+
+An agent writes a Markdown file to `proposals/inbox/`:
+
+```markdown
+---
+action: reply
+thread: 7f3a9c…
+why: Confirms the Monday slot Bob asked for
+agent: Claude
+---
+Monday at 10 works for me — see you then.
+```
+
+Actions: `reply`, `draft`, `archive`, `move`, `labels`, `mark_read`,
+`mark_unread`, `flag`, `unflag`, `create_event`, `update_event`,
+`cancel_event`, `respond_to_invite`. `~/Satchel/README.md` lists each one's
+fields; agents should read it first.
+
+Files without a token come from the built-in **AI folder** agent: it sees what
+the folder holds and is limited to 60 proposals an hour. `agent:` is a
+self-declared name shown in Review, not proof of who wrote the file. Turn
+folder proposals off in Settings → AI folder. A file with an `agent_token:`
+acts as that connected agent, with its limits. JSON files in the API's
+proposal shape also work.
+
+Once read, the file moves to `proposals/processed/` with `status:` (pending,
+approved, edited, rejected, stale, failed or error), the proposal id, any
+warnings and your note, and the status is updated when you decide.
+
+## MCP
+
+For clients without file access (Claude Desktop, web chat apps) and, later,
+the hosted version. Settings → AI agents → **Connect an agent** creates a token
+and shows the setup command, e.g. Claude Code:
+
+```bash
+claude mcp add satchel --env SATCHEL_AGENT_TOKEN=stk_… -- satchel mcp
+```
+
+Claude Desktop / other MCP clients:
+
+```json
+{ "mcpServers": { "satchel": { "command": "satchel", "args": ["mcp"], "env": { "SATCHEL_AGENT_TOKEN": "stk_…" } } } }
+```
+
+The desktop app shows the absolute path of its bundled `satchel` binary.
 `satchel mcp` works whether or not the app is running: it opens the local store
 read-only and writes proposals the app picks up immediately.
-
-## Tools
 
 Read: `whoami`, `list_accounts`, `list_mailboxes`, `search_threads` (free text +
 `from: to: subject: has:attachment is:unread is:flagged before: after: in:`),
@@ -40,32 +96,40 @@ Propose: `propose_reply`, `propose_draft`, `propose_archive`, `propose_move`,
 
 Follow-up: `get_proposal_status`, `list_my_proposals`.
 
+## How much agents may do (*planned*)
+
+Each agent gets a level per kind of action:
+
+| Action | Levels |
+|---|---|
+| Archive, move, labels, mark read, flag | Off · Ask · Do it |
+| Drafts | Off · Ask · Save to Drafts · Send replies |
+| Calendar: create, update, respond, cancel | Off · Ask · Do it |
+
+Presets: **Review everything** (default), **Tidy up for me**, **Hands off**.
+Changes made without asking show in Activity with Undo where possible;
+automatic sends wait in the outbox for an undo window. **Pause agents** puts
+everything back to Ask.
+
+By default a proposal with a risk warning always waits for you, whatever the
+level. You can turn that off per agent ("Let risky changes through without
+asking") after a strong caution: an agent that reads a malicious email could
+then send your mail to strangers and Satchel won't stop it.
+
 ## Safeguards
 
-- **Scope:** per-agent account list, history window, calendar and attachment
-  toggles, and a proposals-per-hour limit.
-- **Warnings** shown on review: recipients outside the original conversation,
-  new conversations, Bcc, many recipients, forwarded attachments, invitations
-  that will be sent, moves to Trash, cancellations.
+- **Scope:** the AI folder's settings; for token agents, a per-agent account
+  list, history window, calendar and attachment toggles, and a
+  proposals-per-hour limit.
+- **Warnings:** recipients outside the original conversation, new
+  conversations, Bcc, many recipients, forwarded attachments, invitations that
+  will be sent, moves to Trash, cancellations.
 - **Staleness:** if the message or event changed after the proposal, approval is
-  blocked until the user looks again.
+  blocked until you look again.
 - **De-duplication:** identical pending proposals from the same agent collapse.
 - **Audit log:** every proposal, decision and send (Settings → Activity).
-- Email bodies are third-party content; the MCP instructions tell agents to treat
-  instructions inside messages as data. The structural limits above are the real
-  protection.
-
-## The AI folder
-
-`~/Satchel/` (configurable in Settings → AI folder) is a one-way, plain-text
-export for tools without MCP:
-
-```
-mail/<account>/INDEX.md, <mailbox>.md
-mail/<account>/threads/<yyyy-mm>/<slug>-<id>/thread.md, meta.json
-calendar/AGENDA.md, calendar/<account>/<calendar>/<uid>.ics
-proposals/inbox/      drop proposal JSON files here (needs an agent token)
-proposals/processed/  results (tokens stripped)
-```
-
-See `~/Satchel/README.md` for the proposal file format.
+- **Hard limits:** no permanent deletes, settings changes, or server-side rules
+  or forwarding, at any level.
+- Email bodies are third-party content; the folder README and MCP instructions
+  tell agents to treat instructions inside messages as data. The structural
+  limits above are the real protection.

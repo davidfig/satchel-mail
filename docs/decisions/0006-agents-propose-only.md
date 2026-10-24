@@ -1,6 +1,6 @@
 # 0006. AI agents can only read and propose
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by 0023
 - **Date:** 2026-10-23
 
 ## Context
@@ -26,3 +26,6 @@ de-duplication of identical pending proposals, and an audit log.
 - Limits blast radius structurally rather than relying on model behaviour.
 - Agents can't automate low-risk actions yet; policy-based auto-approve is a
   possible later decision.
+
+**Amended by 0023:** agents still only propose, but the user's per-agent
+policy may approve a proposal on arrival, up to sending replies.

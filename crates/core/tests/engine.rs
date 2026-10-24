@@ -1,5 +1,5 @@
 //! Engine-level tests with an in-process fake provider: agent permissions,
-//! proposals (warnings, de-duplication, staleness), and the op queue.
+//! proposals (warnings, de-duplication, staleness), the op queue, and spam rules.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -17,6 +17,12 @@ use serde_json::{Value, json};
 #[derive(Default)]
 struct Fake {
     applied: Mutex<Vec<String>>,
+    /// Mail the "server" delivers on the next sync: (remote id, raw, remote mailbox).
+    incoming: Mutex<Vec<(String, Vec<u8>, String)>>,
+    /// Events the server puts on the calendar on the next sync: (remote id, ics).
+    events: Mutex<Vec<(String, String)>>,
+    /// `notify` of each calendar delete pushed to the server.
+    cal_deletes: Mutex<Vec<bool>>,
 }
 
 fn raw(id: &str, from: &str, subject: &str, irt: Option<&str>) -> Vec<u8> {
@@ -39,7 +45,12 @@ impl MailProvider for Fake {
         ctx.set_mailboxes(&[
             RemoteMailbox { remote_id: "INBOX".into(), name: "Inbox".into(), path: "INBOX".into(), role: MailboxRole::Inbox, is_label: false },
             RemoteMailbox { remote_id: "Archive".into(), name: "Archive".into(), path: "Archive".into(), role: MailboxRole::Archive, is_label: false },
+            RemoteMailbox { remote_id: "Junk".into(), name: "Junk".into(), path: "Junk".into(), role: MailboxRole::Junk, is_label: false },
         ])?;
+        let incoming: Vec<_> = self.incoming.lock().unwrap().drain(..).collect();
+        for (rid, raw, mb) in incoming {
+            ctx.put_raw_message(&rid, None, &raw, Flags::default(), &[(mb, None)], None)?;
+        }
         if ctx.message_by_remote("r1")?.is_none() {
             let f = Flags::default();
             ctx.put_raw_message("r1", None, &raw("m1", "Bob <bob@x.test>", "Kickoff", None), f.clone(), &[("INBOX".into(), Some(1))], None)?;
@@ -92,9 +103,28 @@ impl MailProvider for Shared {
     }
 }
 
+struct SharedCal(Arc<Fake>);
+#[async_trait]
+impl CalendarProvider for SharedCal {
+    async fn sync(&self, ctx: &SyncCtx) -> Result<()> {
+        let map = ctx.set_calendars(&[RemoteCalendar { remote_id: "cal".into(), name: "Calendar".into(), color: None, read_only: false }])?;
+        let events: Vec<_> = self.0.events.lock().unwrap().drain(..).collect();
+        for (rid, ics) in events {
+            ctx.put_event(&map["cal"], &rid, None, &ics)?;
+        }
+        Ok(())
+    }
+    async fn apply(&self, _ctx: &SyncCtx, op: &CalendarOp) -> Result<ApplyOutcome> {
+        if let CalendarOp::Delete { notify, .. } = op {
+            self.0.cal_deletes.lock().unwrap().push(*notify);
+        }
+        Ok(ApplyOutcome::default())
+    }
+}
+
 impl ProviderFactory for FakeFactory {
     fn create(&self, _account: &Account, _creds: CredentialHandle) -> Result<Providers> {
-        Ok(Providers { mail: Some(Arc::new(Shared(self.0.clone()))), calendar: None })
+        Ok(Providers { mail: Some(Arc::new(Shared(self.0.clone()))), calendar: Some(Arc::new(SharedCal(self.0.clone()))) })
     }
 }
 
@@ -287,4 +317,260 @@ async fn full_text_search_combines_with_filters() {
     engine.store().delete_message(&invoice).unwrap();
     let (_, n) = search("invoice").await;
     assert_eq!(n, 0);
+}
+
+fn deliver(fake: &Fake, rid: &str, raw: Vec<u8>, mailbox: &str) {
+    fake.incoming.lock().unwrap().push((rid.into(), raw, mailbox.into()));
+}
+
+fn in_role(engine: &Engine, account: &str, rid: &str, role: MailboxRole) -> bool {
+    let Some(id) = engine.store().message_id_by_remote(account, rid).unwrap() else { return false };
+    let mb = engine.store().mailbox_by_role(account, role).unwrap().unwrap();
+    engine.store().memberships(&id).unwrap().iter().any(|(m, _)| *m == mb.id)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sender_rules_outrank_the_server_filter() {
+    let (engine, fake, account, _dir) = setup().await;
+    let invoice = engine.store().message_id_by_remote(&account, "r3").unwrap().unwrap();
+
+    // Agents can't decide what's spam.
+    let a = agent(&engine, AgentPolicy::default()).await;
+    let err = engine.handle(&a, Command::MarkSpam { message_ids: vec![invoice.clone()] }).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Forbidden);
+
+    let r = engine.handle(&Caller::User, Command::MarkSpam { message_ids: vec![invoice.clone()] }).await.unwrap();
+    assert_eq!(r["senders"], json!(["bill@evil.test"]));
+    assert!(in_role(&engine, &account, "r3", MailboxRole::Junk));
+
+    // New mail from the sender lands in the inbox; the rule moves it.
+    deliver(&fake, "r4", raw("m4", "Vendor <Bill@Evil.test>", "Invoice again", None), "INBOX");
+    // The server puts mail from a real person in Junk.
+    deliver(&fake, "r5", raw("m5", "Carol <carol@x.test>", "Lunch?", None), "Junk");
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| in_role(&engine, &account, "r4", MailboxRole::Junk)).await;
+    assert!(in_role(&engine, &account, "r5", MailboxRole::Junk), "no rule for Carol yet");
+
+    // Not spam moves her back, and her later mail never stays in Junk.
+    let lunch = engine.store().message_id_by_remote(&account, "r5").unwrap().unwrap();
+    engine.handle(&Caller::User, Command::MarkNotSpam { message_ids: vec![lunch] }).await.unwrap();
+    assert!(in_role(&engine, &account, "r5", MailboxRole::Inbox));
+    deliver(&fake, "r6", raw("m6", "Carol <carol@x.test>", "Lunch, take two", None), "Junk");
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| in_role(&engine, &account, "r6", MailboxRole::Inbox)).await;
+
+    let rules: Vec<SenderRule> = serde_json::from_value(engine.handle(&Caller::User, Command::ListSenderRules).await.unwrap()).unwrap();
+    assert_eq!(rules.len(), 2);
+    // Removing a rule lets the server's filter decide again.
+    engine.handle(&Caller::User, Command::SetSenderRule { email: "bill@evil.test".into(), verdict: None }).await.unwrap();
+    deliver(&fake, "r7", raw("m7", "Vendor <bill@evil.test>", "Third time", None), "INBOX");
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| engine.store().message_id_by_remote(&account, "r7").ok().flatten().is_some()).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(in_role(&engine, &account, "r7", MailboxRole::Inbox));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn warns_about_impersonation_and_deceptive_links() {
+    let (engine, fake, account, _dir) = setup().await;
+    // The user has written to Bob, so "Bob" from another address is suspicious.
+    deliver(&fake, "s1", raw("s1", "Me <me@x.test>", "Re: Kickoff", Some("m1")).replace_to("Bob <bob@x.test>"), "INBOX");
+    let mut spoof = raw("s2", "Bob <bob.office@freemail.test>", "Quick favor", None);
+    spoof = String::from_utf8(spoof).unwrap().replacen("\r\n\r\n", "\r\nAuthentication-Results: mx.x.test; spf=fail; dkim=none; dmarc=fail\r\n\r\n", 1).into_bytes();
+    deliver(&fake, "s2", spoof, "INBOX");
+    let html = "From: Bank <alerts@bank-secure.test>\r\nTo: me@x.test\r\nSubject: Verify\r\nMessage-ID: <s3@x.test>\r\nDate: Tue, 20 Oct 2026 10:00:00 +0000\r\n\
+        List-Unsubscribe: <https://bank-secure.test/u>\r\nList-Unsubscribe-Post: List-Unsubscribe=One-Click\r\nContent-Type: text/html\r\n\r\n\
+        <p><a href=\"https://bank-secure.test/login\">https://www.bank.com/login</a></p>\r\n";
+    deliver(&fake, "s3", html.as_bytes().to_vec(), "INBOX");
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| engine.store().message_id_by_remote(&account, "s3").ok().flatten().is_some()).await;
+
+    let get = |rid: &str| {
+        let id = engine.store().message_id_by_remote(&account, rid).unwrap().unwrap();
+        let engine = engine.clone();
+        async move { serde_json::from_value::<MessageDetail>(engine.handle(&Caller::User, Command::GetMessage { message_id: id }).await.unwrap()).unwrap() }
+    };
+    let m = get("s2").await;
+    let kinds: Vec<WarningKind> = m.warnings.iter().map(|w| w.kind).collect();
+    assert_eq!(kinds, vec![WarningKind::Impersonation, WarningKind::AuthFailed], "{:?}", m.warnings);
+    assert!(m.warnings[0].message.contains("bob@x.test"));
+
+    let m = get("s3").await;
+    assert_eq!(m.warnings.len(), 1);
+    assert_eq!(m.warnings[0].kind, WarningKind::DeceptiveLink);
+    assert!(m.unsubscribe.as_ref().is_some_and(|u| u.one_click));
+
+    // Bob himself gets no warnings.
+    assert!(get("r1").await.warnings.is_empty());
+}
+
+trait ReplaceTo {
+    fn replace_to(self, to: &str) -> Vec<u8>;
+}
+
+impl ReplaceTo for Vec<u8> {
+    fn replace_to(self, to: &str) -> Vec<u8> {
+        String::from_utf8(self).unwrap().replacen("To: me@x.test", &format!("To: {to}"), 1).into_bytes()
+    }
+}
+
+fn invite_ics(uid: &str, my_status: &str) -> String {
+    [
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Test//EN", "BEGIN:VEVENT", &format!("UID:{uid}"), "DTSTAMP:20261020T100000Z",
+        "DTSTART:20261101T150000Z", "DTEND:20261101T153000Z", "SUMMARY:Claim your prize", "ORGANIZER:mailto:noreply@prize.test",
+        &format!("ATTENDEE;PARTSTAT={my_status};RSVP=TRUE:mailto:me@x.test"), "END:VEVENT", "END:VCALENDAR", "",
+    ]
+    .join("\r\n")
+}
+
+fn invite_mail(id: &str, ics: &str) -> Vec<u8> {
+    format!(
+        "From: Prize <noreply@prize.test>\r\nTo: me@x.test\r\nSubject: Invitation {id}\r\nMessage-ID: <{id}@prize.test>\r\nDate: {}\r\n\
+         MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nYou won.\r\n\
+         --b\r\nContent-Type: text/calendar; method=REQUEST\r\nContent-Disposition: attachment; filename=invite.ics\r\n\r\n{ics}\r\n--b--\r\n",
+        chrono::Utc::now().to_rfc2822()
+    )
+    .into_bytes()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn marking_spam_silently_removes_its_invitation() {
+    let (engine, fake, account, _dir) = setup().await;
+    // The server auto-added the unanswered invite; the user accepted the other one.
+    let unanswered = invite_ics("spam-1", "NEEDS-ACTION");
+    let accepted = invite_ics("spam-2", "ACCEPTED");
+    deliver(&fake, "i1", invite_mail("i1", &unanswered), "INBOX");
+    deliver(&fake, "i2", invite_mail("i2", &accepted), "INBOX");
+    fake.events.lock().unwrap().extend([("e1".to_string(), unanswered), ("e2".to_string(), accepted)]);
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| engine.store().events_by_uid(&account, "spam-2").map(|v| !v.is_empty()).unwrap_or(false)
+        && engine.store().message_id_by_remote(&account, "i2").ok().flatten().is_some()).await;
+
+    let ids: Vec<String> = ["i1", "i2"].iter().map(|r| engine.store().message_id_by_remote(&account, r).unwrap().unwrap()).collect();
+    let r = engine.handle(&Caller::User, Command::MarkSpam { message_ids: ids }).await.unwrap();
+    assert_eq!(r["invites_removed"], json!(1));
+    assert!(engine.store().events_by_uid(&account, "spam-1").unwrap().is_empty());
+    assert_eq!(engine.store().events_by_uid(&account, "spam-2").unwrap().len(), 1, "answered invitations stay");
+    wait_for(|| !fake.cal_deletes.lock().unwrap().is_empty()).await;
+    assert_eq!(*fake.cal_deletes.lock().unwrap(), vec![false], "the organizer is never notified");
+
+    // An invite the server adds later, from the now-blocked sender, comes off after the next sync.
+    let later = invite_ics("spam-3", "NEEDS-ACTION");
+    deliver(&fake, "i3", invite_mail("i3", &later), "INBOX");
+    fake.events.lock().unwrap().push(("e3".into(), later));
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| fake.cal_deletes.lock().unwrap().len() == 2).await;
+    assert!(engine.store().events_by_uid(&account, "spam-3").unwrap().is_empty());
+    assert!(in_role(&engine, &account, "i3", MailboxRole::Junk));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn new_inbox_mail_raises_one_notification() {
+    let (engine, fake, account, _dir) = setup().await;
+    // The first sync stored mail without announcing it.
+    wait_for(|| engine.store().get_account(&account).unwrap().unwrap().sync.last_success.is_some()).await;
+    let mut events = engine.subscribe();
+    let fresh = |id: &str, from: &str, subject: &str| {
+        format!("From: {from}\r\nTo: me@x.test\r\nSubject: {subject}\r\nMessage-ID: <{id}@x.test>\r\nDate: {}\r\n\r\nHi\r\n", chrono::Utc::now().to_rfc2822()).into_bytes()
+    };
+    deliver(&fake, "n1", fresh("n1", "Dana <dana@x.test>", "Hike photos"), "INBOX");
+    deliver(&fake, "n2", fresh("n2", "Ads <ads@x.test>", "Sale"), "Junk");
+    // Dated days ago, like a backfill.
+    deliver(&fake, "n3", raw("n3", "Old <old@x.test>", "From the archive", None), "INBOX");
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    let messages = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(CoreEvent::NewMail { messages, .. }) = events.recv().await {
+                return messages;
+            }
+        }
+    })
+    .await
+    .expect("a new_mail event");
+    let subjects: Vec<&str> = messages.iter().map(|m| m.subject.as_str()).collect();
+    assert_eq!(subjects, ["Hike photos"]);
+    assert_eq!(messages[0].from.as_ref().unwrap().email, "dana@x.test");
+}
+
+/// Drop a file into the AI folder's inbox and ingest it; returns the processed copy.
+async fn drop_proposal(engine: &Arc<Engine>, dir: &tempfile::TempDir, name: &str, text: &str) -> String {
+    let inbox = dir.path().join("mirror/proposals/inbox");
+    std::fs::create_dir_all(&inbox).unwrap();
+    std::fs::write(inbox.join(name), text).unwrap();
+    engine.ingest_dropped_proposals().await;
+    assert!(!inbox.join(name).exists(), "ingested files leave the inbox");
+    std::fs::read_to_string(dir.path().join("mirror/proposals/processed").join(name)).unwrap()
+}
+
+fn field<'a>(file: &'a str, key: &str) -> Option<&'a str> {
+    file.lines().find_map(|l| l.strip_prefix(&format!("{key}: ")))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn markdown_proposal_files_need_no_token_and_report_back() {
+    let (engine, _fake, account, dir) = setup().await;
+    let invoice = engine.store().message_id_by_remote(&account, "r3").unwrap().unwrap();
+    let invoice_thread = engine.store().thread_of(&invoice).unwrap().unwrap();
+    let kickoff = engine.store().message_id_by_remote(&account, "r1").unwrap().unwrap();
+    let kickoff_thread = engine.store().thread_of(&kickoff).unwrap().unwrap();
+
+    // A token-less archive comes from the built-in AI folder agent.
+    let done = drop_proposal(&engine, &dir, "archive.md", &format!("---\naction: archive\nthreads: [{invoice_thread}]\nwhy: Paid already\nagent: Claude\n---\n")).await;
+    assert_eq!(field(&done, "status"), Some("pending"), "{done}");
+    let id = field(&done, "proposal").unwrap().to_string();
+    let p: Proposal = serde_json::from_value(engine.handle(&Caller::User, Command::GetProposal { proposal_id: id.clone() }).await.unwrap()).unwrap();
+    assert_eq!(p.agent_name, "AI folder");
+    assert_eq!(p.rationale, "[Claude] Paid already");
+    assert!(matches!(&p.action, ProposalAction::Archive { message_ids } if message_ids == &vec![invoice.clone()]));
+    let agents: Vec<Agent> = serde_json::from_value(engine.handle(&Caller::User, Command::ListAgents).await.unwrap()).unwrap();
+    assert!(agents.iter().any(|a| a.builtin && a.name == "AI folder"));
+
+    // The user's decision and note are written back to the file.
+    engine.handle(&Caller::User, Command::RejectProposal { proposal_id: id, note: Some("Not \"yet\"".into()) }).await.unwrap();
+    let done = std::fs::read_to_string(dir.path().join("mirror/proposals/processed/archive.md")).unwrap();
+    assert_eq!(field(&done, "status"), Some("rejected"), "{done}");
+    assert_eq!(field(&done, "note"), Some(r#""Not \"yet\"""#));
+
+    // A reply goes to the sender of the thread's last message, with the body as text.
+    let done = drop_proposal(&engine, &dir, "reply.md", &format!("---\naction: reply\nthread: {kickoff_thread}\nwhy: Confirm\n---\nMonday works.\n")).await;
+    let id = field(&done, "proposal").unwrap().to_string();
+    let p: Proposal = serde_json::from_value(engine.handle(&Caller::User, Command::GetProposal { proposal_id: id.clone() }).await.unwrap()).unwrap();
+    let ProposalAction::Draft { draft } = &p.action else { panic!("expected a draft") };
+    assert_eq!(draft.to, vec![Address { name: Some("Carol".into()), email: "carol@x.test".into() }]);
+    assert_eq!(draft.subject, "Re: Kickoff");
+    assert_eq!(draft.body_text, "Monday works.");
+    assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+    engine.handle(&Caller::User, Command::ApproveProposal { proposal_id: id, edited: None }).await.unwrap();
+    let done = std::fs::read_to_string(dir.path().join("mirror/proposals/processed/reply.md")).unwrap();
+    assert_eq!(field(&done, "status"), Some("approved"));
+
+    // Mistakes come back as errors, under a free name if the old one is taken.
+    let done = drop_proposal(&engine, &dir, "oops.md", "---\naction: shred\n---\n").await;
+    assert_eq!(field(&done, "status"), Some("error"));
+    assert!(field(&done, "error").unwrap().contains("unknown action"));
+    std::fs::write(dir.path().join("mirror/proposals/inbox/oops.md"), "no header").unwrap();
+    engine.ingest_dropped_proposals().await;
+    let again = std::fs::read_to_string(dir.path().join("mirror/proposals/processed/oops-2.md")).unwrap();
+    assert!(again.contains("no header"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn folder_proposals_can_be_turned_off_but_tokens_still_work() {
+    let (engine, _fake, account, dir) = setup().await;
+    let invoice = engine.store().message_id_by_remote(&account, "r3").unwrap().unwrap();
+    let mut s = engine.settings();
+    s.mirror.accept_proposals = false;
+    engine.handle(&Caller::User, Command::UpdateSettings { settings: s }).await.unwrap();
+
+    let done = drop_proposal(&engine, &dir, "flag.md", &format!("---\naction: flag\nmessages: [{invoice}]\n---\n")).await;
+    assert_eq!(field(&done, "status"), Some("error"));
+    assert!(field(&done, "error").unwrap().contains("turned off"));
+
+    let v = engine.handle(&Caller::User, Command::CreateAgent { name: "Codex".into(), policy: AgentPolicy::default() }).await.unwrap();
+    let token = v["token"].as_str().unwrap();
+    let done = drop_proposal(&engine, &dir, "flag2.md", &format!("---\naction: flag\nmessages: [{invoice}]\nagent_token: {token}\n---\n")).await;
+    assert_eq!(field(&done, "status"), Some("pending"), "{done}");
+    assert!(!done.contains(token), "the token is stripped");
+    let p: Proposal = serde_json::from_value(engine.handle(&Caller::User, Command::GetProposal { proposal_id: field(&done, "proposal").unwrap().into() }).await.unwrap()).unwrap();
+    assert_eq!(p.agent_name, "Codex");
 }

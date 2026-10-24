@@ -199,7 +199,8 @@ impl Engine {
                 let calendar_remote = p["calendar_remote_id"].as_str().context("calendar_remote_id")?.to_string();
                 let remote = p["remote_id"].as_str().context("remote_id")?.to_string();
                 if !remote.starts_with("local:") {
-                    cal.apply(ctx, &CalendarOp::Delete { calendar_remote_id: calendar_remote, event_remote_id: remote, etag: p.get("etag").and_then(Value::as_str).map(String::from) })
+                    let notify = p.get("notify").and_then(Value::as_bool).unwrap_or(true);
+                    cal.apply(ctx, &CalendarOp::Delete { calendar_remote_id: calendar_remote, event_remote_id: remote, etag: p.get("etag").and_then(Value::as_str).map(String::from), notify })
                         .await?;
                 }
             }

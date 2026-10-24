@@ -74,7 +74,8 @@ pub struct RemoteCalendar {
 #[derive(Debug, Clone)]
 pub enum CalendarOp {
     Put { calendar_remote_id: String, event_remote_id: Option<String>, etag: Option<String>, uid: String, ics: String },
-    Delete { calendar_remote_id: String, event_remote_id: String, etag: Option<String> },
+    /// `notify: false` removes an invitation silently: no decline goes to the organizer.
+    Delete { calendar_remote_id: String, event_remote_id: String, etag: Option<String>, notify: bool },
 }
 
 #[async_trait]
@@ -111,12 +112,18 @@ pub struct Providers {
 
 /// Builds provider instances for an account. Supplied by the host so the
 /// core does not depend on protocol crates.
+#[async_trait]
 pub trait ProviderFactory: Send + Sync {
     fn create(&self, account: &Account, creds: CredentialHandle) -> Result<Providers>;
     /// Start an OAuth flow for a provider kind; returns the URL to open in a
     /// browser. `done` is called once the user finishes (or abandons) sign-in.
     fn oauth_start(&self, _kind: ProviderKind, _done: OAuthDone) -> Result<String> {
         anyhow::bail!("OAuth is not configured for this provider")
+    }
+    /// RFC 8058 one-click unsubscribe: POST `List-Unsubscribe=One-Click` to an
+    /// https URL. Here because the core has no HTTP client of its own.
+    async fn one_click_unsubscribe(&self, _url: &str) -> Result<()> {
+        anyhow::bail!("unsubscribing is not supported by this host")
     }
 }
 
@@ -152,6 +159,8 @@ pub struct SyncCtx {
     pub blobs: Arc<dyn BlobStore>,
     pub settings: Settings,
     pub(crate) events: tokio::sync::broadcast::Sender<CoreEvent>,
+    /// New inbox mail stored since the last `messages_changed`.
+    pub(crate) arrivals: Arc<std::sync::Mutex<Vec<NewMail>>>,
 }
 
 impl SyncCtx {
@@ -231,8 +240,34 @@ impl SyncCtx {
             .iter()
             .filter_map(|(r, uid)| self.mailbox_local_id(r).ok().flatten().map(|id| (id, *uid)))
             .collect();
-        let (id, _) = self.store.upsert_message(&self.account.id, &rec, &local)?;
+        let (id, inserted) = self.store.upsert_message(&self.account.id, &rec, &local)?;
+        if inserted && self.is_arrival(&rec, &local) {
+            let thread_id = self.store.message_row(&id)?.map(|m| m.summary.thread_id).unwrap_or_default();
+            self.arrivals.lock().unwrap().push(NewMail {
+                message_id: id.clone(),
+                thread_id,
+                from: rec.from.clone(),
+                subject: rec.subject.clone(),
+                snippet: rec.snippet.clone(),
+            });
+        }
         Ok(id)
+    }
+
+    /// Whether a newly stored message deserves a notification: unread, in an
+    /// inbox, recent, and not the first sync, a backfill, our own mail, or a
+    /// sender the user marked as spam.
+    fn is_arrival(&self, rec: &MessageRecord, local: &[(String, Option<u32>)]) -> bool {
+        // No notifications until the account has synced once.
+        let Some(last) = self.account.sync.last_success else { return false };
+        if !self.settings.notify_new_mail || rec.flags.seen || rec.flags.draft || rec.date < last - chrono::Duration::days(1) {
+            return false;
+        }
+        let from = rec.from.as_ref().map(|a| a.email.to_lowercase()).unwrap_or_default();
+        if from == self.account.email.to_lowercase() || self.store.sender_rule(&from).ok().flatten() == Some(SenderVerdict::Spam) {
+            return false;
+        }
+        local.iter().any(|(id, _)| self.store.get_mailbox(id).ok().flatten().is_some_and(|m| m.role == MailboxRole::Inbox))
     }
 
     pub fn message_by_remote(&self, remote_id: &str) -> Result<Option<String>> {
@@ -271,6 +306,10 @@ impl SyncCtx {
     pub fn messages_changed(&self) {
         let _ = self.store.recount_mailboxes(&self.account.id);
         let _ = self.events.send(CoreEvent::MessagesChanged { account_id: self.account.id.clone() });
+        let messages = std::mem::take(&mut *self.arrivals.lock().unwrap());
+        if !messages.is_empty() {
+            let _ = self.events.send(CoreEvent::NewMail { account_id: self.account.id.clone(), messages });
+        }
     }
 
     // calendars

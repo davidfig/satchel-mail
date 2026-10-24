@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="1024" height="1024">
+  <defs>
+    <linearGradient id="leather" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d4925a"/>
+      <stop offset="1" stop-color="#b06f3c"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="0.8" stdDeviation="0.9" flood-color="#000" flood-opacity="0.25"/></filter>
+  </defs>
+  <rect x="9.77" y="9.77" width="80.47" height="80.47" rx="18.1" fill="url(#leather)" filter="url(#shadow)"/>
+  <g transform="translate(19.386 17.856) scale(0.6123)">
+    <path d="M37 37 V31 Q37 21 50 21 Q63 21 63 31 V37" fill="none" stroke="#fffaf4" stroke-width="5.5" stroke-linecap="round"/>
+    <defs><clipPath id="bag"><rect x="14" y="36" width="72" height="48" rx="8"/></clipPath></defs>
+    <rect x="14" y="36" width="72" height="48" rx="8" fill="#fffaf4"/>
+    <rect x="27" y="50" width="10" height="30" rx="2.5" fill="#f3dcc4"/>
+    <rect x="63" y="50" width="10" height="30" rx="2.5" fill="#f3dcc4"/>
+    <path d="M14 44 Q14 36 22 36 H78 Q86 36 86 44 V47 L54.5 65.5 Q50 68.8 45.5 65.5 L14 47 Z" fill="#f3dcc4"/>
+    <path d="M8 43.48 L45.5 65.5 Q50 68.8 54.5 65.5 L92 43.48" fill="none" stroke="#9c5a28" stroke-width="3.2" stroke-linejoin="round" clip-path="url(#bag)"/>
+    <path d="M18.5 52 V75.5 Q18.5 80 23 80 H77 Q81.5 80 81.5 75.5 V52" fill="none" stroke="#9c5a28" stroke-width="1.4" stroke-dasharray="2.6 2.1" stroke-linecap="round" opacity="0.7"/>
+    <circle cx="50" cy="68" r="5.8" fill="#9c5a28"/>
+    <circle cx="50" cy="68" r="2.2" fill="#fffaf4"/>
+  </g>
+</svg>

@@ -32,6 +32,9 @@ export function h(sel: string, attrs?: Attrs | Child, ...children: Child[]): HTM
           }
       } else if (k === 'dataset') {
         Object.assign(el.dataset, v);
+      } else if (k === 'title' && tag !== 'iframe') {
+        // Styled tooltip instead of the browser's (see tooltip.ts).
+        el.dataset.tooltip = String(v);
       } else if (k === 'class') {
         el.className = String(v);
       } else if (k in el && typeof v !== 'string') {
@@ -46,6 +49,8 @@ export function h(sel: string, attrs?: Attrs | Child, ...children: Child[]): HTM
     children.unshift(attrs as Child);
   }
   append(el, children);
+  // A tooltip on an icon-only control doubles as its accessible name.
+  if (el.dataset.tooltip && !el.hasAttribute('aria-label') && !el.textContent?.trim()) el.setAttribute('aria-label', el.dataset.tooltip);
   return el;
 }
 
@@ -91,6 +96,7 @@ const ICONS: Record<string, string> = {
   check: '<path d="M4 10.5l4 4 8-9"/>',
   chevronLeft: '<path d="M12.5 4.5L7 10l5.5 5.5"/>',
   chevronRight: '<path d="M7.5 4.5L13 10l-5.5 5.5"/>',
+  chevronDown: '<path d="M4.5 7.5L10 13l5.5-5.5"/>',
   plus: '<path d="M10 4v12M4 10h12"/>',
   refresh: '<path d="M16 10a6 6 0 1 1-1.8-4.3"/><path d="M16 3.5v3.5h-3.5"/>',
   sparkle: '<path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/><path d="M15.5 13.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',

@@ -31,6 +31,7 @@ impl Factory {
     }
 }
 
+#[async_trait::async_trait]
 impl ProviderFactory for Factory {
     fn create(&self, account: &Account, creds: CredentialHandle) -> Result<Providers> {
         match &account.config {
@@ -73,5 +74,25 @@ impl ProviderFactory for Factory {
             bail!("Sign-in for this provider isn't configured in this build. Set {var} (see docs/OAUTH.md).");
         };
         oauth::start(app, done)
+    }
+
+    async fn one_click_unsubscribe(&self, url: &str) -> Result<()> {
+        if !url.to_ascii_lowercase().starts_with("https://") {
+            bail!("one-click unsubscribe needs an https link");
+        }
+        let http = net::http_client(false)?;
+        let r = http
+            .post(url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body("List-Unsubscribe=One-Click")
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await?;
+        let status = r.status();
+        if !status.is_success() {
+            let body = r.text().await.unwrap_or_default();
+            return Err(net::http_error(status, &body, "unsubscribe"));
+        }
+        Ok(())
     }
 }

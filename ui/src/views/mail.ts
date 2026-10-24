@@ -5,12 +5,18 @@ import { debounce, h, icon, replace } from '../lib/dom';
 import { formatAddress, listDate, participantsLabel, shortName } from '../lib/format';
 import { bind, confirmDialog, errorToast, popupMenu, toast } from '../lib/ui';
 import { store } from '../state';
-import type { Address, Mailbox, Thread, ThreadQuery, ThreadSummary } from '../types';
+import type { Address, Mailbox, MessageDetail, Thread, ThreadQuery, ThreadSummary } from '../types';
 import { openComposer } from './composer';
-import { Conversation, ReplyBox, mineFor, viewSource } from './conversation';
+import { Conversation, ReplyBox, mineFor, openExternal, viewSource } from './conversation';
 import { ThreadWindow } from './thread-window';
 
 const ROW_H = 74;
+
+/** Tooltip for Spam on mail already in Spam. */
+const BLOCK_TIP = 'Spam: delete, and always send this sender’s mail to Spam';
+const isJunk = (ids: string[]) => ids.some((id) => store.mailbox(id)?.role === 'junk');
+
+type Action = 'archive' | 'trash' | 'read' | 'unread' | 'spam' | 'not_spam' | 'block';
 // Browsers cap element heights (~17M px in WebKit); beyond this the scrollbar is scaled.
 const MAX_SCROLL_PX = 8_000_000;
 
@@ -93,10 +99,16 @@ export class MailView {
       n > 0 &&
         h('div.bulk-bar',
           h('span', `${n} selected`),
-          h('button', { on: { click: () => void this.act('archive') } }, icon('archive', 16), 'Archive'),
-          h('button', { on: { click: () => void this.act('read') } }, icon('mailOpen', 16), 'Read'),
-          h('button', { on: { click: () => void this.act('trash') } }, icon('trash', 16), 'Delete'),
-          h('button.link', { on: { click: () => { this.selected.clear(); this.renderHeader(); this.renderRows(); } } }, 'Clear')),
+          h('button', { title: 'Archive selected (e)', on: { click: () => void this.act('archive') } }, icon('archive', 16), 'Archive'),
+          h('button', { title: 'Mark selected as read (Shift+I)', on: { click: () => void this.act('read') } }, icon('mailOpen', 16), 'Read'),
+          h('button', { title: 'Move selected to Trash (#)', on: { click: () => void this.act('trash') } }, icon('trash', 16), 'Delete'),
+          this.inSpam()
+            ? [
+                h('button', { title: 'Not spam: move to Inbox and keep these senders out of Spam (!)', on: { click: () => void this.act('not_spam') } }, icon('inbox', 16), 'Not spam'),
+                h('button', { title: BLOCK_TIP, on: { click: () => void this.act('block') } }, icon('junk', 16), 'Spam'),
+              ]
+            : h('button', { title: 'Mark as spam: these senders always go to Spam (!)', on: { click: () => void this.act('spam') } }, icon('junk', 16), 'Spam'),
+          h('button.link', { title: 'Clear the selection', on: { click: () => { this.selected.clear(); this.renderHeader(); this.renderRows(); } } }, 'Clear')),
     );
   }
 
@@ -252,7 +264,12 @@ export class MailView {
     return out;
   }
 
-  private async act(kind: 'archive' | 'trash' | 'read' | 'unread' | 'spam') {
+  /** Whether the targeted conversations are in Spam (so "!" means Not spam). */
+  private inSpam(threads = this.targetThreads()): boolean {
+    return threads.length > 0 && threads.every((t) => isJunk(t.mailbox_ids));
+  }
+
+  private async act(kind: Action) {
     const threads = this.targetThreads();
     if (!threads.length) return;
     try {
@@ -265,12 +282,18 @@ export class MailView {
       }
       if (kind === 'read') await api.setFlags(ids, true, null);
       if (kind === 'unread') await api.setFlags(ids, false, null);
-      if (kind === 'spam') {
-        const junk = store.state.mailboxes.find((m) => m.account_id === threads[0].account_id && m.role === 'junk');
-        if (!junk) return toast('No Junk folder for this account', { kind: 'error' });
-        await api.move(ids, junk.id);
+      let note = '';
+      if (kind === 'spam' || kind === 'not_spam' || kind === 'block') {
+        const r = kind === 'not_spam' ? await api.markNotSpam(ids) : await api.markSpam(ids);
+        // Spam from the Spam folder: remember the sender, then delete.
+        if (kind === 'block') await api.trash(ids);
+        const who = r.senders.length === 1 ? r.senders[0] : `${r.senders.length} senders`;
+        const removed = 'invites_removed' in r && r.invites_removed ? r.invites_removed : 0;
+        const more = (r.also_moved ? ` ${r.also_moved} more message${r.also_moved === 1 ? '' : 's'} moved.` : '')
+          + (removed ? ` Removed ${removed === 1 ? 'its invitation' : `${removed} invitations`} from your calendar; the organizer isn’t told.` : '');
+        if (r.senders.length) note = kind !== 'not_spam' ? ` Future mail from ${who} goes to Spam.${more}` : ` Mail from ${who} will stay out of Spam.${more}`;
       }
-      if (kind === 'archive' || kind === 'trash' || kind === 'spam') {
+      if (kind === 'archive' || kind === 'trash' || kind === 'spam' || kind === 'not_spam' || kind === 'block') {
         const removed = new Set(threads.map((t) => t.thread_id));
         // The store already reflects the change; re-read the window and keep the
         // cursor at the same position, which now holds the next thread.
@@ -283,7 +306,8 @@ export class MailView {
         const next = this.list.at(this.cursor);
         if (next && store.state.selectedThread && removed.has(store.state.selectedThread)) void this.showThread(next.thread_id);
         else if (!next) this.renderEmptyReader();
-        toast(kind === 'archive' ? 'Archived' : kind === 'spam' ? 'Marked as spam' : 'Moved to Trash');
+        const done = { archive: 'Archived', trash: 'Moved to Trash', spam: 'Marked as spam.', not_spam: 'Moved to Inbox.', block: 'Deleted.' }[kind];
+        toast(done + note, note ? { ms: 6000 } : {});
       } else {
         void this.refresh();
       }
@@ -340,8 +364,11 @@ export class MailView {
     const mine = mineFor(thread);
     const people = new Map<string, Address>();
     for (const m of thread.messages) for (const a of [m.from, ...m.to, ...m.cc]) if (a && !mine(a)) people.set(a.email.toLowerCase(), a);
-    const convo = new Conversation(thread, (mode, id) => void this.reply(mode, id));
+    const spam = isJunk(thread.messages.flatMap((m) => m.mailbox_ids));
+    const convo = new Conversation(thread, (mode, id) => void this.reply(mode, id), { spam });
     this.replyBox = new ReplyBox(thread);
+    const unsub = [...thread.messages].reverse().find((m) => m.unsubscribe);
+    const blocked = thread.messages.find((m) => m.sender_verdict === 'spam' && m.from);
     replace(
       this.reader,
       h('header.reader-head',
@@ -349,12 +376,28 @@ export class MailView {
           h('h2.reader-subject', thread.subject || '(no subject)'),
           h('div.muted.small', [...[...people.values()].map(shortName), 'you'].join(', '))),
         h('div.reader-actions',
+          unsub && h('button.unsubscribe', { title: 'Ask the sender to stop sending you this mail', on: { click: () => void this.unsubscribe(unsub, spam) } }, 'Unsubscribe'),
+          spam
+            ? [
+                h('button.icon-btn', { title: 'Not spam (!)', 'aria-label': 'Not spam', on: { click: () => void this.act('not_spam') } }, icon('inbox')),
+                h('button.icon-btn', { title: BLOCK_TIP, 'aria-label': 'Spam', on: { click: () => void this.act('block') } }, icon('junk')),
+              ]
+            : h('button.icon-btn', { title: 'Mark as spam (!)', 'aria-label': 'Mark as spam', on: { click: () => void this.act('spam') } }, icon('junk')),
           h('button.icon-btn', { title: 'Archive (e)', 'aria-label': 'Archive', on: { click: () => void this.act('archive') } }, icon('archive')),
           h('button.icon-btn', { title: 'Delete (#)', 'aria-label': 'Delete', on: { click: () => void this.act('trash') } }, icon('trash')),
           h('button.icon-btn', { title: 'Mark unread (u)', 'aria-label': 'Mark unread', on: { click: () => void this.act('unread') } }, icon('mail')),
           h('button.icon-btn', { title: 'Move to… (v)', 'aria-label': 'Move', on: { click: (e: MouseEvent) => this.moveMenu(e.currentTarget as HTMLElement) } }, icon('folder')),
           h('button.icon-btn', { title: 'More', 'aria-label': 'More actions', on: { click: (e: MouseEvent) => this.moreMenu(e.currentTarget as HTMLElement, thread) } }, icon('more'))),
         labels.length > 0 && h('div.labels', labels.map((m) => h('span.label-chip', m.name)))),
+      spam &&
+        h('div.banner.warn.spam-banner',
+          icon('junk', 16),
+          h('span.grow', blocked
+            ? `You marked ${blocked.from!.email} as spam, so their mail always comes here. Links ask before opening and invitations can’t be answered.`
+            : 'This conversation is in Spam. Links ask before opening and invitations can’t be answered.'),
+          h('div.banner-actions',
+            h('button', { title: 'Move to Inbox and keep this sender out of Spam (!)', on: { click: () => void this.act('not_spam') } }, 'Not spam'),
+            h('button', { title: BLOCK_TIP, on: { click: () => void this.act('block') } }, 'Spam'))),
       convo.root,
       this.replyBox.root,
     );
@@ -368,6 +411,28 @@ export class MailView {
     try {
       const d = await api.composeReply(target, mode);
       openComposer(d);
+    } catch (e) {
+      errorToast(e);
+    }
+  }
+
+  private async unsubscribe(m: MessageDetail, inSpam: boolean) {
+    const u = m.unsubscribe!;
+    const who = m.from?.name || m.from?.email || 'this sender';
+    const how = u.one_click ? `Satchel will tell ${who} to stop sending you this mail.`
+      : u.mailto ? `Satchel will send ${who} an unsubscribe email from your account.`
+      : `This opens ${who}'s unsubscribe page in your browser.`;
+    const ok = inSpam
+      ? await confirmDialog('Unsubscribe from mail in Spam?', `Unsubscribing from real spam tells the sender your address works. Only do this for senders you recognize; otherwise leave it in Spam. ${how}`, 'Unsubscribe', true)
+      : await confirmDialog(`Unsubscribe from ${who}?`, how, 'Unsubscribe');
+    if (!ok) return;
+    try {
+      const r = await api.unsubscribe(m.id);
+      if (r.via === 'browser' && r.url) openExternal(r.url);
+      const msg = r.via === 'browser' ? 'Finish unsubscribing in your browser.' : r.via === 'email' ? `Unsubscribe request sent to ${r.to}.` : `Unsubscribed from ${who}.`;
+      const ids = this.openThread?.thread_id === m.thread_id ? this.openThread.messages.map((x) => x.id) : [m.id];
+      const archive = () => void api.archive(ids).then(() => { toast('Archived'); void this.refresh(); }, errorToast);
+      toast(msg, inSpam ? {} : { kind: 'success', action: { label: 'Archive', run: archive } });
     } catch (e) {
       errorToast(e);
     }
@@ -396,7 +461,12 @@ export class MailView {
     const lastMsg = thread.messages[thread.messages.length - 1];
     popupMenu(anchor, [
       { label: 'Mark as unread', icon: 'mail', hint: 'u', run: () => void this.act('unread') },
-      { label: 'Mark as spam', icon: 'junk', hint: '!', run: () => void this.act('spam') },
+      ...(this.inSpam()
+        ? [
+            { label: 'Not spam', icon: 'inbox', hint: '!', run: () => void this.act('not_spam') },
+            { label: 'Spam: delete and block sender', icon: 'junk', run: () => void this.act('block') },
+          ]
+        : [{ label: 'Mark as spam', icon: 'junk', hint: '!', run: () => void this.act('spam') }]),
       { label: 'Forward', icon: 'forward', hint: 'f', run: () => void this.reply('forward') },
       '-',
       { label: 'View source', icon: 'draft', run: () => void viewSource(lastMsg.id) },
@@ -436,7 +506,7 @@ export class MailView {
     bind('Backspace', 'Delete', () => void this.act('trash'), s);
     bind('u', 'Mark unread', () => void this.act('unread'), s);
     bind('shift+i', 'Mark read', () => void this.act('read'), s);
-    bind('!', 'Mark as spam', () => void this.act('spam'), s);
+    bind('!', 'Mark as spam / Not spam', () => void this.act(this.inSpam() ? 'not_spam' : 'spam'), s);
     bind('s', 'Flag / unflag', () => { const t = this.targetThreads()[0]; if (t) void this.flagThread(t); }, s);
     bind('r', 'Reply', () => this.replyBox?.focus('reply'), s);
     bind('a', 'Reply all', () => this.replyBox?.focus('reply_all'), s);

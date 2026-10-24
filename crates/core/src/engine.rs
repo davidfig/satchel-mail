@@ -66,6 +66,7 @@ pub struct Engine {
     pub(crate) runtimes: Mutex<HashMap<String, AccountRuntime>>,
     pub(crate) settings: RwLock<Settings>,
     pub(crate) mirror_wake: Arc<Notify>,
+    pub(crate) correspondents: Mutex<Option<(std::time::Instant, Arc<crate::spam::Correspondents>)>>,
     pub mode: Mode,
     pub data_dir: PathBuf,
     workers: Mutex<Vec<JoinHandle<()>>>,
@@ -110,6 +111,7 @@ impl Engine {
             runtimes: Mutex::new(HashMap::new()),
             settings: RwLock::new(settings),
             mirror_wake: Arc::new(Notify::new()),
+            correspondents: Mutex::new(None),
             mode: opts.mode,
             data_dir: opts.data_dir,
             workers: Mutex::new(vec![]),
@@ -193,7 +195,7 @@ impl Engine {
 
     pub(crate) fn ctx(&self, account_id: &str) -> Result<SyncCtx> {
         let account = self.store.get_account(account_id)?.ok_or_else(|| crate::error::not_found("account"))?;
-        Ok(SyncCtx { account, store: self.store.clone(), blobs: self.blobs.clone(), settings: self.settings(), events: self.events.clone() })
+        Ok(SyncCtx { account, store: self.store.clone(), blobs: self.blobs.clone(), settings: self.settings(), events: self.events.clone(), arrivals: Default::default() })
     }
 
     pub(crate) fn start_account(self: &Arc<Self>, acc: &Account) {
@@ -255,6 +257,10 @@ impl Engine {
             if let Some(mail) = &providers.mail {
                 result = mail.sync(&ctx).await;
                 if result.is_ok() {
+                    // The user's sender rules outrank the server's spam filter.
+                    if let Err(e) = engine.enforce_sender_rules(&account_id) {
+                        warn!(account = %ctx.account.email, "sender rules: {e:#}");
+                    }
                     engine.fetch_bodies(&ctx, mail.as_ref(), if first { 300 } else { 100 }).await;
                 }
             }
@@ -264,6 +270,8 @@ impl Engine {
                     if result.is_ok() {
                         result = Err(e);
                     }
+                } else if let Err(e) = engine.remove_blocked_invites(&account_id) {
+                    warn!(account = %ctx.account.email, "spam invites: {e:#}");
                 }
                 ctx.calendar_changed();
             }
@@ -452,30 +460,51 @@ impl Engine {
         Ok(n)
     }
 
-    async fn ingest_dropped_proposals(self: &Arc<Self>) {
+    /// Turn files in the AI folder's `proposals/inbox/` into proposals.
+    pub async fn ingest_dropped_proposals(self: &Arc<Self>) {
         let settings = self.settings();
         if !settings.mirror.enabled {
             return;
         }
-        for path in crate::mirror::pending_proposal_files(&settings.mirror) {
-            let result = match std::fs::read_to_string(&path)
-                .map_err(anyhow::Error::from)
-                .and_then(|s| serde_json::from_str::<crate::mirror::DroppedProposal>(&s).map_err(anyhow::Error::from))
-            {
-                Ok(d) => match self.authenticate_agent(&d.agent_token) {
-                    Some(agent) => {
-                        let cmd = Command::CreateProposal { action: d.action, rationale: d.rationale, source_thread_ids: d.source_thread_ids };
-                        match self.handle(&Caller::Agent(agent), cmd).await {
-                            Ok(v) => serde_json::json!({ "ok": v }),
-                            Err(e) => serde_json::json!({ "error": e }),
-                        }
-                    }
-                    None => serde_json::json!({ "error": "invalid or revoked agent_token" }),
-                },
-                Err(e) => serde_json::json!({ "error": format!("unreadable proposal file: {e}") }),
+        for path in crate::proposal_file::pending(&settings.mirror) {
+            let created = match crate::proposal_file::read(&self.store, &path) {
+                Ok(d) => self.ingest_one(&settings.mirror, d).await,
+                Err(e) => Err(format!("{e:#}")),
             };
-            crate::mirror::finish_proposal_file(&settings.mirror, &path, &result);
+            let outcome = match &created {
+                Ok(p) => crate::proposal_file::Outcome::Created(p),
+                Err(e) => crate::proposal_file::Outcome::Error(e.clone()),
+            };
+            crate::proposal_file::finish(&settings.mirror, &path, outcome);
         }
+    }
+
+    async fn ingest_one(self: &Arc<Self>, mirror: &MirrorSettings, d: crate::proposal_file::DroppedProposal) -> std::result::Result<Proposal, String> {
+        let agent = match &d.agent_token {
+            Some(t) => self.authenticate_agent(t).ok_or("invalid or revoked agent_token")?,
+            None => self.folder_agent(mirror).map_err(|e| format!("{e:#}"))?,
+        };
+        let rationale = match d.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+            Some(label) => format!("[{label}] {}", d.rationale),
+            None => d.rationale,
+        };
+        let cmd = Command::CreateProposal { action: d.action, rationale, source_thread_ids: d.source_thread_ids };
+        let v = self.handle(&Caller::Agent(agent), cmd).await.map_err(|e| e.message)?;
+        serde_json::from_value(v).map_err(|e| e.to_string())
+    }
+
+    /// The built-in agent behind token-less proposal files. What it can see
+    /// follows the AI folder settings; its rate limit is the default policy's.
+    fn folder_agent(&self, mirror: &MirrorSettings) -> Result<Agent> {
+        if !mirror.accept_proposals {
+            anyhow::bail!("proposals from the AI folder are turned off (Settings → AI folder); include an agent_token to use a connected agent");
+        }
+        let mut a = self.store.builtin_agent("ai-folder", "AI folder", &AgentPolicy::default())?;
+        a.policy.account_ids = mirror.account_ids.clone();
+        a.policy.since_days = mirror.since_days;
+        a.policy.allow_attachments = mirror.include_attachments;
+        let _ = self.store.touch_agent(&a.id);
+        Ok(a)
     }
 
     // -----------------------------------------------------------------------

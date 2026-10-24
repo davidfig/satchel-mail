@@ -94,6 +94,29 @@ export interface Attachment {
   size: number;
   inline: boolean;
   content_id: string | null;
+  /** Can run code or imitate a sign-in page. */
+  risky?: boolean;
+}
+
+export type WarningKind = 'auth_failed' | 'impersonation' | 'reply_to' | 'deceptive_link' | 'risky_attachment' | 'unknown_inviter';
+
+export interface MessageWarning {
+  kind: WarningKind;
+  message: string;
+}
+
+export interface Unsubscribe {
+  url: string | null;
+  mailto: string | null;
+  one_click: boolean;
+}
+
+export type SenderVerdict = 'spam' | 'not_spam';
+
+export interface SenderRule {
+  email: string;
+  verdict: SenderVerdict;
+  created_at: ISODate;
 }
 
 export interface MessageDetail {
@@ -120,6 +143,9 @@ export interface MessageDetail {
   attachments: Attachment[];
   body_pending: boolean;
   invite?: Invite | null;
+  warnings?: MessageWarning[];
+  unsubscribe?: Unsubscribe | null;
+  sender_verdict?: SenderVerdict | null;
 }
 
 export interface Invite {
@@ -268,6 +294,8 @@ export interface Agent {
   last_used: ISODate | null;
   policy: AgentPolicy;
   revoked: boolean;
+  /** Built into Satchel (the AI folder), not created by the user. */
+  builtin: boolean;
 }
 
 export interface MirrorSettings {
@@ -277,6 +305,7 @@ export interface MirrorSettings {
   since_days: number | null;
   include_eml: boolean;
   include_attachments: boolean;
+  accept_proposals: boolean;
 }
 
 export interface Settings {
@@ -286,6 +315,7 @@ export interface Settings {
   theme: 'system' | 'light' | 'dark' | string;
   initial_sync_days: number;
   poll_interval_secs: number;
+  notify_new_mail: boolean;
 }
 
 export interface AuditEntry {
@@ -316,7 +346,16 @@ export type CoreEvent =
   | { event: 'outbox_changed' }
   | { event: 'op_failed'; account_id: Id; description: string; error: string }
   | { event: 'data_changed' }
-  | { event: 'notice'; level: string; message: string };
+  | { event: 'notice'; level: string; message: string }
+  | { event: 'new_mail'; account_id: Id; messages: NewMail[] };
+
+export interface NewMail {
+  message_id: Id;
+  thread_id: Id;
+  from: Address | null;
+  subject: string;
+  snippet: string;
+}
 
 export interface ApiError {
   code: 'not_found' | 'invalid_input' | 'forbidden' | 'auth' | 'network' | 'conflict' | 'rate_limited' | 'internal';

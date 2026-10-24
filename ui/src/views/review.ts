@@ -47,7 +47,7 @@ export class ReviewView {
           h(`button.tab${this.tab === 'history' ? '.active' : ''}`, { role: 'tab', on: { click: () => { this.tab = 'history'; void this.render(); } } }, 'History'),
           h('span.spacer'),
           this.tab === 'pending' && lowRisk.length > 1 &&
-            h('button', { on: { click: () => void this.approveAll(lowRisk) } }, icon('check', 16), `Approve ${lowRisk.length} low-risk`))),
+            h('button', { title: 'Approve every waiting proposal marked low risk', on: { click: () => void this.approveAll(lowRisk) } }, icon('check', 16), `Approve ${lowRisk.length} low-risk`))),
       shown.length
         ? h('div.proposal-list', cards)
         : h('div.empty-state', icon('sparkle', 36), h('p', this.tab === 'pending' ? 'Nothing waiting for review.' : 'No decisions yet.'),
@@ -91,8 +91,8 @@ export class ReviewView {
       pending &&
         h('footer.proposal-actions',
           h('button.primary', { on: { click: () => void this.approve(p, editedDraft) } }, icon('check', 16), p.action.type === 'draft' ? 'Approve & open draft' : 'Approve'),
-          h('button', { on: { click: () => void this.reject(p) } }, 'Reject'),
-          p.source_thread_ids.length > 0 && h('button.link', { on: { click: () => this.openSource(p.source_thread_ids[0]) } }, 'View conversation')),
+          h('button', { title: 'Decline this proposal; nothing changes', on: { click: () => void this.reject(p) } }, 'Reject'),
+          p.source_thread_ids.length > 0 && h('button.link', { title: 'Open the conversation this proposal is about', on: { click: () => this.openSource(p.source_thread_ids[0]) } }, 'View conversation')),
     );
   }
 
