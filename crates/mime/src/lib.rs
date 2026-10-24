@@ -2,7 +2,9 @@
 //! extract attachments, build outgoing messages, and quote/strip replies.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -71,10 +73,13 @@ pub fn parse(raw: &[u8]) -> Option<Parsed> {
         .unwrap_or_default();
     let html = msg.body_html(0).map(|h| h.into_owned());
     // mail-parser synthesizes an HTML body from text and vice versa; only keep
-    // HTML when the message actually has an HTML part.
+    // HTML when the message actually has an HTML part, and convert it
+    // ourselves when there is no text part (the synthesized text drops
+    // paragraph breaks and link targets).
     let has_real_html = msg.html_bodies().any(|p| p.is_text_html());
+    let has_real_text = msg.text_bodies().any(|p| p.is_text() && !p.is_text_html());
     let html = if has_real_html { html } else { None };
-    let text = if text.trim().is_empty() {
+    let text = if !has_real_text || text.trim().is_empty() {
         html.as_deref().map(html_to_text).unwrap_or_default()
     } else {
         text
@@ -284,12 +289,91 @@ fn strip_css_urls(s: &str) -> String {
     out
 }
 
+/// Readable text for HTML-only mail: paragraphs kept, links written inline as
+/// `text (url)`, no markdown markers and no hard wrapping (the reader reflows).
 pub fn html_to_text(html: &str) -> String {
-    html2text::config::plain()
-        .string_from_read(html.as_bytes(), 100)
-        .unwrap_or_default()
-        .trim()
-        .to_string()
+    let urls = Rc::new(RefCell::new(Vec::new()));
+    let text = html2text::config::with_decorator(MailTextDecorator { links: vec![], urls: urls.clone() })
+        .no_table_borders()
+        .no_link_wrapping()
+        .allow_width_overflow()
+        .string_from_read(html.as_bytes(), 10_000)
+        .unwrap_or_default();
+    let mut text = text.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
+    // A link whose text is its own address doesn't need it twice.
+    for url in urls.borrow().iter() {
+        text = text.replace(&format!("{url} ({url})"), url);
+    }
+    text.trim().to_string()
+}
+
+#[derive(Clone)]
+struct MailTextDecorator {
+    /// What to write at the end of each open link.
+    links: Vec<String>,
+    urls: Rc<RefCell<Vec<String>>>,
+}
+
+impl html2text::render::TextDecorator for MailTextDecorator {
+    type Annotation = ();
+
+    fn decorate_link_start(&mut self, url: &str) -> (String, ()) {
+        let target = url.strip_prefix("mailto:").unwrap_or(url);
+        let shown = url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:");
+        self.links.push(if shown { format!(" ({target})") } else { String::new() });
+        if shown {
+            self.urls.borrow_mut().push(target.to_string());
+        }
+        (String::new(), ())
+    }
+    fn decorate_link_end(&mut self) -> String {
+        self.links.pop().unwrap_or_default()
+    }
+    fn decorate_em_start(&self) -> (String, ()) {
+        (String::new(), ())
+    }
+    fn decorate_em_end(&self) -> String {
+        String::new()
+    }
+    fn decorate_strong_start(&self) -> (String, ()) {
+        (String::new(), ())
+    }
+    fn decorate_strong_end(&self) -> String {
+        String::new()
+    }
+    fn decorate_strikeout_start(&self) -> (String, ()) {
+        (String::new(), ())
+    }
+    fn decorate_strikeout_end(&self) -> String {
+        String::new()
+    }
+    fn decorate_code_start(&self) -> (String, ()) {
+        (String::new(), ())
+    }
+    fn decorate_code_end(&self) -> String {
+        String::new()
+    }
+    fn decorate_preformat_first(&self) {}
+    fn decorate_preformat_cont(&self) {}
+    // Images are left out so an image-only message still has no text.
+    fn decorate_image(&mut self, _src: &str, _title: &str) -> (String, ()) {
+        (String::new(), ())
+    }
+    fn header_prefix(&self, _level: usize) -> String {
+        String::new()
+    }
+    fn quote_prefix(&self) -> String {
+        "> ".into()
+    }
+    fn unordered_item_prefix(&self) -> String {
+        "• ".into()
+    }
+    fn ordered_item_prefix(&self, i: i64) -> String {
+        format!("{i}. ")
+    }
+    fn make_subblock_decorator(&self) -> Self {
+        Self { links: vec![], urls: self.urls.clone() }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -531,6 +615,24 @@ mod tests {
     }
 
     #[test]
+    fn html_only_mail_keeps_paragraphs_and_links() {
+        let raw = b"From: Carol <carol@x.test>\r\nSubject: Notes\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<div>Hi Alice,</div><div><br></div><div>Here is <b>bold</b> and <a href=\"https://x.test/notes\">the notes</a>.</div><div><br></div><div>Thanks,<br>Carol</div>";
+        let p = parse(raw).unwrap();
+        assert!(p.html.is_some());
+        assert_eq!(p.text, "Hi Alice,\n\nHere is bold and the notes (https://x.test/notes).\n\nThanks,\nCarol");
+    }
+
+    #[test]
+    fn html_to_text_links_and_wrapping() {
+        let long = "word ".repeat(40);
+        let t = html_to_text(&format!(
+            r##"<p>{long}</p><p><a href="https://x.test/a">https://x.test/a</a>, <a href="mailto:a@x.test">a@x.test</a>, <a href="mailto:a@x.test">mail me</a>, <a href="#top">top</a></p><p><img src="cid:logo" alt="Logo"></p>"##
+        ));
+        assert_eq!(t, format!("{}\n\nhttps://x.test/a, a@x.test, mail me (a@x.test), top", long.trim_end()));
+        assert_eq!(html_to_text(r#"<img src="https://x.test/banner.png" alt="Banner">"#), "");
+    }
+
+    #[test]
     fn sanitize_blocks_scripts_and_remote() {
         let s = sanitize_html(
             r#"<p onclick="x()">hi</p><script>alert(1)</script><img src="https://t.example/p.gif"><img src="cid:abc"><div style="background:url(https://x/y.png)">z</div>"#,
@@ -580,3 +682,4 @@ mod tests {
         assert_eq!(reply_subject("Re: hello"), "Re: hello");
     }
 }
+
