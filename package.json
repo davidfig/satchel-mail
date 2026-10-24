@@ -7,6 +7,8 @@
     "web": "scripts/run web",
     "app:test": "scripts/run --test",
     "web:test": "scripts/run web --test",
+    "dev": "scripts/run dev --test",
+    "dev:real": "scripts/run dev",
     "servers": "scripts/dev-servers start",
     "servers:reset": "scripts/dev-servers reset",
     "servers:stop": "scripts/dev-servers stop"

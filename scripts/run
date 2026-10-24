@@ -3,8 +3,9 @@
 #
 #   scripts/run                  desktop app (Tauri dev, UI hot reload) on your real data
 #   scripts/run web              web UI + API on http://127.0.0.1:7781
-#   scripts/run [web] --test     use the local Stalwart test servers and .dev/test-data
-#   scripts/run [web] --data DIR use DIR as the data directory (keychain secrets)
+#   scripts/run dev              web UI with hot reload on http://localhost:5173
+#   scripts/run [mode] --test    use the local Stalwart test servers and .dev/test-data
+#   scripts/run [mode] --data DIR use DIR as the data directory (keychain secrets)
 #
 # Real data lives in the default data directory with secrets in the OS
 # keychain. OAuth client ids for Gmail / Microsoft (see docs/OAUTH.md) are read
@@ -24,10 +25,10 @@ test=0
 data=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    desktop|web) mode="$1" ;;
+    desktop|web|dev) mode="$1" ;;
     --test) test=1 ;;
     --data) data="${2:?--data needs a directory}"; shift ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1 (see scripts/run --help)" >&2; exit 1 ;;
   esac
   shift
@@ -57,6 +58,22 @@ case "$mode" in
   web)
     (cd ui && npm run build)
     exec target/debug/satchel serve --ui ui/dist
+    ;;
+  dev)
+    # Vite serves the UI and proxies /api to `satchel serve`, sending the
+    # shared session token as a bearer header.
+    export SATCHEL_SESSION_TOKEN="${SATCHEL_SESSION_TOKEN:-$(openssl rand -hex 16)}"
+    target/debug/satchel serve &
+    server=$!
+    trap 'kill $server 2>/dev/null' EXIT INT TERM
+    # Opening the store takes a moment; don't let the page load before the API is up.
+    for _ in $(seq 100); do
+      curl -s -o /dev/null http://127.0.0.1:7781/ && break
+      kill -0 $server 2>/dev/null || exit 1
+      sleep 0.2
+    done
+    cd ui
+    npm run dev
     ;;
   desktop)
     # Tauri runs the CLI as a sidecar named for the host triple.

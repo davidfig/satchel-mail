@@ -41,6 +41,7 @@ Requirements: Rust 1.90+, Node 20+, Python 3 (for fixtures).
 commands are pnpm scripts in the root `package.json`:
 
 ```bash
+pnpm dev              # web UI with hot reload on http://localhost:5173, test data
 pnpm app              # desktop app on your real data (OAuth client ids from .env)
 pnpm web              # web UI on http://127.0.0.1:7781, real data
 pnpm web:test         # web UI against the local test servers and .dev/test-data
