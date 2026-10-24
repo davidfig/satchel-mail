@@ -10,6 +10,24 @@ const MIN_RECENT = 3;
 /** Folding fewer messages than this isn't worth a click. */
 const MIN_FOLD = 2;
 
+/**
+ * Splits trailing punctuation off a URL found in text, so "(https://x.test/a)." links
+ * to https://x.test/a. Brackets the URL itself opened stay (Wikipedia-style links).
+ */
+export function trimUrl(url: string): [string, string] {
+  const count = (s: string, c: string) => s.split(c).length - 1;
+  let end = url.length;
+  while (end > 0) {
+    const c = url[end - 1];
+    const body = url.slice(0, end);
+    if ('.,;:!?\'"'.includes(c)) end--;
+    else if (c === ')' && count(body, '(') < count(body, ')')) end--;
+    else if (c === ']' && count(body, '[') < count(body, ']')) end--;
+    else break;
+  }
+  return [url.slice(0, end), url.slice(end)];
+}
+
 export const isAttribution = (l: string) => /^On .+wrote:\s*$/.test(l.trim()) || /^-{2,} ?(Original|Forwarded) [Mm]essage/.test(l.trim());
 
 export interface FoldPlan {

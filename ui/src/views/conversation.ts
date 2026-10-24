@@ -7,7 +7,7 @@ import { errorToast, modal, popupMenu, toast } from '../lib/ui';
 import { store } from '../state';
 import { transport } from '../transport';
 import type { Address, Draft, MessageDetail, PartStat, Proposal, ReplyMode, Thread } from '../types';
-import { isAttribution, looksDesigned, planFold, splitQuote, stripHtmlQuotes } from '../lib/thread';
+import { isAttribution, looksDesigned, planFold, splitQuote, stripHtmlQuotes, trimUrl } from '../lib/thread';
 import { openComposer, sendWithUndo } from './composer';
 
 /** Consecutive messages from one sender within this window share a name line. */
@@ -442,8 +442,11 @@ function inviteCard(m: MessageDetail): HTMLElement {
 function linkified(line: string): HTMLElement {
   const div = h(line.startsWith('>') ? 'div.quote' : 'div');
   for (const p of line.split(/(https?:\/\/[^\s<>"]+)/g)) {
-    if (/^https?:\/\//.test(p)) div.appendChild(h('a', { href: p, rel: 'noopener noreferrer', target: '_blank', on: { click: (e: MouseEvent) => { e.preventDefault(); openExternal(p); } } }, p));
-    else if (p) div.appendChild(document.createTextNode(p));
+    if (/^https?:\/\//.test(p)) {
+      const [url, rest] = trimUrl(p);
+      div.appendChild(h('a', { href: url, rel: 'noopener noreferrer', target: '_blank', on: { click: (e: MouseEvent) => { e.preventDefault(); openExternal(url); } } }, url));
+      if (rest) div.appendChild(document.createTextNode(rest));
+    } else if (p) div.appendChild(document.createTextNode(p));
   }
   if (!line) div.appendChild(h('br'));
   return div;

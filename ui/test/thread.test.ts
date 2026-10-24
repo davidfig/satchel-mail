@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { DOMParser } from 'linkedom';
-import { looksDesigned, planFold, stripHtmlQuotes } from '../src/lib/thread.ts';
+import { looksDesigned, planFold, stripHtmlQuotes, trimUrl } from '../src/lib/thread.ts';
 
 globalThis.DOMParser = DOMParser as unknown as typeof globalThis.DOMParser;
 
@@ -169,5 +169,18 @@ describe('planFold', () => {
     msgs[5].flags.seen = false;
     msgs[5].from.email = me;
     assert.deepEqual(planFold(msgs as never, mine), { firstNew: -1, fold: { start: 1, end: 7 } });
+  });
+});
+
+describe('trimUrl', () => {
+  test('drops trailing punctuation and an unopened closing bracket', () => {
+    assert.deepEqual(trimUrl('https://x.test/notes).'), ['https://x.test/notes', ').']);
+    assert.deepEqual(trimUrl('https://x.test/a,'), ['https://x.test/a', ',']);
+    assert.deepEqual(trimUrl('https://x.test/a]'), ['https://x.test/a', ']']);
+  });
+  test('keeps brackets that belong to the URL', () => {
+    assert.deepEqual(trimUrl('https://en.wikipedia.org/wiki/Satchel_(bag)'), ['https://en.wikipedia.org/wiki/Satchel_(bag)', '']);
+    assert.deepEqual(trimUrl('https://en.wikipedia.org/wiki/Satchel_(bag)).'), ['https://en.wikipedia.org/wiki/Satchel_(bag)', ').']);
+    assert.deepEqual(trimUrl('https://x.test/?q=a'), ['https://x.test/?q=a', '']);
   });
 });
