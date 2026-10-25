@@ -85,6 +85,9 @@ enum AccountsCmd {
         smtp_security: String,
         #[arg(long)]
         caldav_url: Option<String>,
+        /// CardDAV URL for contacts (default: discovered from the CalDAV server).
+        #[arg(long)]
+        carddav_url: Option<String>,
         /// Accept self-signed certificates (local test servers only).
         #[arg(long)]
         insecure: bool,
@@ -103,6 +106,8 @@ enum AccountsCmd {
         session_url: String,
         #[arg(long)]
         caldav_url: Option<String>,
+        #[arg(long)]
+        carddav_url: Option<String>,
         #[arg(long)]
         insecure: bool,
     },
@@ -243,7 +248,7 @@ async fn main() -> Result<()> {
                         println!("{}\t{}\t{:?}\t{:?}\t{}", a.id, a.email, a.kind, a.sync.state, a.sync.error.unwrap_or_default());
                     }
                 }
-                AccountsCmd::AddImap { email, name, username, password, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security, caldav_url, insecure } => {
+                AccountsCmd::AddImap { email, name, username, password, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security, caldav_url, carddav_url, insecure } => {
                     let config = AccountConfig::Imap {
                         email: email.clone(),
                         display_name: name.clone(),
@@ -255,18 +260,20 @@ async fn main() -> Result<()> {
                         smtp_port: *smtp_port,
                         smtp_security: security(smtp_security)?,
                         caldav_url: caldav_url.clone(),
+                        carddav_url: carddav_url.clone(),
                         allow_invalid_certs: *insecure,
                     };
                     let v = user(&engine, Command::AddAccount { config, credential: Credential::Password { password: password.clone() } }).await?;
                     println!("{}", v["id"].as_str().unwrap_or_default());
                 }
-                AccountsCmd::AddJmap { email, name, username, password, session_url, caldav_url, insecure } => {
+                AccountsCmd::AddJmap { email, name, username, password, session_url, caldav_url, carddav_url, insecure } => {
                     let config = AccountConfig::Jmap {
                         email: email.clone(),
                         display_name: name.clone(),
                         username: username.clone().unwrap_or_else(|| email.clone()),
                         session_url: session_url.clone(),
                         caldav_url: caldav_url.clone(),
+                        carddav_url: carddav_url.clone(),
                         allow_invalid_certs: *insecure,
                     };
                     let v = user(&engine, Command::AddAccount { config, credential: Credential::Password { password: password.clone() } }).await?;

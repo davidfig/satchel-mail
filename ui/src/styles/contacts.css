@@ -1,0 +1,24 @@
+/* ------------------------------------------------------------ contacts */
+.contacts-view { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; height: 100%; }
+.contact-list { padding: 4px 0; }
+.contact-row { display: flex; align-items: center; gap: 10px; width: 100%; height: auto; padding: 8px 12px; border: none; border-radius: 0; background: none; text-align: left; border-bottom: 1px solid var(--line); }
+.contact-row:hover { background: var(--hover); }
+.contact-row.active { background: var(--active); box-shadow: inset 3px 0 0 var(--accent); }
+.contact-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.contact-row-main > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-row .who { font-size: 13.5px; color: var(--text); }
+.avatar.big { width: 44px; height: 44px; font-size: 17px; }
+.contact-head { display: flex; align-items: center; gap: 12px; flex: 1 1 240px; min-width: 0; }
+.contact-body { padding: 18px 24px 40px; display: flex; flex-direction: column; gap: 16px; max-width: 640px; }
+.contact-section h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); margin: 0 0 6px; }
+.contact-line { display: flex; align-items: baseline; gap: 8px; font-size: 14px; padding: 2px 0; }
+.contact-line .link { font-size: 14px; }
+.contact-notes { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.contact-rows { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.contact-rows > .row { width: 100%; align-items: center; }
+.contact-rows > .row > input { flex: 1; }
+.contact-rows > .row > select { width: 120px; flex: none; }
+.contact-form .row > .form-field { flex: 1; }
+.merge-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+.merge-item { padding: 4px 2px; }
+.merge-item .avatar { width: 24px; height: 24px; font-size: 11px; }

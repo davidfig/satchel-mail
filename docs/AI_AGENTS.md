@@ -29,6 +29,8 @@ README.md                                  how to read and propose (for the agen
 mail/<account>/INDEX.md, <mailbox>.md      newest threads first
 mail/<account>/threads/<yyyy-mm>/<slug>-<id>/thread.md, meta.json
 calendar/AGENDA.md, calendar/<account>/<calendar>/<uid>.ics
+contacts/CONTACTS.md                       the address book, with contact ids
+contacts/people/<name>-<id>.md             one person; edit or add one to propose a change
 proposals/inbox/                           drop proposal files here
 proposals/processed/                       results (tokens stripped)
 ```
@@ -51,8 +53,13 @@ Monday at 10 works for me — see you then.
 
 Actions: `reply`, `draft`, `archive`, `move`, `labels`, `mark_read`,
 `mark_unread`, `flag`, `unflag`, `create_event`, `update_event`,
-`cancel_event`, `respond_to_invite`. `~/Satchel/README.md` lists each one's
-fields; agents should read it first.
+`cancel_event`, `respond_to_invite`, `save_contact`. `~/Satchel/README.md`
+lists each one's fields; agents should read it first.
+
+Contacts can also be changed by editing a person's file in
+`contacts/people/`, or added by creating one. Satchel turns the edit into a
+`save_contact` proposal with only the fields the agent changed, and moves
+the file to `proposals/processed/` like an inbox file (0029).
 
 Files without a token come from the built-in **AI folder** agent: it sees what
 the folder holds and is limited to 60 proposals an hour. `agent:` is a
@@ -86,13 +93,16 @@ The desktop app shows the absolute path of its bundled `satchel` binary.
 read-only and writes proposals the app picks up immediately.
 
 Read: `whoami`, `list_accounts`, `list_mailboxes`, `search_threads` (free text +
-`from: to: subject: has:attachment is:unread is:flagged before: after: in:`),
+`from: to: with: subject: has:attachment is:unread is:flagged before: after: in:`),
 `get_thread`, `get_message`, `get_attachment`, `list_calendars`, `list_events`,
-`get_event`, `find_free_time`.
+`get_event`, `find_free_time`, `search_contacts`, `get_contact`.
 
 Propose: `propose_reply`, `propose_draft`, `propose_archive`, `propose_move`,
 `propose_labels`, `propose_mark_read`, `propose_flag`, `propose_event`,
-`propose_event_change`, `propose_cancel_event`, `propose_invite_response`.
+`propose_event_change`, `propose_cancel_event`, `propose_invite_response`,
+`propose_contact` (create or change a contact; agents never delete or merge
+contacts, and adding an address to someone or renaming them is flagged as a
+risk in Review).
 
 Follow-up: `get_proposal_status`, `list_my_proposals`.
 
@@ -119,7 +129,7 @@ then send your mail to strangers and Satchel won't stop it.
 ## Safeguards
 
 - **Scope:** the AI folder's settings; for token agents, a per-agent account
-  list, history window, calendar and attachment toggles, and a
+  list, history window, calendar, contacts and attachment toggles, and a
   proposals-per-hour limit.
 - **Warnings:** recipients outside the original conversation, new
   conversations, Bcc, many recipients, forwarded attachments, invitations that

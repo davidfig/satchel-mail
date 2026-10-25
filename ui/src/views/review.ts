@@ -2,22 +2,43 @@
 
 import { api } from '../api';
 import { h, icon, replace } from '../lib/dom';
-import { displayName, formatAddress, fullDate, relative, timeRange } from '../lib/format';
+import { displayName, formatAddress, fullDate, parseAddresses, relative, timeRange } from '../lib/format';
 import { errorToast, modal, toast } from '../lib/ui';
 import { store } from '../state';
-import type { CalEvent, Draft, Proposal, ProposalAction } from '../types';
-import { openComposer } from './composer';
+import type { CalEvent, Contact, Draft, Proposal, ProposalAction } from '../types';
+import { openComposer } from './mail/composer';
 
 const LOW_RISK = new Set(['archive', 'mark_read', 'flag', 'labels']);
 
 export class ReviewView {
   root = h('div.review-view');
   private tab: 'pending' | 'history' = 'pending';
+  /** Your edits to proposed drafts, by proposal, kept across redraws. */
+  private edits = new Map<string, Draft>();
+  /** News arrived while you were typing; redraw when you stop. */
+  private stale = false;
 
   constructor() {
     store.onEvent((e) => {
-      if ((e.event === 'proposals_changed' || e.event === 'data_changed') && store.state.view === 'review') void this.render();
+      if ((e.event === 'proposals_changed' || e.event === 'data_changed') && store.state.view === 'review') {
+        if (this.typing()) this.stale = true;
+        else void this.render();
+      }
     });
+    this.root.addEventListener('focusout', () => {
+      // After the focus has moved on, so typing() sees where it went.
+      setTimeout(() => {
+        if (this.stale && !this.typing()) {
+          this.stale = false;
+          void this.render();
+        }
+      });
+    });
+  }
+
+  private typing(): boolean {
+    const a = document.activeElement;
+    return !!a && this.root.contains(a) && (a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement);
   }
 
   show() {
@@ -41,7 +62,7 @@ export class ReviewView {
       this.root,
       h('header.page-head',
         h('h1', 'Review'),
-        h('p.muted', 'AI agents can only propose. Nothing is sent, moved or scheduled until you approve it here.'),
+        h('p.muted', 'AI agents can only propose. Nothing is sent, moved, scheduled or added to your contacts until you approve it here.'),
         h('div.tabs', { role: 'tablist' },
           h(`button.tab${this.tab === 'pending' ? '.active' : ''}`, { role: 'tab', on: { click: () => { this.tab = 'pending'; void this.render(); } } }, `Waiting (${pending.length})`),
           h(`button.tab${this.tab === 'history' ? '.active' : ''}`, { role: 'tab', on: { click: () => { this.tab = 'history'; void this.render(); } } }, 'History'),
@@ -73,7 +94,10 @@ export class ReviewView {
     const pending = p.status === 'pending' || p.status === 'stale';
     const preview = await this.preview(p.action).catch((e) => h('p.error', `Could not load preview: ${e instanceof Error ? e.message : e}`));
     let editedDraft: Draft | null = null;
-    if (p.action.type === 'draft') editedDraft = structuredClone(p.action.draft);
+    if (p.action.type === 'draft' && pending) {
+      editedDraft = this.edits.get(p.id) ?? structuredClone(p.action.draft);
+      this.edits.set(p.id, editedDraft);
+    }
     const body = p.action.type === 'draft' && pending ? this.draftEditor(editedDraft!) : preview;
     const statusChip = h(`span.status-chip.${p.status}`, p.status === 'applied' ? 'approved' : p.status);
     return h(`article.proposal${p.warnings.length ? '.has-warnings' : ''}`,
@@ -101,7 +125,7 @@ export class ReviewView {
     const subject = h('input', { type: 'text', value: d.subject, 'aria-label': 'Subject' });
     const body = h('textarea.draft-body', { rows: 10, 'aria-label': 'Message' });
     body.value = d.body_text;
-    to.addEventListener('input', () => (d.to = to.value.split(',').map((s) => s.trim()).filter(Boolean).map((e) => { const m = e.match(/^(.*)<([^>]+)>$/); return m ? { name: m[1].trim() || null, email: m[2].trim() } : { email: e }; })));
+    to.addEventListener('input', () => (d.to = parseAddresses(to.value)));
     subject.addEventListener('input', () => (d.subject = subject.value));
     body.addEventListener('input', () => (d.body_text = body.value));
     const acct = store.state.accounts.find((a) => a.id === d.account_id);
@@ -148,6 +172,12 @@ export class ReviewView {
         const ev = await api.getEvent(a.event_id).catch(() => null);
         return h('div', a.type === 'respond_to_invite' && h('p', 'Response: ', h('strong', a.response.replace('_', ' '))), ev ? eventPreview(ev) : h('p.muted', 'Event no longer exists.'));
       }
+      case 'save_contact': {
+        const before = a.contact.id ? await api.getContact(a.contact.id).catch(() => null) : null;
+        return before
+          ? h('div.event-diff', h('div.before', h('span.muted.small', 'Now'), contactPreview(before)), h('div.after', h('span.muted.small', 'Proposed'), contactPreview(a.contact)))
+          : contactPreview(a.contact);
+      }
     }
   }
 
@@ -155,6 +185,7 @@ export class ReviewView {
     try {
       const changed = edited && JSON.stringify(edited) !== JSON.stringify((p.action as { draft?: Draft }).draft);
       const r = await api.approveProposal(p.id, changed ? { type: 'draft', draft: edited! } : null);
+      this.edits.delete(p.id);
       if (r.draft_id) {
         const drafts = await api.listDrafts();
         const d = drafts.find((x) => x.id === r.draft_id);
@@ -195,6 +226,16 @@ export class ReviewView {
   private openSource(threadId: string) {
     store.set({ view: 'mail', selectedThread: threadId });
   }
+}
+
+export function contactPreview(c: Contact): HTMLElement {
+  return h('div.event-card',
+    h('div.event-title', c.name || c.emails[0]?.email || '(no name)'),
+    c.emails.length > 0 && h('div.muted', icon('mail', 14), ` ${c.emails.map((e) => e.email).join(', ')}`),
+    c.phones.length > 0 && h('div.muted', ` ${c.phones.map((p) => p.number).join(', ')}`),
+    (c.title || c.organization) && h('div.muted.small', [c.title, c.organization].filter(Boolean).join(', ')),
+    c.birthday && h('div.muted.small', `Birthday: ${c.birthday}`),
+    c.notes && h('p.small', c.notes));
 }
 
 export function eventPreview(e: CalEvent): HTMLElement {

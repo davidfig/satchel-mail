@@ -29,3 +29,13 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0023 | [Users choose how much agents may do on their own](0023-agent-autonomy-levels.md) | Accepted |
 | 0024 | [Spam: sender rules outrank the server, and the core warns about phishing](0024-spam-handling.md) | Accepted |
 | 0025 | [New-mail notifications in the system notification center](0025-new-mail-notifications.md) | Accepted |
+| 0026 | [Contacts: generated from mail, edited by you, synced with your accounts](0026-contacts.md) | Accepted |
+| 0027 | [A person view built on `with:` search](0027-person-view.md) | Accepted |
+| 0028 | [Folders: managed in Satchel, pushed through the op queue](0028-folders.md) | Accepted |
+| 0029 | [Agents edit contacts by editing their files](0029-editable-contact-files.md) | Accepted |
+| 0030 | [Sends go out at most once](0030-sends-go-out-at-most-once.md) | Accepted |
+| 0031 | [Versioned schema with ordered migrations](0031-schema-migrations.md) | Accepted |
+| 0032 | [Local attackers: the web session and AI-folder symlinks](0032-local-attack-surface.md) | Accepted |
+| 0033 | [Writes to the server change only what the user changed](0033-writes-change-only-what-changed.md) | Accepted |
+| 0034 | [Sender rules act on the server only for mail they're sure about](0034-sender-rules-act-only-on-authentic-mail.md) | Accepted |
+| 0035 | [Code layout: folders by domain, files under ~400 lines](0035-code-layout.md) | Accepted |

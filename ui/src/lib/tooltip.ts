@@ -4,7 +4,7 @@
 // any native `title` that slips through is converted on hover, so the browser's
 // own tooltip never shows.
 
-const SHOW_DELAY = 450;
+const SHOW_DELAY = 800;
 // Moving straight from one tooltip to the next skips the delay.
 const WARM_MS = 300;
 const GAP = 6;
@@ -20,7 +20,8 @@ let lastHidden = 0;
 function textFor(el: HTMLElement): string {
   const own = el.dataset.tooltip;
   if (own !== undefined) return own;
-  if (el.tagName !== 'BUTTON') return '';
+  // Menu items already show their whole label.
+  if (el.tagName !== 'BUTTON' || el.getAttribute('role') === 'menuitem') return '';
   return el.getAttribute('aria-label') ?? el.textContent?.trim().replace(/\s+/g, ' ') ?? '';
 }
 

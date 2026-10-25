@@ -41,6 +41,7 @@ impl OAuthApp {
                 "profile".into(),
                 "https://mail.google.com/".into(),
                 "https://www.googleapis.com/auth/calendar".into(),
+                "https://www.googleapis.com/auth/contacts".into(),
             ],
             extra_auth_params: vec![("access_type".into(), "offline".into()), ("prompt".into(), "consent".into())],
         })
@@ -63,6 +64,7 @@ impl OAuthApp {
                 "https://graph.microsoft.com/Mail.ReadWrite".into(),
                 "https://graph.microsoft.com/Mail.Send".into(),
                 "https://graph.microsoft.com/Calendars.ReadWrite".into(),
+                "https://graph.microsoft.com/Contacts.ReadWrite".into(),
                 "https://graph.microsoft.com/User.Read".into(),
             ],
             extra_auth_params: vec![("prompt".into(), "select_account".into())],

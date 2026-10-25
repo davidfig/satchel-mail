@@ -1,18 +1,19 @@
 //! Satchel Mail core: local store, sync engine, op queue, proposals, search
 //! and the AI mirror. Hosts (desktop app, CLI, future server) wrap [`Engine`].
 
+mod accounts;
+mod agents;
+pub mod ai_folder;
 pub mod blobs;
 pub mod calendar;
-mod commands;
+pub mod contacts;
+mod dispatch;
 pub mod engine;
 pub mod error;
-pub mod mirror;
+pub mod mail;
 mod ops;
-pub mod proposal_file;
 pub mod provider;
-pub mod search;
 pub mod secrets;
-mod spam;
 pub mod store;
 
 pub use engine::{Caller, Engine, EngineOptions, Mode, default_data_dir};

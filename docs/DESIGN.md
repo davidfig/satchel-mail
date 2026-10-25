@@ -291,7 +291,7 @@ M0–M6 are built; M7 (hosted version) is on hold pending a design discussion.
 Each decision, including these, has its own record in [docs/decisions/](decisions/README.md).
 
 - **Test servers:** Stalwart alone (it also serves CalDAV and JMAP), so Radicale isn't used.
-- **Store:** SQLite behind one module (`core/src/store.rs`) that contains all SQL; it is not yet a trait. `BlobStore` and `SecretStore` are traits. Extracting `Store` is the first M7 task.
+- **Store:** SQLite behind one module (`core/src/store/`) that contains all SQL; it is not yet a trait. `BlobStore` and `SecretStore` are traits. Extracting `Store` is the first M7 task.
 - **IMAP identity:** `<uidvalidity>:<uid>:<mailbox>`. After a move we re-identify the copy by Message-ID among UIDs ≥ the target's previous UIDNEXT, so local ids survive moves we perform (async-imap doesn't expose OBJECTID).
 - **Gmail:** labels map to mailboxes plus a virtual "All Mail"; deltas via `history.list`; older mail backfills a page per sync.
 - **Graph calendar:** synced as concrete instances (`calendarView/delta`, −180/+540 days), not series masters; attendees respond via accept/decline endpoints.

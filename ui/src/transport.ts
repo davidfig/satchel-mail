@@ -82,19 +82,14 @@ class HttpTransport implements Transport {
 
   async invoke<T>(cmd: string, args?: unknown): Promise<T> {
     const body = args === undefined ? { id: this.seq++, cmd } : { id: this.seq++, cmd, args };
-    const post = () =>
-      fetch('/api/rpc', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify(body),
-      });
-    let r = await post();
-    if (r.status === 401) {
-      // The server restarted with a new session; pick up the fresh cookie and retry once.
-      await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' });
-      r = await post();
-    }
+    // A 401 means this browser has no session: the user has to open the link
+    // `satchel serve` printed (the server never hands the cookie to just anyone).
+    const r = await fetch('/api/rpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    });
     if (!r.ok) throw new RpcError({ code: r.status === 401 ? 'auth' : 'network', message: await r.text() });
     const res = (await r.json()) as { ok?: T; error?: ApiError };
     if (res.error) throw new RpcError(res.error);
@@ -120,7 +115,6 @@ class HttpTransport implements Transport {
     };
     ws.onclose = () => {
       this.ws = null;
-      void fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' }).catch(() => {});
       setTimeout(() => this.connect(), this.retry);
       this.retry = Math.min(this.retry * 2, 10_000);
     };

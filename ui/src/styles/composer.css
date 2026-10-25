@@ -1,0 +1,21 @@
+/* ------------------------------------------------------------ composer */
+.composer { position: fixed; right: 20px; bottom: 0; width: min(640px, calc(100vw - 40px)); height: min(620px, calc(100vh - 40px)); background: var(--panel); border: 1px solid var(--line-2); border-bottom: none; border-radius: 12px 12px 0 0; box-shadow: var(--shadow); display: flex; flex-direction: column; z-index: 40; }
+.composer-head { display: flex; align-items: center; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--line); }
+.composer-head h2 { margin: 0; font-size: 14px; flex: 1; }
+.composer-fields { border-bottom: 1px solid var(--line); }
+.field-row { display: flex; align-items: center; border-bottom: 1px solid var(--line); padding: 0 12px 0 16px; position: relative; }
+.field-row:last-child { border-bottom: none; }
+.field-row-wrap { display: flex; align-items: center; border-bottom: 1px solid var(--line); padding-right: 12px; }
+.field-row-wrap .field-row { flex: 1; border-bottom: none; }
+.field-label { width: 64px; color: var(--text-3); font-size: 13px; flex: none; }
+.field-input { flex: 1; position: relative; }
+.field-input input, .field-input select { border: none; background: transparent; padding: 9px 0; border-radius: 0; }
+.field-input input:focus-visible, .field-input select:focus-visible { outline: none; }
+.suggest { position: absolute; left: 0; right: 0; top: 100%; z-index: 5; background: var(--panel); border-radius: 8px; box-shadow: var(--shadow); overflow: hidden; }
+.suggest:empty { display: none; }
+.suggest-item { width: 100%; border: none; border-radius: 0; justify-content: flex-start; height: 32px; }
+.composer .body { flex: 1; border: none; border-radius: 0; padding: 14px 16px; resize: none; font-size: 14px; }
+.composer .body:focus-visible { outline: none; }
+.attach-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px; }
+.attach-list:not(:empty) { padding: 8px 16px; border-top: 1px solid var(--line); }
+.composer-foot { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }

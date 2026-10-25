@@ -12,7 +12,10 @@ sent, moved or scheduled until you approve it in the Review queue.
   remote-image blocking, keyboard shortcuts, command palette, dark mode.
 - **Calendar:** day/week/month/agenda, recurring events, invitations with RSVP
   from the email itself, free-time search.
-- **AI surface:** MCP server (`satchel mcp`) with 24 read + propose tools, an
+- **Contacts:** built from the people you write to, editable and mergeable
+  (one person, many addresses), synced with CardDAV, Google Contacts and
+  Outlook contacts.
+- **AI surface:** MCP server (`satchel mcp`) with 27 read + propose tools, an
   AI-readable folder (`~/Satchel/`), per-agent access policies, an audit log.
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture and
@@ -25,7 +28,7 @@ crates/api        command/event schema shared by every host and client
 crates/core       store (SQLite + FTS5), sync engine, op queue, proposals, AI mirror
 crates/mime       MIME parse/build, HTML sanitizing, quoting
 crates/ical       iCalendar parse/serialize, recurrence expansion, iMIP
-crates/providers  IMAP/SMTP, JMAP, Gmail, Google Calendar, Microsoft Graph, CalDAV, OAuth
+crates/providers  IMAP/SMTP, JMAP, Gmail, Google Calendar + Contacts, Microsoft Graph, CalDAV, CardDAV, OAuth
 crates/mcp        MCP server (read + propose tools)
 crates/cli        `satchel` binary: serve (web UI + API), mcp, sync, accounts, agents
 apps/desktop      Tauri desktop app
@@ -43,7 +46,7 @@ commands are pnpm scripts in the root `package.json`:
 ```bash
 pnpm dev              # web UI with hot reload on http://localhost:7780, test data
 pnpm app              # desktop app on your real data (OAuth client ids from .env)
-pnpm web              # web UI on http://127.0.0.1:7781, real data
+pnpm web              # web UI on http://127.0.0.1:7781 (open the link it prints), real data
 pnpm web:test         # web UI against the local test servers and .dev/test-data
 pnpm servers:reset    # restore and reseed the local test servers
 ```
@@ -64,7 +67,7 @@ SATCHEL_PASSWORD=test-pass-alice target/debug/satchel accounts add-imap \
   --email alice@satchel.test --name Alice --username alice \
   --imap-host 127.0.0.1 --imap-port 2993 --smtp-port 2465 \
   --caldav-url http://127.0.0.1:8480/dav/cal --insecure
-target/debug/satchel serve --ui ui/dist      # http://127.0.0.1:7781
+target/debug/satchel serve --ui ui/dist      # open the http://127.0.0.1:7781/?session=… link it prints
 ```
 
 Run the desktop app in development:

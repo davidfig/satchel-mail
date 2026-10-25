@@ -35,9 +35,31 @@ pub fn to_api(e: anyhow::Error) -> ApiError {
 
 /// Whether a provider error is worth retrying.
 pub fn is_transient(e: &anyhow::Error) -> bool {
+    if e.downcast_ref::<crate::provider::MaybeSent>().is_some() {
+        return false;
+    }
     if let Some(a) = e.downcast_ref::<ApiError>() {
         return matches!(a.code, ErrorCode::Network | ErrorCode::RateLimited | ErrorCode::Internal);
     }
+    // Network trouble is worth retrying; a refusal from the server isn't
+    // (IMAP NO/BAD replies, a folder that's gone). Retrying a doomed op holds
+    // back every op queued after it.
+    if e.chain().any(|c| c.is::<std::io::Error>()) {
+        return true;
+    }
+    const PERMANENT: [&str; 11] = [
+        "not found",
+        "invalid",
+        "forbidden",
+        "no such",
+        "permission",
+        "no response",
+        "bad response",
+        "already exists",
+        "doesn't exist",
+        "does not exist",
+        "mailbox remote id",
+    ];
     let s = format!("{e:#}").to_lowercase();
-    !(s.contains("not found") || s.contains("invalid") || s.contains("forbidden") || s.contains("no such") || s.contains("permission"))
+    !PERMANENT.iter().any(|p| s.contains(p))
 }

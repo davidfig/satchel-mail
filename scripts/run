@@ -63,6 +63,7 @@ case "$mode" in
     # Vite serves the UI and proxies /api to `satchel serve`, sending the
     # shared session token as a bearer header.
     export SATCHEL_SESSION_TOKEN="${SATCHEL_SESSION_TOKEN:-$(openssl rand -hex 16)}"
+    export SATCHEL_DEV_ORIGIN=http://localhost:7780
     target/debug/satchel serve &
     server=$!
     trap 'kill $server 2>/dev/null' EXIT INT TERM

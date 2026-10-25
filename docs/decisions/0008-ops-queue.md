@@ -1,6 +1,6 @@
 # 0008. Optimistic local changes with a durable op queue
 
-- **Status:** Accepted
+- **Status:** Accepted (failure handling refined by 0030)
 - **Date:** 2026-10-23
 
 ## Context

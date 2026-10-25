@@ -23,18 +23,19 @@ for the layout and `docs/` for design and decisions.
   whether a proposal applies on arrival or waits in Review (0023). Never add
   an MCP tool or agent command that sends, deletes, or changes settings, and
   never let agents read-write their own policy.
-- **Files first for agents.** The AI folder (`~/Satchel/`, `mirror.rs`) is the
+- **Files first for agents.** The AI folder (`~/Satchel/`, `core/src/ai_folder/`) is the
   main agent interface; MCP is the second door (0022). New agent features
   should work through the folder, not only through MCP.
 - **One command surface.** Everything the UI, CLI and MCP do goes through
   `satchel_api::Command` → `Engine::handle`. Don't add host-specific backdoors.
-- **All SQL lives in `crates/core/src/store.rs`** (and `schema.sql`), so the
-  store can be ported to Postgres for the hosted version.
+- **All SQL lives in `crates/core/src/store/`** (one file per table group,
+  plus `schema.sql`), so the store can be ported to Postgres for the hosted
+  version. Schema changes need a migration (0031).
 - **UI is vanilla TypeScript** (no framework). Only `ui/src/transport.ts` may
   touch Tauri APIs.
 - **Reuse UI components; don't rebuild them.** Shared pieces live in
   `ui/src/lib/` (`dom.ts` helpers and icons, `ui.ts` toasts/modals/menus/
-  shortcuts, `tooltip.ts`) and are styled once in `styles.css` with the
+  shortcuts, `tooltip.ts`) and are styled once in `ui/src/styles/` with the
   tokens. Use them instead of one-off versions, and when a view needs
   something new that another view could use, add it to `lib/` first. Never
   use native browser UI where we have our own: tooltips come from
@@ -63,14 +64,33 @@ at the user's real data directory — set `SATCHEL_DATA_DIR`.
 
 ## Where things are
 
-- `crates/api` — the command/event schema (mirror changes in `ui/src/types.ts`).
-- `crates/core` — `engine.rs` (account loops, indexer, mirror), `commands.rs`
-  (dispatch, policies, proposals), `ops.rs` (outbound queue), `store.rs`,
-  `search.rs` (query parsing → FTS5), `mirror.rs`, `calendar.rs`.
-- `crates/providers` — one file per protocol, implementing the traits in
-  `core/src/provider.rs`.
+Code is grouped in folders by domain, files stay under ~400 lines, and a
+folder's `mod.rs` (or `index.ts`) says what's in it (0035).
+
+- `crates/api` — the command/event schema, one file per domain (`mail.rs`,
+  `calendar.rs`, `command.rs`, …). Mirror changes in the matching file in
+  `ui/src/types/`.
+- `crates/core/src`:
+  - `dispatch/` — `Command` → handler routing, and agent access checks.
+  - `mail/` (read, write, drafts and sending, folders, search, spam),
+    `calendar/` (expansion, event writes, emailed invites), `contacts/`
+    (automatic contacts, merging, server cards, commands), `agents/`
+    (identity, proposals), `accounts.rs`.
+  - `engine/` — the `Engine`, account loops, background workers.
+  - `ops/` — the outbound op queue, one file per kind of op.
+  - `store/` — all SQL, one file per table group; `schema.sql`.
+  - `ai_folder/` — `export/` writes `~/Satchel`, `import/` reads proposal and
+    person files, `safe_fs.rs` refuses symlinks.
+  - `provider/` — the traits providers implement, and `SyncCtx`.
+- `crates/providers/src` — by vendor: `imap/`, `jmap/`, `google/` (Gmail,
+  Calendar, Contacts), `microsoft/` (mail, calendar, contacts), `dav/`
+  (CalDAV, CardDAV); `net.rs`, `oauth.rs`.
+- `crates/ical`, `crates/mime` — parsing and building, split by concern.
 - `crates/mcp` — MCP tools. `crates/cli` — `satchel` binary + HTTP server.
-- `apps/desktop` — Tauri host. `ui/` — front end.
+- `crates/core/tests` — integration tests by area, with fakes in `support/`.
+- `apps/desktop` — Tauri host.
+- `ui/src` — `app/` (shell, palette), `views/mail/`, `views/settings/`,
+  `views/*.ts`, `lib/` (shared components), `types/`, `styles/`.
 
 ## Conventions
 

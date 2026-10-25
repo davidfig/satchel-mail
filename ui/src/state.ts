@@ -6,13 +6,17 @@ import type { Account, CoreEvent, Mailbox, MailboxRole, Settings } from './types
 import { notifyNewMail } from './lib/notify';
 import { toast } from './lib/ui';
 
-export type View = 'mail' | 'calendar' | 'review' | 'settings';
+export type View = 'mail' | 'calendar' | 'contacts' | 'review' | 'settings';
 
 /** What the mail list is showing. */
 export type MailSource =
   | { kind: 'role'; role: MailboxRole; label: string }
   | { kind: 'mailbox'; mailbox_id: string; label: string }
-  | { kind: 'search'; query: string; label: string };
+  | { kind: 'search'; query: string; label: string }
+  | { kind: 'person'; emails: string[]; label: string; filter: PersonFilter; back?: MailSource };
+
+/** Which of a person's conversations to list. */
+export type PersonFilter = 'all' | 'from' | 'files';
 
 interface AppState {
   view: View;
@@ -22,6 +26,8 @@ interface AppState {
   pendingProposals: number;
   source: MailSource;
   selectedThread: string | null;
+  /** Contact for the Contacts view to show next. */
+  selectedContact: string | null;
   myEmails: Set<string>;
 }
 
@@ -36,6 +42,7 @@ class Store {
     pendingProposals: 0,
     source: { kind: 'role', role: 'inbox', label: 'Inbox' },
     selectedThread: null,
+    selectedContact: null,
     myEmails: new Set(),
   };
   private listeners = new Set<Listener>();

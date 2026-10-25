@@ -8,11 +8,18 @@ export function displayName(a: Address | null | undefined): string {
 export function shortName(a: Address | null | undefined): string {
   const n = displayName(a);
   if (n.includes('@')) return n.split('@')[0];
-  return n.split(/\s+/)[0];
+  // "Doe, John" (common in Outlook) is first name John.
+  const [last, first] = n.split(',', 2).map((s) => s.trim());
+  if (first) return first.split(/\s+/)[0];
+  return last.split(/\s+/)[0];
 }
 
 export function formatAddress(a: Address): string {
-  return a.name ? `${a.name} <${a.email}>` : a.email;
+  if (!a.name) return a.email;
+  // Quote names with list or address punctuation ("Doe, John") so they read
+  // back as one address.
+  const name = /[,;<>"@()]/.test(a.name) ? `"${a.name.replace(/["\\]/g, '\\$&')}"` : a.name;
+  return `${name} <${a.email}>`;
 }
 
 export function participantsLabel(list: Address[], me: Set<string>): string {
@@ -62,17 +69,58 @@ export function relative(iso: string | null): string {
   return `${Math.floor(s / 86400)} d ago`;
 }
 
-/** "Name <a@b>, c@d" -> Address[] */
-export function parseAddresses(s: string): Address[] {
-  const out: Address[] = [];
-  for (const part of s.split(/[,;\n]/)) {
-    const p = part.trim();
-    if (!p) continue;
-    const m = p.match(/^(.*)<([^>]+)>$/);
-    if (m) out.push({ name: m[1].trim().replace(/^"|"$/g, '') || null, email: m[2].trim() });
-    else out.push({ email: p });
+/** Split an address list on commas, semicolons and newlines, except inside
+ *  quotes or angle brackets. A piece with no address in it followed by a
+ *  "Name <address>" piece is a display name that was split at a comma
+ *  (Doe, John <john@x>), so they join. */
+function splitAddressList(s: string): string[] {
+  const parts: string[] = [];
+  let cur = '';
+  let quoted = false;
+  let angle = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quoted && c === '\\' && i + 1 < s.length) {
+      cur += c + s[++i];
+      continue;
+    }
+    if (c === '"' && !angle) quoted = !quoted;
+    else if (c === '<' && !quoted) angle = true;
+    else if (c === '>' && !quoted) angle = false;
+    else if (!quoted && !angle && (c === ',' || c === ';' || c === '\n')) {
+      parts.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += c;
   }
+  parts.push(cur);
+  const out: string[] = [];
+  let pending = '';
+  for (const p of parts) {
+    const t = p.trim();
+    if (!t) continue;
+    if (!t.includes('@')) {
+      pending = pending ? `${pending}, ${t}` : t;
+      continue;
+    }
+    if (pending && /^[^<]*<[^>]*@[^>]*>$/.test(t)) out.push(`${pending}, ${t}`);
+    else out.push(...(pending ? [pending, t] : [t]));
+    pending = '';
+  }
+  if (pending) out.push(pending);
   return out;
+}
+
+/** "Name <a@b>, \"Doe, John\" <c@d>, e@f" -> Address[] */
+export function parseAddresses(s: string): Address[] {
+  return splitAddressList(s).map((p) => {
+    const m = p.match(/^(.*)<([^>]+)>$/);
+    if (!m) return { email: p };
+    let name = m[1].trim();
+    if (name.startsWith('"') && name.endsWith('"') && name.length >= 2) name = name.slice(1, -1).replace(/\\(.)/g, '$1');
+    return { name: name || null, email: m[2].trim() };
+  });
 }
 
 export function initials(a: Address | null | undefined): string {

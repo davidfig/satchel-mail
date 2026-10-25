@@ -100,7 +100,8 @@ export interface MenuItem {
   run: () => void;
 }
 
-export function popupMenu(anchor: HTMLElement, items: (MenuItem | '-')[]) {
+/** Open a menu below `anchor`, or at a point (a right-click). */
+export function popupMenu(anchor: HTMLElement | { x: number; y: number }, items: (MenuItem | '-')[]) {
   document.querySelector('.menu')?.remove();
   const menu = h(
     'div.menu',
@@ -127,7 +128,7 @@ export function popupMenu(anchor: HTMLElement, items: (MenuItem | '-')[]) {
     ),
   );
   document.body.appendChild(menu);
-  const r = anchor.getBoundingClientRect();
+  const r = anchor instanceof HTMLElement ? anchor.getBoundingClientRect() : { left: anchor.x, top: anchor.y, bottom: anchor.y };
   const mw = menu.offsetWidth;
   const mh = menu.offsetHeight;
   menu.style.left = `${Math.min(r.left, innerWidth - mw - 8)}px`;
@@ -215,5 +216,21 @@ export function installShortcuts() {
       return;
     }
     run(k);
+  });
+}
+
+/** Our own right-click menu on `el`, built when it opens. Text selections,
+ *  links and form fields inside keep the system menu, so Copy still works. */
+export function contextMenu(el: HTMLElement, build: (e: MouseEvent) => (MenuItem | '-')[] | null) {
+  el.addEventListener('contextmenu', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('a, input, textarea, [contenteditable="true"]') || !(getSelection()?.isCollapsed ?? true)) return;
+    const items = build(e);
+    if (!items?.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // The keyboard's menu key (or Shift+F10) reports no pointer position.
+    const at = e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : el;
+    popupMenu(at, items);
   });
 }
