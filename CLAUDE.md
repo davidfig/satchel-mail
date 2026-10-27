@@ -50,6 +50,7 @@ for the layout and `docs/` for design and decisions.
 ```bash
 scripts/dev-servers reset                 # local Stalwart (IMAP/SMTP/JMAP/CalDAV) + fixtures
 scripts/run [web] [--test]                # build + run the app (also `pnpm app|web|web:test`)
+scripts/dev-signing-cert                  # once: stable dev signing so keychain "Always Allow" sticks
 cargo test --workspace                    # unit + engine integration tests
 cargo clippy --workspace                  # keep at zero warnings
 (cd ui && npx tsc --noEmit && npm test && npm run build)

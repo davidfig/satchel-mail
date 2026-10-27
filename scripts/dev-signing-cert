@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Create a self-signed code-signing certificate, "Satchel Mail Dev", in your
+# login keychain. scripts/run signs dev builds with it, so macOS sees every
+# rebuild as the same app and "Always Allow" on the keychain prompt sticks.
+#
+#   scripts/dev-signing-cert          create it (asks for your login password once, to trust it)
+#   scripts/dev-signing-cert --remove delete it
+#
+# The certificate is only trusted for code signing on this Mac. Release builds
+# use the real Developer ID (see scripts/release.sh).
+
+set -euo pipefail
+
+NAME="Satchel Mail Dev"
+KEYCHAIN="${SATCHEL_SIGN_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
+
+if [[ "${1:-}" == "--remove" ]]; then
+  security delete-identity -c "$NAME" "$KEYCHAIN"
+  echo "Removed \"$NAME\"."
+  exit 0
+fi
+
+if security find-certificate -c "$NAME" "$KEYCHAIN" >/dev/null 2>&1; then
+  echo "\"$NAME\" already exists. Remove it first with --remove to make a new one."
+  exit 0
+fi
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+cat >"$tmp/cert.conf" <<EOF
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = $NAME
+[ext]
+basicConstraints = critical, CA:false
+keyUsage = critical, digitalSignature
+extendedKeyUsage = critical, codeSigning
+EOF
+
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config "$tmp/cert.conf" \
+  -keyout "$tmp/key.pem" -out "$tmp/cert.pem" 2>/dev/null
+# The p12 password only protects the file for the import below.
+openssl pkcs12 -export -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
+  -name "$NAME" -passout pass:satchel -out "$tmp/cert.p12"
+
+# -T lets codesign use the key without a prompt on every build.
+security import "$tmp/cert.p12" -k "$KEYCHAIN" -P satchel -T /usr/bin/codesign >/dev/null
+# Without trust codesign refuses the identity. macOS asks for your password here.
+security add-trusted-cert -p codeSign -k "$KEYCHAIN" "$tmp/cert.pem"
+
+echo "Created \"$NAME\". scripts/run will sign dev builds with it."
+echo "Click Always Allow on the next keychain prompt; it will stick across rebuilds."

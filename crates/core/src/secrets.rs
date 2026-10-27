@@ -18,15 +18,20 @@ pub fn account_key(account_id: &str) -> String {
     format!("account:{account_id}")
 }
 
+/// OS keychain store. Values are cached after the first read: macOS asks the
+/// user before each access by a binary it doesn't trust yet (every unsigned
+/// dev rebuild), so we touch the keychain at most once per item per run.
 #[cfg(feature = "keychain")]
 pub struct KeychainSecretStore {
     service: String,
+    /// Serialized JSON as stored; `None` remembers a missing entry.
+    cache: Mutex<HashMap<String, Option<String>>>,
 }
 
 #[cfg(feature = "keychain")]
 impl KeychainSecretStore {
     pub fn new(service: impl Into<String>) -> Self {
-        Self { service: service.into() }
+        Self { service: service.into(), cache: Mutex::new(HashMap::new()) }
     }
     fn entry(&self, key: &str) -> Result<keyring::Entry> {
         keyring::Entry::new(&self.service, key).map_err(|e| anyhow!("keychain: {e}"))
@@ -36,22 +41,40 @@ impl KeychainSecretStore {
 #[cfg(feature = "keychain")]
 impl SecretStore for KeychainSecretStore {
     fn get(&self, key: &str) -> Result<Option<Credential>> {
-        match self.entry(key)?.get_password() {
-            Ok(s) => Ok(Some(serde_json::from_str(&s)?)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(anyhow!("keychain: {e}")),
-        }
+        let mut cache = self.cache.lock().unwrap();
+        let stored = match cache.get(key) {
+            Some(v) => v.clone(),
+            None => {
+                let v = match self.entry(key)?.get_password() {
+                    Ok(s) => Some(s),
+                    Err(keyring::Error::NoEntry) => None,
+                    Err(e) => return Err(anyhow!("keychain: {e}")),
+                };
+                cache.insert(key.to_string(), v.clone());
+                v
+            }
+        };
+        Ok(stored.map(|s| serde_json::from_str(&s)).transpose()?)
     }
     fn set(&self, key: &str, value: &Credential) -> Result<()> {
-        self.entry(key)?
-            .set_password(&serde_json::to_string(value)?)
-            .map_err(|e| anyhow!("keychain: {e}"))
+        let json = serde_json::to_string(value)?;
+        let mut cache = self.cache.lock().unwrap();
+        // Rewriting an unchanged item would still prompt.
+        if cache.get(key).is_some_and(|v| v.as_deref() == Some(json.as_str())) {
+            return Ok(());
+        }
+        self.entry(key)?.set_password(&json).map_err(|e| anyhow!("keychain: {e}"))?;
+        cache.insert(key.to_string(), Some(json));
+        Ok(())
     }
     fn delete(&self, key: &str) -> Result<()> {
+        let mut cache = self.cache.lock().unwrap();
         match self.entry(key)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(anyhow!("keychain: {e}")),
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(anyhow!("keychain: {e}")),
         }
+        cache.insert(key.to_string(), None);
+        Ok(())
     }
 }
 

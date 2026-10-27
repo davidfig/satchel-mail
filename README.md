@@ -51,6 +51,11 @@ pnpm web:test         # web UI against the local test servers and .dev/test-data
 pnpm servers:reset    # restore and reseed the local test servers
 ```
 
+On macOS, run `scripts/dev-signing-cert` once. It creates a local
+code-signing certificate that `scripts/run` signs dev builds with, so the
+keychain's "Always Allow" still holds after a rebuild instead of prompting
+every time.
+
 The steps by hand:
 
 ```bash
