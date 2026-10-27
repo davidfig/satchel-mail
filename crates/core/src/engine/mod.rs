@@ -2,6 +2,7 @@
 //! and executes [`Command`]s for a [`Caller`].
 
 mod account_loop;
+mod bodies;
 mod workers;
 
 use std::collections::HashMap;

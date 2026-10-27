@@ -22,6 +22,10 @@ pub struct MessageRecord {
     pub attachments: Vec<Attachment>,
     pub blob_hash: Option<String>,
     pub size: u64,
+    /// With `blob_hash`: the copy leaves out attachment contents.
+    pub partial: bool,
+    /// With `blob_hash`: bytes the copy takes on disk.
+    pub blob_size: u64,
 }
 
 /// Remote handles for a local message, used when pushing ops.
@@ -36,6 +40,8 @@ pub struct MessageRef {
     pub mailboxes: Vec<(String, String, Option<u32>)>,
     pub flags: Flags,
     pub blob_hash: Option<String>,
+    /// The full message's size on the server, if known (0 if not).
+    pub size: u64,
     pub version: i64,
 }
 
@@ -124,6 +130,8 @@ pub struct StoredMessage {
     pub in_reply_to: Option<String>,
     pub attachments: Vec<Attachment>,
     pub blob_hash: Option<String>,
+    /// The stored copy leaves out attachment contents.
+    pub partial: bool,
     pub remote_id: String,
     pub version: i64,
 }

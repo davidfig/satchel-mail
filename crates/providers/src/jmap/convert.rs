@@ -68,6 +68,7 @@ pub(super) fn record(e: &Value) -> MessageRecord {
         attachments: vec![],
         blob_hash: None,
         size: e["size"].as_u64().unwrap_or(0),
+        ..Default::default()
     }
 }
 

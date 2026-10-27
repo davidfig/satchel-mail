@@ -36,6 +36,7 @@ pub fn record(m: &Value) -> MessageRecord {
         attachments: vec![],
         blob_hash: None,
         size: 0,
+        ..Default::default()
     }
 }
 

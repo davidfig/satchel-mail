@@ -38,6 +38,12 @@ pub struct Fake {
     pub sent: Mutex<Vec<Vec<u8>>>,
     /// Make sends fail as if the connection dropped before the server confirmed.
     pub sends_unconfirmed: std::sync::atomic::AtomicBool,
+    /// Full raw messages by remote id, for `fetch_raw` (delivered ones).
+    pub originals: Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    /// Copies without attachments by remote id, for `fetch_without_attachments`.
+    pub slim: Mutex<std::collections::HashMap<String, satchel_mime::Slim>>,
+    /// How many times `fetch_raw` ran.
+    pub raw_fetches: std::sync::atomic::AtomicUsize,
 }
 
 pub fn raw(id: &str, from: &str, subject: &str, irt: Option<&str>) -> Vec<u8> {
@@ -74,6 +80,7 @@ impl MailProvider for Fake {
         .collect::<Vec<_>>())?;
         let incoming: Vec<_> = self.incoming.lock().unwrap().drain(..).collect();
         for (rid, raw, mb) in incoming {
+            self.originals.lock().unwrap().insert(rid.clone(), raw.clone());
             ctx.put_raw_message(&rid, None, &raw, Flags::default(), &[(mb, None)], None)?;
         }
         if ctx.message_by_remote("r1")?.is_none() {
@@ -84,8 +91,9 @@ impl MailProvider for Fake {
         }
         Ok(())
     }
-    async fn fetch_raw(&self, _ctx: &SyncCtx, _msg: &MessageRef) -> Result<Vec<u8>> {
-        anyhow::bail!("not needed")
+    async fn fetch_raw(&self, _ctx: &SyncCtx, msg: &MessageRef) -> Result<Vec<u8>> {
+        self.raw_fetches.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.originals.lock().unwrap().get(&msg.remote_id).cloned().ok_or_else(|| anyhow::anyhow!("not on the server"))
     }
     async fn apply(&self, _ctx: &SyncCtx, op: &ResolvedOp) -> Result<ApplyOutcome> {
         let name = match op {
@@ -162,6 +170,13 @@ impl MailProvider for Shared {
     }
     async fn fetch_raw(&self, ctx: &SyncCtx, msg: &MessageRef) -> Result<Vec<u8>> {
         self.0.fetch_raw(ctx, msg).await
+    }
+    async fn fetch_without_attachments(&self, ctx: &SyncCtx, msg: &MessageRef) -> Result<Download> {
+        let slim = self.0.slim.lock().unwrap().get(&msg.remote_id).cloned();
+        match slim {
+            Some(s) => Ok(Download::Slim(s)),
+            None => Ok(Download::Full(self.0.fetch_raw(ctx, msg).await?)),
+        }
     }
     async fn apply(&self, ctx: &SyncCtx, op: &ResolvedOp) -> Result<ApplyOutcome> {
         self.0.apply(ctx, op).await

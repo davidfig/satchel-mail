@@ -145,6 +145,15 @@ pub enum ContactOp {
     Delete { book_remote_id: String, card_remote_id: String, etag: Option<String> },
 }
 
+/// A message as downloaded for its stored copy.
+#[derive(Debug, Clone)]
+pub enum Download {
+    /// The raw message as the server has it.
+    Full(Vec<u8>),
+    /// Rebuilt without attachment contents, which never left the server.
+    Slim(satchel_mime::Slim),
+}
+
 #[async_trait]
 pub trait MailProvider: Send + Sync {
     /// Verify credentials and connectivity.
@@ -153,6 +162,12 @@ pub trait MailProvider: Send + Sync {
     async fn sync(&self, ctx: &SyncCtx) -> Result<()>;
     /// Fetch a full raw message.
     async fn fetch_raw(&self, ctx: &SyncCtx, msg: &MessageRef) -> Result<Vec<u8>>;
+    /// Fetch a message for the stored copy, leaving attachment contents on
+    /// the server where it can (0036). Default: the full message, which
+    /// [`SyncCtx::put_blob`] strips after downloading.
+    async fn fetch_without_attachments(&self, ctx: &SyncCtx, msg: &MessageRef) -> Result<Download> {
+        Ok(Download::Full(self.fetch_raw(ctx, msg).await?))
+    }
     async fn apply(&self, ctx: &SyncCtx, op: &ResolvedOp) -> Result<ApplyOutcome>;
     /// Block until the server signals changes or `max_wait` elapses. Returns
     /// true if changes are likely. Default: plain sleep (polling).

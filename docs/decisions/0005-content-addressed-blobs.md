@@ -12,7 +12,9 @@ bytes are the ground truth for rendering, search and the AI mirror.
 
 Store raw messages as immutable files named by their BLAKE3 hash
 (`blobs/ab/cdef….eml`), behind the `BlobStore` trait. Messages reference blobs
-by hash; bodies older than the initial-sync window are fetched on demand.
+by hash; bodies older than the initial-sync window are fetched on demand
+(superseded by 0036: all mail downloads in the background, without
+attachment contents, within an optional storage limit).
 
 ## Consequences
 

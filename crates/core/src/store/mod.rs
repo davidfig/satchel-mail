@@ -5,6 +5,7 @@
 mod accounts;
 mod agents;
 mod audit;
+mod bodies;
 mod calendars;
 mod contacts;
 mod drafts;
@@ -19,6 +20,7 @@ mod tests;
 mod threads;
 mod types;
 
+pub use bodies::StoredBlob;
 pub use types::*;
 
 use std::collections::{HashMap, HashSet};
@@ -187,10 +189,14 @@ fn open_conn(path: &Path) -> Result<Connection> {
 /// The schema version `schema.sql` creates. To change the schema, edit
 /// `schema.sql` to the new shape, bump this, and append to [`MIGRATIONS`] the
 /// SQL that takes a database from the previous version to this one.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` database to version `i + 2`.
-const MIGRATIONS: &[&str] = &[];
+const MIGRATIONS: &[&str] = &[
+    // 2: attachment-free copies and per-account storage limits (0036).
+    "ALTER TABLE messages ADD COLUMN partial INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE messages ADD COLUMN blob_size INTEGER NOT NULL DEFAULT 0;",
+];
 
 /// Create or upgrade the schema, tracked in `PRAGMA user_version`.
 fn migrate(c: &mut Connection) -> Result<()> {

@@ -139,34 +139,4 @@ impl Engine {
         }
         ctx.contacts_changed();
     }
-
-    pub(crate) async fn fetch_bodies(&self, ctx: &SyncCtx, mail: &dyn crate::provider::MailProvider, limit: u32) {
-        let since = Utc::now() - chrono::Duration::days(ctx.settings.initial_sync_days.max(7) as i64);
-        let ids = ctx.store.messages_without_body(&ctx.account.id, since, limit).unwrap_or_default();
-        if ids.is_empty() {
-            return;
-        }
-        let total = ids.len();
-        for (i, id) in ids.into_iter().enumerate() {
-            if i % 25 == 0 {
-                ctx.progress(format!("Downloading messages {}/{}", i, total));
-            }
-            if let Err(e) = self.ensure_body(ctx, mail, &id).await {
-                debug!("body {id}: {e:#}");
-            }
-        }
-    }
-
-    pub(crate) async fn ensure_body(&self, ctx: &SyncCtx, mail: &dyn crate::provider::MailProvider, id: &str) -> Result<Option<Vec<u8>>> {
-        let Some(r) = ctx.store.message_ref(id)? else { return Ok(None) };
-        if let Some(h) = &r.blob_hash
-            && let Some(b) = self.blobs.get(h)? {
-                return Ok(Some(b));
-            }
-        let raw = mail.fetch_raw(ctx, &r).await?;
-        let parsed = satchel_mime::parse(&raw).unwrap_or_default();
-        let hash = self.blobs.put(&raw)?;
-        ctx.store.set_blob(id, &hash, &parsed.snippet, &parsed.attachments)?;
-        Ok(Some(raw))
-    }
 }

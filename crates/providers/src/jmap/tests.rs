@@ -17,3 +17,63 @@ fn converts_email() {
     assert!(r.flags.seen && !r.flags.flagged);
     assert_eq!(mailboxes_of(&e), vec![("a".to_string(), None)]);
 }
+
+/// `p` as JMAP's `bodyStructure` describes it, with text in `values` and
+/// every leaf's contents in `blobs`.
+fn jmap_part(p: &crate::test_mail::TestPart, n: &mut usize, values: &mut serde_json::Map<String, Value>, blobs: &mut HashMap<String, Vec<u8>>) -> Value {
+    // Raw header values keep the space after the colon.
+    let headers: Vec<Value> = p.fields().into_iter().map(|(n, v)| json!({ "name": n, "value": format!(" {v}") })).collect();
+    let mime = p.mime_type();
+    if mime.starts_with("multipart/") {
+        let subs: Vec<Value> = p.children.iter().map(|c| jmap_part(c, n, values, blobs)).collect();
+        return json!({ "partId": null, "type": mime, "headers": headers, "size": 0, "subParts": subs });
+    }
+    *n += 1;
+    let (id, blob) = (n.to_string(), format!("B{n}"));
+    let data = p.decoded();
+    if mime == "text/plain" || mime == "text/html" {
+        // The server decodes text from its charset.
+        let text: String = if p.header("Content-Type").unwrap().contains("iso-8859-1") { data.iter().map(|b| *b as char).collect() } else { String::from_utf8(data.clone()).unwrap() };
+        values.insert(id.clone(), json!({ "value": text, "isTruncated": false, "isEncodingProblem": false }));
+    }
+    let disposition = p.header("Content-Disposition").map(|d| d.split(';').next().unwrap().trim().to_string());
+    let cid = p.header("Content-ID").map(|c| c.trim_matches(['<', '>']).to_string());
+    blobs.insert(blob.clone(), data.clone());
+    json!({ "partId": id, "blobId": blob, "type": mime, "headers": headers, "size": data.len(), "disposition": disposition, "cid": cid })
+}
+
+#[test]
+fn downloads_without_attachments() {
+    let raw = crate::test_mail::sample();
+    let (mut values, mut blobs) = (serde_json::Map::new(), HashMap::new());
+    let root = jmap_part(&crate::test_mail::split(&raw), &mut 0, &mut values, &mut blobs);
+    let values = Value::Object(values);
+    assert!(parts::skips_any(&root, false));
+    let mut wanted = vec![];
+    parts::to_fetch(&root, false, &values, &mut wanted);
+    // The logo and the invitation download; the text came as values, the PDF stays.
+    assert_eq!(wanted.len(), 2);
+    let fetched: HashMap<String, Vec<u8>> = wanted.iter().map(|w| (w.clone(), blobs[w].clone())).collect();
+    let slim = satchel_mime::rebuild(&parts::part(&root, false, &values, &fetched).unwrap()).unwrap();
+    crate::test_mail::assert_slim(&raw, &slim.raw, &slim.attachments);
+    assert_eq!(slim.attachments.iter().find(|a| a.filename == "report.pdf").unwrap().size, crate::test_mail::pdf_size());
+}
+
+/// Needs `scripts/dev-servers start`; run with `cargo test -p satchel-providers -- --ignored`.
+#[tokio::test]
+#[ignore]
+async fn live_download_without_attachments() {
+    let creds = CredentialHandle::new("slim-test".into(), std::sync::Arc::new(satchel_core::secrets::MemSecretStore::default()));
+    creds.set(&Credential::Password { password: "test-pass-carol".into() }).unwrap();
+    let p = JmapProvider::new("http://127.0.0.1:8480/.well-known/jmap".into(), "carol".into(), true, creds).unwrap();
+    let acc = p.session().await.unwrap().account_id;
+    let (_, roles, _) = p.mailboxes(&acc).await.unwrap();
+    let raw = crate::test_mail::sample();
+    let id = p.import(&acc, &raw, &roles[&MailboxRole::Inbox], json!({})).await.unwrap();
+    let slim = p.fetch_slim(&id).await.unwrap();
+    p.call(vec![json!(["Email/set", { "accountId": acc, "destroy": [id] }, "d"])]).await.unwrap();
+    let slim = slim.expect("rebuilt");
+    crate::test_mail::assert_slim(&raw, &slim.raw, &slim.attachments);
+    let pdf = slim.attachments.iter().find(|a| a.filename == "report.pdf").unwrap();
+    assert_eq!(pdf.size, crate::test_mail::pdf_size());
+}

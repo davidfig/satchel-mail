@@ -1,6 +1,6 @@
 // Shared UI pieces: toasts, modals, popover menus, keyboard shortcuts.
 
-import { h, icon } from './dom';
+import { h, icon, listen } from './dom';
 
 // ---------------------------------------------------------------- toasts
 
@@ -222,7 +222,8 @@ export function installShortcuts() {
 /** Our own right-click menu on `el`, built when it opens. Text selections,
  *  links and form fields inside keep the system menu, so Copy still works. */
 export function contextMenu(el: HTMLElement, build: (e: MouseEvent) => (MenuItem | '-')[] | null) {
-  el.addEventListener('contextmenu', (e) => {
+  listen(el, 'contextmenu', (ev) => {
+    const e = ev as MouseEvent;
     const t = e.target as HTMLElement;
     if (t.closest('a, input, textarea, [contenteditable="true"]') || !(getSelection()?.isCollapsed ?? true)) return;
     const items = build(e);

@@ -1,4 +1,4 @@
--- Satchel Mail local store, schema version 1.
+-- Satchel Mail local store, schema version 2.
 -- Every account-scoped row carries account_id; accounts carry tenant_id so the
 -- same schema can be multi-tenant in the hosted version.
 
@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS messages (
     attachments_json TEXT NOT NULL DEFAULT '[]',
     blob_hash        TEXT,
     size             INTEGER NOT NULL DEFAULT 0,
+    -- The stored copy leaves out attachment contents (fetched when asked for).
+    partial          INTEGER NOT NULL DEFAULT 0,
+    -- Bytes the stored copy takes on disk (0: unknown, use size).
+    blob_size        INTEGER NOT NULL DEFAULT 0,
     -- Local version, bumped on every change (used for proposal staleness).
     version          INTEGER NOT NULL DEFAULT 1,
     indexed          INTEGER NOT NULL DEFAULT 0,

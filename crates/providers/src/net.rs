@@ -223,6 +223,7 @@ pub fn http_error(status: reqwest::StatusCode, body: &str, what: &str) -> anyhow
     use satchel_api::{ApiError, ErrorCode};
     let code = match status.as_u16() {
         401 => ErrorCode::Auth,
+        403 if is_quota_body(body) => ErrorCode::RateLimited,
         403 => ErrorCode::Forbidden,
         404 | 410 => ErrorCode::NotFound,
         409 | 412 => ErrorCode::Conflict,
@@ -233,6 +234,12 @@ pub fn http_error(status: reqwest::StatusCode, body: &str, what: &str) -> anyhow
     };
     let snippet: String = body.chars().take(300).collect();
     anyhow::Error::new(ApiError::new(code, format!("{what}: HTTP {status}: {snippet}")))
+}
+
+/// Whether a 403 body is Google's rate or quota limit rather than a refusal.
+/// Google reports per-minute quotas as 403, not 429.
+pub fn is_quota_body(body: &str) -> bool {
+    ["rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded", "Quota exceeded"].iter().any(|s| body.contains(s))
 }
 
 /// [`MaybeSent::classify`] for HTTP sends: a connection that never opened
@@ -263,6 +270,17 @@ mod tests {
     #[test]
     fn encodes() {
         assert_eq!(super::enc("a b@c/d+é"), "a%20b%40c%2Fd%2B%C3%A9");
+    }
+
+    #[test]
+    fn google_quota_403_is_rate_limited() {
+        use satchel_api::{ApiError, ErrorCode};
+        let quota = r#"{"error":{"code":403,"message":"Quota exceeded for quota metric 'Total Query Cost'","errors":[{"reason":"rateLimitExceeded"}]}}"#;
+        let e = super::http_error(reqwest::StatusCode::FORBIDDEN, quota, "list labels");
+        assert_eq!(e.downcast_ref::<ApiError>().unwrap().code, ErrorCode::RateLimited);
+        let denied = r#"{"error":{"code":403,"errors":[{"reason":"insufficientPermissions"}]}}"#;
+        let e = super::http_error(reqwest::StatusCode::FORBIDDEN, denied, "list labels");
+        assert_eq!(e.downcast_ref::<ApiError>().unwrap().code, ErrorCode::Forbidden);
     }
 
     #[tokio::test]

@@ -51,6 +51,39 @@ impl SyncCtx {
         Ok(self.store.mailbox_by_remote(&self.account.id, remote_id)?.map(|m| m.id))
     }
 
+    /// Whether stored copies keep attachments: the AI folder copies
+    /// attachments or .eml files.
+    pub fn keeps_attachments(&self) -> bool {
+        let m = &self.settings.mirror;
+        m.enabled && (m.include_attachments || m.include_eml)
+    }
+
+    /// Store a message's raw bytes, leaving out attachment contents unless
+    /// `full` or [`Self::keeps_attachments`]. Returns (hash, bytes stored,
+    /// whether attachments were left out).
+    pub fn put_blob(&self, raw: &[u8], full: bool) -> Result<(String, u64, bool)> {
+        let slim = if full || self.keeps_attachments() { None } else { satchel_mime::strip_attachments(raw) };
+        let bytes = slim.as_deref().unwrap_or(raw);
+        Ok((self.blobs.put(bytes)?, bytes.len() as u64, slim.is_some()))
+    }
+
+    /// Store a downloaded message's copy. Returns (hash, bytes stored,
+    /// whether attachments were left out, the message parsed with the full
+    /// message's attachment list).
+    pub fn put_download(&self, d: &Download) -> Result<(String, u64, bool, satchel_mime::Parsed)> {
+        Ok(match d {
+            Download::Full(raw) => {
+                let (hash, size, partial) = self.put_blob(raw, false)?;
+                (hash, size, partial, satchel_mime::parse(raw).unwrap_or_default())
+            }
+            Download::Slim(s) => {
+                let mut parsed = satchel_mime::parse(&s.raw).unwrap_or_default();
+                parsed.attachments = s.attachments.clone();
+                (self.blobs.put(&s.raw)?, s.raw.len() as u64, true, parsed)
+            }
+        })
+    }
+
     /// Store a message from raw RFC 822 bytes. `mailboxes` are remote mailbox ids with optional UIDs.
     pub fn put_raw_message(
         &self,
@@ -62,27 +95,47 @@ impl SyncCtx {
         internal_date: Option<DateTime<Utc>>,
     ) -> Result<String> {
         let parsed = satchel_mime::parse(raw).unwrap_or_default();
-        let hash = self.blobs.put(raw)?;
-        let rec = MessageRecord {
+        let (hash, blob_size, partial) = self.put_blob(raw, false)?;
+        let rec = Self::record_from(remote_id, remote_thread_id, parsed, flags, internal_date, raw.len() as u64);
+        self.put_record(MessageRecord { blob_hash: Some(hash), partial, blob_size, ..rec }, mailboxes)
+    }
+
+    /// Store a message rebuilt without attachment contents; `size` is the
+    /// full message's size on the server.
+    pub fn put_slim_message(
+        &self,
+        remote_id: &str,
+        slim: &satchel_mime::Slim,
+        size: u64,
+        flags: Flags,
+        mailboxes: &[(String, Option<u32>)],
+        internal_date: Option<DateTime<Utc>>,
+    ) -> Result<String> {
+        let (hash, blob_size, partial, parsed) = self.put_download(&Download::Slim(slim.clone()))?;
+        let rec = Self::record_from(remote_id, None, parsed, flags, internal_date, size);
+        self.put_record(MessageRecord { blob_hash: Some(hash), partial, blob_size, ..rec }, mailboxes)
+    }
+
+    fn record_from(remote_id: &str, remote_thread_id: Option<&str>, parsed: satchel_mime::Parsed, flags: Flags, internal_date: Option<DateTime<Utc>>, size: u64) -> MessageRecord {
+        MessageRecord {
             remote_id: remote_id.to_string(),
             remote_thread_id: remote_thread_id.map(|s| s.to_string()),
-            message_id_hdr: parsed.message_id.clone(),
-            in_reply_to: parsed.in_reply_to.clone(),
-            references: parsed.references.clone(),
-            subject: parsed.subject.clone(),
-            from: parsed.from.clone(),
-            to: parsed.to.clone(),
-            cc: parsed.cc.clone(),
-            bcc: parsed.bcc.clone(),
-            reply_to: parsed.reply_to.clone(),
+            message_id_hdr: parsed.message_id,
+            in_reply_to: parsed.in_reply_to,
+            references: parsed.references,
+            subject: parsed.subject,
+            from: parsed.from,
+            to: parsed.to,
+            cc: parsed.cc,
+            bcc: parsed.bcc,
+            reply_to: parsed.reply_to,
             date: parsed.date.or(internal_date).unwrap_or_else(Utc::now),
-            snippet: parsed.snippet.clone(),
+            snippet: parsed.snippet,
             flags,
-            attachments: parsed.attachments.clone(),
-            blob_hash: Some(hash),
-            size: raw.len() as u64,
-        };
-        self.put_record(rec, mailboxes)
+            attachments: parsed.attachments,
+            size,
+            ..Default::default()
+        }
     }
 
     /// Store a message from metadata only (body fetched later).

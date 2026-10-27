@@ -6,6 +6,8 @@ import type { ApiError, CoreEvent } from './types';
 
 export interface Transport {
   invoke<T>(cmd: string, args?: unknown): Promise<T>;
+  /** Calls a desktop-host command (`open_url`, `save_file`, `cli_path`), not the engine. The web has none. */
+  host<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
   subscribe(fn: (e: CoreEvent) => void): () => void;
   /** Sets the window title (the browser tab on the web). */
   setTitle(title: string): void;
@@ -38,6 +40,11 @@ class TauriTransport implements Transport {
     const res = (await invoke('api', { request: { id: 0, cmd, args } })) as { ok?: T; error?: ApiError };
     if (res.error) throw new RpcError(res.error);
     return res.ok as T;
+  }
+
+  async host<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<T>(cmd, args);
   }
 
   subscribe(fn: (e: CoreEvent) => void) {
@@ -94,6 +101,10 @@ class HttpTransport implements Transport {
     const res = (await r.json()) as { ok?: T; error?: ApiError };
     if (res.error) throw new RpcError(res.error);
     return res.ok as T;
+  }
+
+  host<T>(cmd: string): Promise<T> {
+    return Promise.reject(new Error(`${cmd} is only available in the desktop app`));
   }
 
   private connect() {

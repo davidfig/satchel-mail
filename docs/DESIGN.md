@@ -191,6 +191,7 @@ trait MailProvider {
     async fn list_mailboxes(&self) -> Result<Vec<RemoteMailbox>>;
     async fn sync(&self, state: &SyncState, sink: &mut dyn SyncSink) -> Result<SyncState>; // delta
     async fn fetch_raw(&self, id: &RemoteId) -> Result<Bytes>;
+    async fn fetch_without_attachments(&self, id: &RemoteId) -> Result<Download>; // structure + kept parts (0036)
     async fn apply(&self, op: &Op) -> Result<ApplyResult>;
     async fn watch(&self, tx: Sender<Change>) -> Result<()>; // IDLE / push / polling fallback
 }
@@ -206,7 +207,7 @@ trait CalendarProvider { /* same shape for calendars/events */ }
 
 Sending: Gmail API / Graph `sendMail` / SMTP submission / JMAP `EmailSubmission`.
 
-Initial sync strategy: headers + snippets for the last N months first (fast inbox), bodies in background, older history backfilled lazily.
+Initial sync strategy: headers + snippets for the last N months first (fast inbox), then content for all mail in the background, newest first, without attachment contents and within an optional per-account storage limit (0036).
 
 ## 8. Frontend (vanilla TS)
 

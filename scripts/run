@@ -81,6 +81,7 @@ case "$mode" in
   desktop)
     # Tauri runs the CLI as a sidecar named for the host triple.
     triple="$(rustc -vV | sed -n 's/host: //p')"
+    mkdir -p apps/desktop/binaries
     cp target/debug/satchel "apps/desktop/binaries/satchel-$triple"
     # Cargo runs the app through dev-sign, so every rebuild is signed the same way.
     export "CARGO_TARGET_$(tr 'a-z-' 'A-Z_' <<<"$triple")_RUNNER=$ROOT/scripts/dev-sign"

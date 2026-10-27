@@ -47,6 +47,9 @@ export function general(view: SettingsView, el: HTMLElement) {
     [['system', 'Match system'], ['light', 'Light'], ['dark', 'Dark']].map(([v, l]) => h('option', { value: v, selected: s.theme === v }, l)));
   const days = h('input', { type: 'number', min: '7', max: '3650', value: String(s.initial_sync_days) });
   const poll = h('input', { type: 'number', min: '15', max: '3600', value: String(s.poll_interval_secs) });
+  const option = (cur: number | null) => ([v, l]: string[]) => h('option', { value: v, selected: String(cur ?? '') === v }, l);
+  const background = h('select', [['365', 'Last year'], ['1825', 'Last 5 years'], ['', 'All mail']].map(option(s.download_days)));
+  const limit = h('select', [['', 'No limit'], ['1024', '1 GB'], ['2048', '2 GB'], ['5120', '5 GB'], ['10240', '10 GB'], ['25600', '25 GB'], ['51200', '50 GB']].map(option(s.storage_limit_mb)));
   const notify = h('input', {
     type: 'checkbox',
     checked: s.notify_new_mail,
@@ -61,10 +64,12 @@ export function general(view: SettingsView, el: HTMLElement) {
     h('h1', 'General'),
     h('div.form',
       field('Appearance', theme),
-      field('Download full messages from the last (days)', days, 'Older mail syncs headers first; bodies download when opened.'),
+      field('Download messages from the last (days) first', days, 'These come first; older mail lists right away and its content follows in the background.'),
+      field('Keep downloading in the background', background, 'Older mail downloads when you open it. Attachments always download only when you open them.'),
+      field('Storage limit per account', limit, 'Over the limit, the content of the oldest mail is removed (it stays listed and searchable, and downloads again when opened).'),
       field('Check for new mail every (seconds)', poll, 'Accounts with push (IMAP IDLE, JMAP) update instantly.'),
       h('label.row.inline', notify, 'Show a notification when new mail arrives in an inbox (only while you’re in another app)'),
-      h('div.row', h('button.primary', { on: { click: () => void view.saveSettings({ ...(store.state.settings ?? s), initial_sync_days: Number(days.value) || 90, poll_interval_secs: Number(poll.value) || 120 }).then(() => toast('Saved')) } }, 'Save'))));
+      h('div.row', h('button.primary', { on: { click: () => void view.saveSettings({ ...(store.state.settings ?? s), initial_sync_days: Number(days.value) || 90, download_days: background.value ? Number(background.value) : null, storage_limit_mb: limit.value ? Number(limit.value) : null, poll_interval_secs: Number(poll.value) || 120 }).then(() => toast('Saved')) } }, 'Save'))));
 }
 
 export async function activity(view: SettingsView, el: HTMLElement) {

@@ -117,6 +117,39 @@ impl ImapProvider {
     }
 
     pub(super) async fn fetch_into(&self, s: &mut Session, ctx: &SyncCtx, mb: &RemoteMailbox, uv: u32, uids: &[u32], body: bool) -> Result<()> {
+        if !body || ctx.keeps_attachments() {
+            return self.fetch_whole(s, ctx, mb, uv, uids, body).await;
+        }
+        // Messages with attachments come down without them, the rest whole.
+        let mut plans = self.plans(s, &uid_set(uids)).await?;
+        let mut whole: Vec<u32> = uids.iter().filter(|u| !plans.contains_key(u)).copied().collect();
+        if !plans.is_empty() {
+            let mut meta: HashMap<u32, (Flags, Option<DateTime<Utc>>, u64)> = HashMap::new();
+            let ids: Vec<u32> = plans.keys().copied().collect();
+            let fetches: Vec<Fetch> = s.uid_fetch(uid_set(&ids), "(UID FLAGS INTERNALDATE RFC822.SIZE)").await?.try_collect().await?;
+            for f in &fetches {
+                let (Some(uid), (flags, false)) = (f.uid, flags_of(f)) else { continue };
+                meta.insert(uid, (flags, f.internal_date().map(|d| d.with_timezone(&Utc)), f.size.unwrap_or(0) as u64));
+            }
+            for uid in ids {
+                let (plan, Some((flags, internal, size))) = (plans.remove(&uid).unwrap(), meta.remove(&uid)) else { continue };
+                match self.fetch_slim(s, uid, &plan).await? {
+                    Some(slim) => {
+                        let mbs = [(mb.remote_id.clone(), Some(uid))];
+                        ctx.put_slim_message(&remote_id(uv, uid, &mb.remote_id), &slim, size, flags, &mbs, internal)?;
+                    }
+                    None => whole.push(uid),
+                }
+            }
+        }
+        if whole.is_empty() {
+            return Ok(());
+        }
+        self.fetch_whole(s, ctx, mb, uv, &whole, true).await
+    }
+
+    /// Fetch and store whole messages (`body`) or just their headers.
+    async fn fetch_whole(&self, s: &mut Session, ctx: &SyncCtx, mb: &RemoteMailbox, uv: u32, uids: &[u32], body: bool) -> Result<()> {
         let q = if body { "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])" } else { "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER])" };
         let mut stream = s.uid_fetch(uid_set(uids), q).await?;
         while let Some(f) = stream.try_next().await? {

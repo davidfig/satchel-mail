@@ -6,6 +6,7 @@
 
 mod apply;
 mod names;
+mod parts;
 mod smtp;
 mod sync;
 #[cfg(test)]
@@ -23,7 +24,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use satchel_api::*;
-use satchel_core::provider::{ApplyOutcome, CredentialHandle, MailProvider, MaybeSent, RemoteMailbox, ResolvedOp, SyncCtx};
+use satchel_core::provider::{ApplyOutcome, CredentialHandle, Download, MailProvider, MaybeSent, RemoteMailbox, ResolvedOp, SyncCtx};
 use satchel_core::store::{MessageRecord, MessageRef};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -147,6 +148,24 @@ impl ImapProvider {
     async fn has_cap(&self, c: &str) -> bool {
         self.caps.lock().await.contains(c)
     }
+
+    /// The whole message with UID `uid` in the selected mailbox.
+    async fn fetch_full(s: &mut Session, uid: u32) -> Result<Vec<u8>> {
+        let fetches: Vec<Fetch> = s.uid_fetch(uid.to_string(), "(UID BODY.PEEK[])").await?.try_collect().await?;
+        let raw = fetches.into_iter().find_map(|f| f.body().map(|b| b.to_vec()));
+        raw.ok_or_else(|| anyhow::Error::new(ApiError::new(ErrorCode::NotFound, "message no longer on server")))
+    }
+}
+
+/// A stored message's mailbox and UID.
+fn location(msg: &MessageRef) -> Result<(String, u32)> {
+    Ok(match parse_remote_id(&msg.remote_id) {
+        Some((_, uid, mb)) => (mb.to_string(), uid),
+        None => {
+            let (_, rmb, uid) = msg.mailboxes.iter().find(|(_, _, u)| u.is_some()).context("message has no IMAP location")?;
+            (rmb.clone(), uid.unwrap())
+        }
+    })
 }
 
 #[async_trait]
@@ -197,19 +216,28 @@ impl MailProvider for ImapProvider {
     }
 
     async fn fetch_raw(&self, _ctx: &SyncCtx, msg: &MessageRef) -> Result<Vec<u8>> {
-        let (mb, uid) = match parse_remote_id(&msg.remote_id) {
-            Some((_, uid, mb)) => (mb.to_string(), uid),
-            None => {
-                let (_, rmb, uid) = msg.mailboxes.iter().find(|(_, _, u)| u.is_some()).context("message has no IMAP location")?;
-                (rmb.clone(), uid.unwrap())
-            }
-        };
+        let (mb, uid) = location(msg)?;
         let mut s = self.session().await?;
         s.examine(&mb).await?;
-        let fetches: Vec<Fetch> = s.uid_fetch(uid.to_string(), "(UID BODY.PEEK[])").await?.try_collect().await?;
-        let raw = fetches.into_iter().find_map(|f| f.body().map(|b| b.to_vec()));
+        let raw = Self::fetch_full(&mut s, uid).await;
         self.release(s).await;
-        raw.ok_or_else(|| anyhow::Error::new(ApiError::new(ErrorCode::NotFound, "message no longer on server")))
+        raw
+    }
+
+    async fn fetch_without_attachments(&self, _ctx: &SyncCtx, msg: &MessageRef) -> Result<Download> {
+        let (mb, uid) = location(msg)?;
+        let mut s = self.session().await?;
+        s.examine(&mb).await?;
+        let r = async {
+            if let Some(plan) = self.plans(&mut s, &uid.to_string()).await?.remove(&uid)
+                && let Some(slim) = self.fetch_slim(&mut s, uid, &plan).await? {
+                    return Ok(Download::Slim(slim));
+                }
+            Ok(Download::Full(Self::fetch_full(&mut s, uid).await?))
+        }
+        .await;
+        self.release(s).await;
+        r
     }
 
     async fn apply(&self, _ctx: &SyncCtx, op: &ResolvedOp) -> Result<ApplyOutcome> {

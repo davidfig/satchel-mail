@@ -1,6 +1,7 @@
 //! Gmail API mail provider: labels, history-based deltas.
 
 mod apply;
+mod parts;
 mod sync;
 #[cfg(test)]
 mod tests;
@@ -13,7 +14,7 @@ use base64::Engine as _;
 use chrono::{TimeZone, Utc};
 use futures::StreamExt;
 use satchel_api::*;
-use satchel_core::provider::{ApplyOutcome, CredentialHandle, MailProvider, RemoteMailbox, ResolvedOp, SyncCtx};
+use satchel_core::provider::{ApplyOutcome, CredentialHandle, Download, MailProvider, RemoteMailbox, ResolvedOp, SyncCtx};
 use satchel_core::store::{MessageRecord, MessageRef};
 use serde_json::{Value, json};
 use tracing::{debug, warn};
@@ -97,6 +98,7 @@ fn record_from_metadata(m: &Value) -> MessageRecord {
         attachments: vec![],
         blob_hash: None,
         size: m["sizeEstimate"].as_u64().unwrap_or(0),
+        ..Default::default()
     }
 }
 
@@ -222,6 +224,13 @@ impl MailProvider for GmailProvider {
     async fn fetch_raw(&self, _ctx: &SyncCtx, msg: &MessageRef) -> Result<Vec<u8>> {
         let v = self.get(&format!("{GMAIL}/messages/{}?format=raw", msg.remote_id), "get raw message").await?;
         b64url_decode(v["raw"].as_str().context("no raw content")?)
+    }
+
+    async fn fetch_without_attachments(&self, ctx: &SyncCtx, msg: &MessageRef) -> Result<Download> {
+        match self.fetch_slim(&msg.remote_id).await? {
+            Some(slim) => Ok(Download::Slim(slim)),
+            None => Ok(Download::Full(self.fetch_raw(ctx, msg).await?)),
+        }
     }
 
     async fn apply(&self, _ctx: &SyncCtx, op: &ResolvedOp) -> Result<ApplyOutcome> {

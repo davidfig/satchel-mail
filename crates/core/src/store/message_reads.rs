@@ -28,7 +28,7 @@ impl Store {
     pub fn message_ref(&self, message_id: &str) -> Result<Option<MessageRef>> {
         let base = self.r(|c| {
             Ok(c.query_row(
-                "SELECT id, account_id, remote_id, remote_thread_id, message_id_hdr, seen, flagged, answered, draft, blob_hash, version FROM messages WHERE id=?",
+                "SELECT id, account_id, remote_id, remote_thread_id, message_id_hdr, seen, flagged, answered, draft, blob_hash, version, size FROM messages WHERE id=?",
                 [message_id],
                 |r| {
                     Ok(MessageRef {
@@ -41,6 +41,7 @@ impl Store {
                         flags: Flags { seen: r.get(5)?, flagged: r.get(6)?, answered: r.get(7)?, draft: r.get(8)? },
                         blob_hash: r.get(9)?,
                         version: r.get(10)?,
+                        size: r.get::<_, i64>(11)?.max(0) as u64,
                     })
                 },
             )
@@ -97,6 +98,7 @@ impl Store {
                         in_reply_to: r.get("in_reply_to")?,
                         attachments: from_json(&r.get::<_, String>("attachments_json")?),
                         blob_hash: r.get("blob_hash")?,
+                        partial: r.get("partial")?,
                         remote_id: r.get("remote_id")?,
                         version: r.get("version")?,
                     })
@@ -121,18 +123,6 @@ impl Store {
     }
 
     /// Messages whose body still needs fetching, newest first.
-    pub fn messages_without_body(&self, account_id: &str, since: DateTime<Utc>, limit: u32) -> Result<Vec<String>> {
-        self.r(|c| {
-            let mut s = c.prepare(
-                "SELECT id FROM messages WHERE account_id=? AND blob_hash IS NULL AND date>=? ORDER BY date DESC LIMIT ?",
-            )?;
-            let rows = s
-                .query_map(params![account_id, since.timestamp_millis(), limit], |r| r.get(0))?
-                .collect::<rusqlite::Result<Vec<String>>>()?;
-            Ok(rows)
-        })
-    }
-
     /// Messages whose search entry is missing or out of date (headers are
     /// indexed right away; bodies once downloaded).
     pub fn unindexed(&self, limit: u32) -> Result<Vec<String>> {

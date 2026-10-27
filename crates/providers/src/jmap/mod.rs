@@ -2,6 +2,7 @@
 
 mod apply;
 mod convert;
+mod parts;
 mod sync;
 #[cfg(test)]
 mod tests;
@@ -16,7 +17,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use satchel_api::*;
-use satchel_core::provider::{ApplyOutcome, CredentialHandle, MailProvider, RemoteMailbox, ResolvedOp, SyncCtx};
+use satchel_core::provider::{ApplyOutcome, CredentialHandle, Download, MailProvider, RemoteMailbox, ResolvedOp, SyncCtx};
 use satchel_core::store::{MessageRecord, MessageRef};
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
@@ -156,6 +157,22 @@ impl JmapProvider {
         Ok((out, roles, m["state"].as_str().unwrap_or_default().to_string()))
     }
 
+    /// Download a blob's contents.
+    async fn download(&self, s: &Session, blob: &str, ty: &str) -> Result<Vec<u8>> {
+        let url = s
+            .download_url
+            .replace("{accountId}", &s.account_id)
+            .replace("{blobId}", blob)
+            .replace("{name}", if ty == "message/rfc822" { "message.eml" } else { "part" })
+            .replace("{type}", ty);
+        let resp = self.auth(self.http.get(&url))?.send().await?;
+        let st = resp.status();
+        if !st.is_success() {
+            return Err(crate::net::http_error(st, &resp.text().await.unwrap_or_default(), "JMAP download"));
+        }
+        Ok(resp.bytes().await?.to_vec())
+    }
+
     async fn get_emails(&self, ctx: &SyncCtx, acc: &str, ids: &[String]) -> Result<()> {
         let s = self.session().await?;
         for chunk in ids.chunks(s.max_get.max(1)) {
@@ -203,20 +220,15 @@ impl MailProvider for JmapProvider {
         let s = self.session().await?;
         let r = self.call(vec![json!(["Email/get", { "accountId": s.account_id, "ids": [msg.remote_id], "properties": ["blobId"] }, "b"])]).await?;
         let blob = r["b"]["list"][0]["blobId"].as_str().ok_or_else(|| anyhow::Error::new(ApiError::new(ErrorCode::NotFound, "message no longer on server")))?;
-        let url = s
-            .download_url
-            .replace("{accountId}", &s.account_id)
-            .replace("{blobId}", blob)
-            .replace("{name}", "message.eml")
-            .replace("{type}", "message/rfc822");
-        let resp = self.auth(self.http.get(&url))?.send().await?;
-        let st = resp.status();
-        if !st.is_success() {
-            return Err(crate::net::http_error(st, &resp.text().await.unwrap_or_default(), "JMAP download"));
-        }
-        Ok(resp.bytes().await?.to_vec())
+        self.download(&s, blob, "message/rfc822").await
     }
 
+    async fn fetch_without_attachments(&self, ctx: &SyncCtx, msg: &MessageRef) -> Result<Download> {
+        match self.fetch_slim(&msg.remote_id).await? {
+            Some(slim) => Ok(Download::Slim(slim)),
+            None => Ok(Download::Full(self.fetch_raw(ctx, msg).await?)),
+        }
+    }
 
     async fn apply(&self, _ctx: &SyncCtx, op: &ResolvedOp) -> Result<ApplyOutcome> {
         self.apply_op(op).await

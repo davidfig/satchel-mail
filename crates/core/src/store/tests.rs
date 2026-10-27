@@ -21,10 +21,14 @@ fn a_database_from_before_versioning_counts_as_version_1() {
     let path = dir.path().join("satchel.db");
     let c = Connection::open(&path).unwrap();
     c.execute_batch(include_str!("schema.sql")).unwrap();
+    // Back to the version 1 shape, so the migrations since run on it.
+    c.execute_batch("ALTER TABLE messages DROP COLUMN partial; ALTER TABLE messages DROP COLUMN blob_size;").unwrap();
     drop(c);
     drop(Store::open(&path).unwrap());
-    let v: i64 = Connection::open(&path).unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    let c = Connection::open(&path).unwrap();
+    let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
     assert_eq!(v, SCHEMA_VERSION);
+    c.query_row("SELECT partial, blob_size FROM messages", [], |_| Ok(())).optional().unwrap();
 }
 
 fn rec(remote: &str, mid: &str, irt: Option<&str>, subject: &str, mins: i64) -> MessageRecord {

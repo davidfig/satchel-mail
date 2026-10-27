@@ -1,6 +1,6 @@
 import { api } from '../api';
 import { transport } from '../transport';
-import { h, icon, replace } from '../lib/dom';
+import { h, icon, patch, replace } from '../lib/dom';
 import { deleteFolder, folderDialog, folderTree } from '../lib/folders';
 import { relative } from '../lib/format';
 import { bind, contextMenu, errorToast, setScope, toast } from '../lib/ui';
@@ -16,6 +16,14 @@ import { SettingsView } from '../views/settings';
 import { showShortcuts } from './help';
 import { COLLAPSED_KEY, LOCATION_KEY, SECTIONS_KEY, UNIFIED, readCollapsed, readJson, writeJson } from './location';
 import { palette } from './palette';
+
+/** Each account's built-in folders, in sidebar order: the ones the
+ *  all-accounts section combines, then Gmail's Important and All Mail. */
+const BUILT_IN: { role: MailboxRole; icon: string }[] = [
+  ...UNIFIED,
+  { role: 'important', icon: 'label' },
+  { role: 'all', icon: 'archive' },
+];
 
 /** The app frame: sidebar navigation and the current view. */
 export class Shell {
@@ -145,7 +153,9 @@ export class Shell {
 
   private sourceItem(source: MailSource, ic: string, count: number, opts: { text?: string; depth?: number } = {}) {
     const s = store.state.source;
-    const active = store.state.view === 'mail' && s.kind === source.kind && (s.kind === 'role' ? s.role === (source as { role: string }).role : s.kind === 'mailbox' && s.mailbox_id === (source as { mailbox_id: string }).mailbox_id);
+    // With one account, "Inbox" (g i, the default) is that account's Inbox.
+    const sole = store.state.accounts.length === 1 && s.kind === 'role' && source.kind === 'mailbox' && store.mailbox(source.mailbox_id)?.role === s.role;
+    const active = store.state.view === 'mail' && (sole || (s.kind === source.kind && (s.kind === 'role' ? s.role === (source as { role: string }).role : s.kind === 'mailbox' && s.mailbox_id === (source as { mailbox_id: string }).mailbox_id)));
     const el = h(`button.mb-item${active ? '.active' : ''}`, { title: source.label, style: opts.depth ? { paddingLeft: `${10 + opts.depth * 16}px` } : undefined, on: { click: () => this.go('mail', source) } },
       icon(ic, 16),
       h('span.mb-name', opts.text ?? source.label),
@@ -162,7 +172,9 @@ export class Shell {
     const errors = accounts.filter((a) => a.sync.state === 'error' || a.sync.state === 'offline');
     const inboxUnread = unread('inbox');
     transport.setTitle(inboxUnread > 0 ? `(${inboxUnread}) satchel.email` : 'satchel.email');
-    replace(
+    // Patched, not replaced: this runs on every sync tick, and swapping the
+    // nodes out from under the pointer made hover and tooltips flicker.
+    patch(
       this.sidebar,
       h('div.brand', h('img.logo', { src: '/favicon.svg', alt: '' }), h('span.brand-name', 'satchel.email'),
         h('button.icon-btn.collapse-btn', {
@@ -180,8 +192,9 @@ export class Shell {
         this.navItem('settings', 'Settings', 'settings')),
       store.state.view === 'mail' && !collapsed &&
         h('div.mailboxes',
-          accounts.length > 1 ? this.sectionHeader('all', h('span', 'All accounts')) : h('div.mb-section'),
-          (accounts.length < 2 || !this.closedSections.has('all')) &&
+          // With one account its own section says it all.
+          accounts.length > 1 && this.sectionHeader('all', h('span', 'All accounts')),
+          accounts.length > 1 && !this.closedSections.has('all') &&
             UNIFIED.filter((u) => mailboxes.some((m) => m.role === u.role) || u.role === 'inbox').map((u) =>
               this.sourceItem({ kind: 'role', role: u.role, label: u.label }, u.icon, unread(u.role))),
           accounts.map((a) => this.accountSection(a, mailboxes.filter((m) => m.account_id === a.id)))),
@@ -201,7 +214,8 @@ export class Shell {
       h('div.mb-section-row',
         this.sectionHeader(a.id, h('span.acct-dot', { style: { background: a.color } }), h('span.acct-email', a.email), h(`span.state-dot${dot}`)),
         h('button.icon-btn.mb-add', { title: labels ? 'New label' : 'New folder', on: { click: () => void this.newFolder(a.id, null) } }, icon('plus', 14))),
-      open && store.state.accounts.length > 1 && boxes.filter((m) => m.role === 'inbox').map((m) => this.sourceItem({ kind: 'mailbox', mailbox_id: m.id, label: 'Inbox' }, 'inbox', m.unread)),
+      open && BUILT_IN.flatMap(({ role, icon: ic }) => boxes.filter((m) => m.role === role).map((m) =>
+        this.sourceItem({ kind: 'mailbox', mailbox_id: m.id, label: m.name }, ic, role === 'drafts' ? m.total : role === 'all' || role === 'sent' || role === 'trash' ? 0 : m.unread))),
       open && folderTree(boxes).map(({ box, depth }) =>
         this.sourceItem({ kind: 'mailbox', mailbox_id: box.id, label: box.path }, box.is_label ? 'label' : 'folder', box.unread, { text: box.name, depth })));
   }

@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::engine::{Caller, Engine, Mode};
 use crate::error::{err, forbidden, not_found};
-use crate::store::ThreadFilter;
+use crate::store::{StoredMessage, ThreadFilter};
 
 impl Engine {
     pub(crate) fn list_threads(&self, caller: &Caller, q: &ThreadQuery) -> Result<Vec<ThreadSummary>> {
@@ -82,9 +82,37 @@ impl Engine {
         }
     }
 
-    pub(crate) async fn message_detail(&self, id: &str, force_remote: bool) -> Result<MessageDetail> {
+    /// Like [`Self::raw_for`], but with attachment contents: a stored copy
+    /// that leaves them out is replaced by the full message from the server.
+    pub(crate) async fn full_raw_for(&self, id: &str) -> Result<Option<Vec<u8>>> {
         let m = self.store.message_row(id)?.ok_or_else(|| not_found("message"))?;
-        let raw = match self.raw_for(id).await {
+        if !(m.partial && m.blob_hash.is_some()) || self.mode != Mode::Full {
+            return self.raw_for(id).await;
+        }
+        let providers = self.providers_for(&m.summary.account_id)?;
+        let Some(mail) = providers.mail.clone() else { return self.raw_for(id).await };
+        let ctx = self.ctx(&m.summary.account_id)?;
+        match tokio::time::timeout(std::time::Duration::from_secs(120), self.ensure_full(&ctx, mail.as_ref(), id)).await {
+            Ok(r) => r.map(Some),
+            Err(_) => Err(err(ErrorCode::Network, "timed out fetching attachments")),
+        }
+    }
+
+    pub(crate) async fn message_detail(&self, id: &str, force_remote: bool) -> Result<MessageDetail> {
+        let mut m = self.store.message_row(id)?.ok_or_else(|| not_found("message"))?;
+        // Inline images too big to keep in the stored copy come with the full message.
+        let big_inline = |m: &StoredMessage| m.partial && m.attachments.iter().any(|a| a.inline && a.size > satchel_mime::KEEP_INLINE_BYTES as u64);
+        let had_body = m.blob_hash.is_some();
+        let mut raw = if big_inline(&m) { self.full_raw_for(id).await } else { self.raw_for(id).await };
+        if !had_body && let Ok(Some(r)) = &raw {
+            // Just downloaded, perhaps without attachment contents.
+            m = self.store.message_row(id)?.ok_or_else(|| not_found("message"))?;
+            let missing = |a: &Attachment| satchel_mime::attachment_bytes(r, &a.id).is_none_or(|(_, _, b)| b.is_empty());
+            if big_inline(&m) && m.attachments.iter().any(|a| a.inline && a.size > satchel_mime::KEEP_INLINE_BYTES as u64 && missing(a)) {
+                raw = self.full_raw_for(id).await;
+            }
+        }
+        let raw = match raw {
             Ok(r) => r,
             Err(e) => {
                 tracing::debug!("body fetch failed: {e:#}");
@@ -111,7 +139,8 @@ impl Engine {
                     }
                     None => (None, false),
                 };
-                (p.text, html, blocked, p.attachments)
+                // A stored copy without attachment contents parses with zero sizes.
+                (p.text, html, blocked, if m.partial && !m.attachments.is_empty() { m.attachments.clone() } else { p.attachments })
             }
             None => (m.summary.snippet.clone(), None, false, m.attachments.clone()),
         };
@@ -169,7 +198,7 @@ impl Engine {
     /// An attachment's content. Agents get text content; binary only when
     /// their policy allows it.
     pub(crate) async fn get_attachment(&self, caller: &Caller, message_id: &str, attachment_id: &str) -> Result<Value> {
-        let raw = self.raw_for(message_id).await?.ok_or_else(|| not_found("message body"))?;
+        let raw = self.full_raw_for(message_id).await?.ok_or_else(|| not_found("message body"))?;
         let (filename, mime_type, data) = satchel_mime::attachment_bytes(&raw, attachment_id).ok_or_else(|| not_found("attachment"))?;
         if let Caller::Agent(a) = caller {
             let is_text = mime_type.starts_with("text/") || mime_type == "application/json" || mime_type.ends_with("+xml");

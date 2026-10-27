@@ -157,6 +157,14 @@ pub struct Settings {
     pub theme: String,
     /// Days of mail fetched on first sync before background backfill.
     pub initial_sync_days: u32,
+    /// Days of mail whose content downloads in the background (None: all
+    /// mail). Older mail downloads when opened.
+    #[serde(default)]
+    pub download_days: Option<u32>,
+    /// Most disk space each account's downloaded mail may use, in MB (None:
+    /// no limit). Over it, the oldest content is freed for newer mail.
+    #[serde(default)]
+    pub storage_limit_mb: Option<u64>,
     /// Seconds between polls for providers without push.
     pub poll_interval_secs: u32,
     /// Show a desktop notification when new mail arrives in an inbox.
@@ -176,6 +184,8 @@ impl Default for Settings {
             sync_ai_drafts_to_server: false,
             theme: "system".into(),
             initial_sync_days: 90,
+            download_days: None,
+            storage_limit_mb: None,
             poll_interval_secs: 120,
             notify_new_mail: true,
         }

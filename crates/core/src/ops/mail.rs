@@ -145,6 +145,7 @@ impl Engine {
             mailboxes: vec![],
             flags: Flags::default(),
             blob_hash: None,
+            size: 0,
             version: 0,
         }))
     }
@@ -172,6 +173,9 @@ impl Engine {
         if let Some(fwd) = &d.forward_of
             && let Some(m) = self.store.message_row(fwd)?
                 && let Some(raw) = m.blob_hash.as_ref().and_then(|h| self.blobs.get(h).ok().flatten()) {
+                    if m.partial && m.attachments.iter().any(|a| !a.inline) {
+                        return Err(crate::error::err(ErrorCode::Network, "the forwarded message's attachments aren't downloaded yet; open them, then send again"));
+                    }
                     for a in m.attachments.iter().filter(|a| !a.inline) {
                         if let Some((name, mime, data)) = satchel_mime::attachment_bytes(&raw, &a.id) {
                             attachments.push((name, mime, data));

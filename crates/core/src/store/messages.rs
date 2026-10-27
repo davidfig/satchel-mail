@@ -25,12 +25,14 @@ impl Store {
                 tx.execute(
                     "UPDATE messages SET seen=?, flagged=?, answered=?, draft=?, remote_thread_id=COALESCE(?, remote_thread_id),
                        blob_hash=COALESCE(?, blob_hash), snippet=CASE WHEN ?='' THEN snippet ELSE ? END,
+                       partial=CASE WHEN ? IS NULL THEN partial ELSE ? END, blob_size=CASE WHEN ? IS NULL THEN blob_size ELSE ? END,
                        attachments_json=CASE WHEN ?='[]' THEN attachments_json ELSE ? END,
                        has_attachments=MAX(has_attachments, ?), version=version+1, mirrored=0
                      WHERE id=?",
                     params![
                         rec.flags.seen, rec.flags.flagged, rec.flags.answered, rec.flags.draft, rec.remote_thread_id,
-                        rec.blob_hash, rec.snippet, rec.snippet, to_json(&rec.attachments), to_json(&rec.attachments),
+                        rec.blob_hash, rec.snippet, rec.snippet, rec.blob_hash, rec.partial, rec.blob_hash, rec.blob_size as i64,
+                        to_json(&rec.attachments), to_json(&rec.attachments),
                         rec.attachments.iter().any(|a| !a.inline), id
                     ],
                 )?;
@@ -42,14 +44,15 @@ impl Store {
                 tx.execute(
                     "INSERT INTO messages (id, account_id, remote_id, remote_thread_id, thread_id, message_id_hdr, in_reply_to, subject,
                        from_name, from_email, to_json, cc_json, bcc_json, reply_to_json, refs_json, date, snippet, seen, flagged, answered,
-                       draft, has_attachments, attachments_json, blob_hash, size)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       draft, has_attachments, attachments_json, blob_hash, size, partial, blob_size)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     params![
                         id, account_id, rec.remote_id, rec.remote_thread_id, thread_id, rec.message_id_hdr, rec.in_reply_to, rec.subject,
                         rec.from.as_ref().and_then(|a| a.name.clone()), rec.from.as_ref().map(|a| a.email.clone()),
                         to_json(&rec.to), to_json(&rec.cc), to_json(&rec.bcc), to_json(&rec.reply_to), to_json(&rec.references),
                         rec.date.timestamp_millis(), rec.snippet, rec.flags.seen, rec.flags.flagged, rec.flags.answered, rec.flags.draft,
-                        rec.attachments.iter().any(|a| !a.inline), to_json(&rec.attachments), rec.blob_hash, rec.size as i64
+                        rec.attachments.iter().any(|a| !a.inline), to_json(&rec.attachments), rec.blob_hash, rec.size as i64,
+                        rec.partial, rec.blob_size as i64
                     ],
                 )?;
                 let mut refs: Vec<&String> = rec.references.iter().collect();
@@ -189,20 +192,6 @@ impl Store {
             c.execute(
                 "UPDATE messages SET seen=?, flagged=?, answered=?, draft=?, version=version+1, mirrored=0 WHERE id=?",
                 params![flags.seen, flags.flagged, flags.answered, flags.draft, message_id],
-            )?;
-            Ok(())
-        })?;
-        if let Some(t) = self.thread_of(message_id)? {
-            self.recompute_thread(&t)?;
-        }
-        Ok(())
-    }
-
-    pub fn set_blob(&self, message_id: &str, hash: &str, snippet: &str, attachments: &[Attachment]) -> Result<()> {
-        self.w(|c| {
-            c.execute(
-                "UPDATE messages SET blob_hash=?, snippet=CASE WHEN ?='' THEN snippet ELSE ? END, attachments_json=?, has_attachments=?, indexed=0, mirrored=0 WHERE id=?",
-                params![hash, snippet, snippet, to_json(&attachments), attachments.iter().any(|a| !a.inline), message_id],
             )?;
             Ok(())
         })?;

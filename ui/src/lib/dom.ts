@@ -21,7 +21,7 @@ export function h(sel: string, attrs?: Attrs | Child, ...children: Child[]): HTM
     for (const [k, v] of Object.entries(attrs)) {
       if (v === undefined || v === null || v === false) continue;
       if (k === 'on') {
-        for (const [ev, fn] of Object.entries(v as Record<string, EventListener>)) el.addEventListener(ev, fn);
+        for (const [ev, fn] of Object.entries(v as Record<string, EventListener>)) listen(el, ev, fn);
       } else if (k === 'style') {
         if (typeof v === 'string') el.setAttribute('style', v);
         else
@@ -68,6 +68,69 @@ export function clear(el: Element) {
 export function replace(el: Element, ...children: Child[]) {
   clear(el);
   append(el, children);
+}
+
+/** Listeners added through `listen` (and `h`'s `on`), per element and event.
+ *  Each element gets one stable DOM listener per event that calls whatever is
+ *  stored here, so `patch` can hand a kept element the new tree's handlers. */
+const handlers = new WeakMap<Element, Map<string, EventListener[]>>();
+
+/** addEventListener that `patch` knows about. Use it for listeners on
+ *  elements that are re-rendered with `patch`. */
+export function listen(el: Element, ev: string, fn: EventListener) {
+  let byEvent = handlers.get(el);
+  if (!byEvent) handlers.set(el, (byEvent = new Map()));
+  let list = byEvent.get(ev);
+  if (!list) {
+    byEvent.set(ev, (list = []));
+    el.addEventListener(ev, (e) => {
+      for (const f of handlers.get(el)?.get(ev) ?? []) f.call(el, e);
+    });
+  }
+  list.push(fn);
+}
+
+/** Like `replace`, but updates `el`'s existing children in place to match the
+ *  new ones instead of swapping them out. Use it for views that re-render
+ *  often (the sidebar on every sync tick): nodes under the pointer keep their
+ *  :hover, tooltips stay up, images don't reload, animations don't restart.
+ *  It syncs attributes, text and `listen` handlers, so render from scratch
+ *  each time and set state through attributes, not DOM properties. */
+export function patch(el: Element, ...children: Child[]) {
+  const next = document.createElement('div');
+  append(next, children);
+  patchChildren(el, next);
+}
+
+function patchChildren(old: Node, next: Node) {
+  const want = [...next.childNodes];
+  for (let i = 0; i < want.length; i++) {
+    const have = old.childNodes[i];
+    if (have && sameKind(have, want[i])) patchNode(have, want[i]);
+    else if (have) old.replaceChild(want[i], have);
+    else old.appendChild(want[i]);
+  }
+  while (old.childNodes.length > want.length) old.removeChild(old.lastChild!);
+}
+
+function sameKind(a: Node, b: Node) {
+  return a.nodeType === b.nodeType && a.nodeName === b.nodeName;
+}
+
+function patchNode(old: Node, next: Node) {
+  if (!(old instanceof Element) || !(next instanceof Element)) {
+    if (old.nodeValue !== next.nodeValue) old.nodeValue = next.nodeValue;
+    return;
+  }
+  for (const { name } of [...old.attributes]) if (!next.hasAttribute(name)) old.removeAttribute(name);
+  for (const { name, value } of [...next.attributes]) if (old.getAttribute(name) !== value) old.setAttribute(name, value);
+  const theirs = handlers.get(next);
+  for (const ev of handlers.get(old)?.keys() ?? []) if (!theirs?.has(ev)) handlers.get(old)!.set(ev, []);
+  for (const [ev, fns] of theirs ?? []) {
+    if (!handlers.get(old)?.has(ev)) listen(old, ev, () => {});
+    handlers.get(old)!.set(ev, fns);
+  }
+  patchChildren(old, next);
 }
 
 /** Inline SVG icons (stroke-based, 20px grid). */

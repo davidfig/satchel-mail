@@ -58,6 +58,10 @@ impl Engine {
                 };
                 d.body_text = satchel_mime::forward_body(&parsed);
                 d.forward_of = Some(message_id.to_string());
+                // Sending reads the attachments from the stored copy; get them now.
+                if let Err(e) = self.full_raw_for(message_id).await {
+                    tracing::debug!("attachments for forward: {e:#}");
+                }
             }
         }
         Ok(d)
@@ -78,7 +82,7 @@ impl Engine {
     pub(crate) async fn edit_draft(&self, message_id: &str) -> Result<Draft> {
         let m = self.store.message_row(message_id)?.ok_or_else(|| not_found("message"))?;
         let account = m.summary.account_id.clone();
-        let raw = self.raw_for(message_id).await?.ok_or_else(|| not_found("message body"))?;
+        let raw = self.full_raw_for(message_id).await?.ok_or_else(|| not_found("message body"))?;
         // Satchel's own drafts name their local draft.
         if let Some(id) = header_value(&raw, "X-Satchel-Draft-Id")
             && let Some((d, _)) = self.store.get_draft(&id)?

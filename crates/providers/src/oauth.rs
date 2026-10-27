@@ -334,7 +334,7 @@ impl TokenSource {
 }
 
 /// An authenticated JSON HTTP client that retries once on 401 after a refresh
-/// and backs off on 429/503.
+/// and backs off on 429/503 and Google's quota 403s.
 pub struct ApiClient {
     pub http: reqwest::Client,
     pub tokens: TokenSource,
@@ -353,23 +353,24 @@ impl ApiClient {
                 refreshed = true;
                 continue;
             }
-            if st.as_u16() == 429 || st.as_u16() == 503 {
-                let wait = resp
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .map(Duration::from_secs)
-                    .unwrap_or(backoff);
-                tokio::time::sleep(wait.min(Duration::from_secs(60))).await;
-                backoff *= 2;
-                continue;
+            let retry_after = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(Duration::from_secs);
+            if st.is_success() {
+                return Ok(resp);
             }
-            if !st.is_success() {
+            if st.as_u16() != 429 && st.as_u16() != 503 {
                 let body = resp.text().await.unwrap_or_default();
-                return Err(crate::net::http_error(st, &body, what));
+                // Google sends per-minute quota errors as 403.
+                if !(st.as_u16() == 403 && crate::net::is_quota_body(&body)) {
+                    return Err(crate::net::http_error(st, &body, what));
+                }
             }
-            return Ok(resp);
+            tokio::time::sleep(retry_after.unwrap_or(backoff).min(Duration::from_secs(60))).await;
+            backoff *= 2;
         }
         Err(anyhow::Error::new(ApiError::new(ErrorCode::RateLimited, format!("{what}: rate limited"))))
     }

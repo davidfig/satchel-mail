@@ -83,7 +83,7 @@ export function editAgent(view: SettingsView, existing: Agent | null, dataDir?: 
 
 export async function showToken(token: string, dataDir?: string) {
   // The desktop app bundles the CLI; use its absolute path so it works without PATH changes.
-  const cli = transport.kind === 'tauri' ? ((await transport.invoke<string | null>('cli_path').catch(() => null)) ?? 'satchel') : 'satchel';
+  const cli = transport.kind === 'tauri' ? ((await transport.host<string | null>('cli_path').catch(() => null)) ?? 'satchel') : 'satchel';
   const quoted = cli.includes(' ') ? `"${cli}"` : cli;
   const env = dataDir && transport.kind !== 'tauri' ? ` --env SATCHEL_DATA_DIR="${dataDir}"` : '';
   const claude = `claude mcp add satchel --env SATCHEL_AGENT_TOKEN=${token}${env} -- ${quoted} mcp`;

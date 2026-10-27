@@ -8,6 +8,8 @@ pub mod jmap;
 pub mod microsoft;
 pub mod net;
 pub mod oauth;
+#[cfg(test)]
+mod test_mail;
 
 use std::sync::Arc;
 

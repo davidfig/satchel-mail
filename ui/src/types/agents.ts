@@ -69,6 +69,10 @@ export interface Settings {
   sync_ai_drafts_to_server: boolean;
   theme: 'system' | 'light' | 'dark' | string;
   initial_sync_days: number;
+  /** Days of mail downloaded in the background (null: all mail). */
+  download_days: number | null;
+  /** Most disk each account's downloaded mail may use, in MB (null: no limit). */
+  storage_limit_mb: number | null;
   poll_interval_secs: number;
   notify_new_mail: boolean;
 }

@@ -170,7 +170,7 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
 }
 
 export function openExternal(url: string) {
-  if (transport.kind === 'tauri') void transport.invoke('open_url', { url }).catch(() => window.open(url, '_blank', 'noopener'));
+  if (transport.kind === 'tauri') void transport.host('open_url', { url }).catch(() => window.open(url, '_blank', 'noopener'));
   else window.open(url, '_blank', 'noopener,noreferrer');
 }
 
@@ -185,7 +185,7 @@ async function download(messageId: string, attachmentId: string) {
 
 export async function saveBase64(filename: string, mime: string, b64: string) {
   if (transport.kind === 'tauri') {
-    const path = await transport.invoke<string | null>('save_file', { filename, data_base64: b64 });
+    const path = await transport.host<string | null>('save_file', { filename, data_base64: b64 });
     if (path) toast(`Saved to ${path}`, { kind: 'success' });
     return;
   }

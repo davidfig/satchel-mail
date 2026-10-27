@@ -85,7 +85,7 @@ impl Engine {
             }
             Command::GetRawMessage { message_id } => {
                 self.require_user(caller)?;
-                let raw = self.raw_for(&message_id).await?.ok_or_else(|| not_found("message body"))?;
+                let raw = self.full_raw_for(&message_id).await?.ok_or_else(|| not_found("message body"))?;
                 ok(json!({ "raw": String::from_utf8_lossy(&raw) }))
             }
             Command::GetAttachment { message_id, attachment_id } => {
