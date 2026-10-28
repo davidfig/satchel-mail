@@ -6,7 +6,7 @@ import { shortName } from '../../lib/format';
 import { personLink } from '../../lib/person';
 import { errorToast } from '../../lib/ui';
 import { store } from '../../state';
-import type { Address, Mailbox, Thread } from '../../types';
+import type { Address, Mailbox, Thread, ThreadSummary } from '../../types';
 import { editDraft, openComposer } from './composer';
 import { Conversation, mineFor } from './conversation';
 import { ReplyBox } from './reply-box';
@@ -29,7 +29,9 @@ export async function showThread(view: MailView, threadId: string, markRead = tr
     const thread = await api.getThread(threadId);
     if (gen !== view.generation || store.state.selectedThread !== threadId) return;
     view.openThread = thread;
-    view.openSummary = view.list.find(threadId) ?? null;
+    // Opened from outside the loaded rows (a notification, Review, or
+    // scrolled away): build the summary so the header's actions still work.
+    view.openSummary = view.list.find(threadId) ?? summaryOf(thread);
     view.renderThread(thread);
     // Opening a draft from Drafts means finishing it.
     const src = store.state.source;
@@ -48,6 +50,27 @@ export async function showThread(view: MailView, threadId: string, markRead = tr
     errorToast(e);
     view.renderEmptyReader();
   }
+}
+
+function summaryOf(thread: Thread): ThreadSummary {
+  const ms = thread.messages;
+  const last = ms[ms.length - 1];
+  const people = new Map<string, Address>();
+  for (const m of ms) for (const a of [m.from, ...m.to]) if (a) people.set(a.email.toLowerCase(), a);
+  return {
+    thread_id: thread.thread_id,
+    account_id: thread.account_id,
+    subject: thread.subject,
+    participants: [...people.values()],
+    last_date: last?.date ?? '',
+    message_count: ms.length,
+    unread_count: ms.filter((m) => !m.flags.seen).length,
+    flagged: ms.some((m) => m.flags.flagged),
+    has_attachments: ms.some((m) => m.has_attachments),
+    snippet: last?.snippet ?? '',
+    mailbox_ids: [...new Set(ms.flatMap((m) => m.mailbox_ids))],
+    latest_message_id: last?.id ?? '',
+  };
 }
 
 export function renderThread(view: MailView, thread: Thread) {
