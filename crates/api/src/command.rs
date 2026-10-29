@@ -29,6 +29,15 @@ pub enum Command {
     /// Delete an empty-of-subfolders folder. Its messages move to Trash first
     /// (labels: the label just goes). Returns {moved_to_trash}.
     DeleteMailbox { mailbox_id: Id },
+    /// Smart folders in sidebar order, with their badge counts.
+    ListSmartFolders,
+    // smart folders (user scope only)
+    /// Create (no id) or update a smart folder. Returns the SmartFolder.
+    SaveSmartFolder { folder: SmartFolder },
+    /// Remove a smart folder. Its mail is untouched.
+    DeleteSmartFolder { id: Id },
+    /// Put the smart folders in this order.
+    ReorderSmartFolders { ids: Vec<Id> },
     ListThreads { query: ThreadQuery },
     /// Total matching threads (for list sizing); ignores paging fields.
     CountThreads { query: ThreadQuery },
@@ -153,6 +162,7 @@ impl Command {
             self,
             Command::ListAccounts
                 | Command::ListMailboxes { .. }
+                | Command::ListSmartFolders
                 | Command::ListThreads { .. }
                 | Command::CountThreads { .. }
                 | Command::GetThread { .. }

@@ -31,11 +31,12 @@ export function writeJson(key: string, value: unknown) {
   }
 }
 
-/** Reopen where the user left off, unless that mailbox has since gone away. */
+/** Reopen where the user left off, unless that mailbox or smart folder has since gone away. */
 export function restoreLocation() {
   const last = readJson<{ view: View; source: MailSource }>(LOCATION_KEY);
   if (!last || !['mail', 'calendar', 'contacts', 'review', 'settings'].includes(last.view)) return;
-  const source = last.source?.kind === 'mailbox' && !store.mailbox(last.source.mailbox_id) ? store.state.source : last.source ?? store.state.source;
+  const gone = (last.source?.kind === 'mailbox' && !store.mailbox(last.source.mailbox_id)) || (last.source?.kind === 'smart' && !store.smartFolder(last.source.id));
+  const source = gone ? store.state.source : last.source ?? store.state.source;
   store.set({ view: last.view, source });
 }
 

@@ -100,6 +100,7 @@ function emptyMessage(): string {
   const s = store.state.source;
   if (!store.state.accounts.length) return 'No accounts yet — add one in Settings.';
   if (s.kind === 'search') return 'No matching conversations.';
+  if (s.kind === 'smart') return 'Nothing in this smart folder right now.';
   if (s.kind === 'person') return s.filter === 'all' ? `No conversations with ${s.label}.` : 'No matching conversations.';
   return s.kind === 'role' && s.role === 'inbox' ? 'Inbox zero. 🎉' : 'Nothing here.';
 }

@@ -123,6 +123,8 @@ export interface ThreadQuery {
   mailbox_id?: Id | null;
   role?: MailboxRole | null;
   account_id?: Id | null;
+  /** A smart folder: its saved search, narrowed by `search` if given. */
+  smart_folder_id?: Id | null;
   search?: string | null;
   limit?: number | null;
   before?: ISODate | null;
@@ -151,3 +153,17 @@ export interface Draft {
 }
 
 export type ReplyMode = 'reply' | 'reply_all' | 'forward';
+
+/** What a smart folder's sidebar badge counts. */
+export type SmartBadge = 'unread' | 'total' | 'none';
+
+/** A saved search shown under Mail in the sidebar, across every account. */
+export interface SmartFolder {
+  /** Empty when creating one. */
+  id: Id;
+  name: string;
+  query: string;
+  badge: SmartBadge;
+  /** The number the badge shows. */
+  count: number;
+}

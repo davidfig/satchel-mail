@@ -11,6 +11,7 @@ pub enum CoreEvent {
     MessagesChanged { account_id: Id },
     CalendarChanged { account_id: Id },
     ContactsChanged,
+    SmartFoldersChanged,
     ProposalsChanged,
     OutboxChanged,
     /// A queued operation failed permanently.

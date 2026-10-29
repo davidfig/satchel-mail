@@ -31,6 +31,7 @@ import type {
   SenderRule,
   SenderVerdict,
   Settings,
+  SmartFolder,
   Thread,
   ThreadQuery,
   ThreadSummary,
@@ -50,6 +51,10 @@ export const api = {
   syncNow: (account_id: Id | null = null) => call('sync_now', { account_id }),
 
   listMailboxes: (account_id: Id | null = null) => call<Mailbox[]>('list_mailboxes', { account_id }),
+  listSmartFolders: () => call<SmartFolder[]>('list_smart_folders'),
+  saveSmartFolder: (folder: SmartFolder) => call<SmartFolder>('save_smart_folder', { folder }),
+  deleteSmartFolder: (id: Id) => call('delete_smart_folder', { id }),
+  reorderSmartFolders: (ids: Id[]) => call('reorder_smart_folders', { ids }),
   listThreads: (query: ThreadQuery) => call<ThreadSummary[]>('list_threads', { query }),
   countThreads: (query: ThreadQuery) => call<{ total: number }>('count_threads', { query }),
   getThread: (thread_id: Id) => call<Thread>('get_thread', { thread_id }),

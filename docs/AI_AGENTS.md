@@ -28,6 +28,7 @@ access there gets around every safeguard.
 README.md                                  how to read and propose (for the agent)
 mail/<account>/INDEX.md, <mailbox>.md      newest threads first
 mail/<account>/threads/<yyyy-mm>/<slug>-<id>/thread.md, meta.json
+smart-folders.md                           the user's smart folders: each query and its newest threads
 calendar/AGENDA.md, calendar/<account>/<calendar>/<uid>.ics
 contacts/CONTACTS.md                       the address book, with contact ids
 contacts/people/<name>-<id>.md             one person; edit or add one to propose a change
@@ -92,8 +93,11 @@ The desktop app shows the absolute path of its bundled `satchel` binary.
 `satchel mcp` works whether or not the app is running: it opens the local store
 read-only and writes proposals the app picks up immediately.
 
-Read: `whoami`, `list_accounts`, `list_mailboxes`, `search_threads` (free text +
-`from: to: with: subject: has:attachment is:unread is:flagged before: after: in:`),
+Read: `whoami`, `list_accounts`, `list_mailboxes`, `list_smart_folders`,
+`search_threads` (free text + `from: to: with: subject: has:attachment
+is:unread is:read is:flagged is:unflagged before: after: newer_than: older_than:
+in: in:anywhere account:`, `-` before a term to exclude it, and
+`smart_folder_id` to browse a smart folder),
 `get_thread`, `get_message`, `get_attachment`, `list_calendars`, `list_events`,
 `get_event`, `find_free_time`, `search_contacts`, `get_contact`.
 

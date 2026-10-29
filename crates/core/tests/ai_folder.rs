@@ -99,3 +99,15 @@ async fn symlinks_in_the_ai_folder_are_never_followed() {
     assert!(!planted.exists(), "wrote through a planted symlink");
     assert_eq!(std::fs::read_to_string(&secret).unwrap(), "PRIVATE KEY");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn smart_folders_are_listed_for_agents() {
+    let (engine, _fake, _account, dir) = setup().await;
+    let folder = SmartFolder { name: "Vendors".into(), query: "from:bill".into(), ..Default::default() };
+    engine.handle(&Caller::User, Command::SaveSmartFolder { folder }).await.unwrap();
+    engine.mirror_pass(true).unwrap();
+    let md = std::fs::read_to_string(dir.path().join("mirror/smart-folders.md")).unwrap();
+    assert!(md.contains("## Vendors") && md.contains("Query: `from:bill`"), "{md}");
+    assert!(md.contains("| Invoice |") && !md.contains("Kickoff"), "{md}");
+    assert!(md.contains("/thread.md)"), "{md}");
+}

@@ -2,7 +2,7 @@
 
 import { api } from './api';
 import { transport } from './transport';
-import type { Account, CoreEvent, Mailbox, MailboxRole, Settings } from './types';
+import type { Account, CoreEvent, Mailbox, MailboxRole, Settings, SmartFolder } from './types';
 import { notifyNewMail } from './lib/notify';
 import { toast } from './lib/ui';
 
@@ -12,6 +12,7 @@ export type View = 'mail' | 'calendar' | 'contacts' | 'review' | 'settings';
 export type MailSource =
   | { kind: 'role'; role: MailboxRole; label: string }
   | { kind: 'mailbox'; mailbox_id: string; label: string }
+  | { kind: 'smart'; id: string; label: string }
   | { kind: 'search'; query: string; label: string }
   | { kind: 'person'; emails: string[]; label: string; filter: PersonFilter; back?: MailSource };
 
@@ -22,6 +23,7 @@ interface AppState {
   view: View;
   accounts: Account[];
   mailboxes: Mailbox[];
+  smartFolders: SmartFolder[];
   settings: Settings | null;
   pendingProposals: number;
   source: MailSource;
@@ -38,6 +40,7 @@ class Store {
     view: 'mail',
     accounts: [],
     mailboxes: [],
+    smartFolders: [],
     settings: null,
     pendingProposals: 0,
     source: { kind: 'role', role: 'inbox', label: 'Inbox' },
@@ -73,6 +76,10 @@ class Store {
     this.set({ mailboxes: await api.listMailboxes(null) });
   }
 
+  async refreshSmartFolders() {
+    this.set({ smartFolders: await api.listSmartFolders() });
+  }
+
   async refreshProposals() {
     const p = await api.listProposals('pending');
     const stale = await api.listProposals('stale');
@@ -80,17 +87,21 @@ class Store {
   }
 
   async init() {
-    const [settings] = await Promise.all([api.getSettings(), this.refreshAccounts(), this.refreshMailboxes(), this.refreshProposals()]);
+    const [settings] = await Promise.all([api.getSettings(), this.refreshAccounts(), this.refreshMailboxes(), this.refreshSmartFolders(), this.refreshProposals()]);
     this.set({ settings });
     applyTheme(settings.theme);
     const refresh = debounceAsync(async () => {
-      await Promise.all([this.refreshMailboxes(), this.refreshAccounts()]);
+      await Promise.all([this.refreshMailboxes(), this.refreshAccounts(), this.refreshSmartFolders()]);
     }, 400);
     transport.subscribe((e) => {
       switch (e.event) {
         case 'accounts_changed':
           void this.refreshAccounts();
           void this.refreshMailboxes();
+          void this.refreshSmartFolders();
+          break;
+        case 'smart_folders_changed':
+          void this.refreshSmartFolders();
           break;
         case 'mailboxes_changed':
         case 'messages_changed':
@@ -128,6 +139,10 @@ class Store {
 
   mailbox(id: string) {
     return this.state.mailboxes.find((m) => m.id === id);
+  }
+
+  smartFolder(id: string) {
+    return this.state.smartFolders.find((f) => f.id === id);
   }
 }
 

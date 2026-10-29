@@ -142,6 +142,7 @@ const ICONS: Record<string, string> = {
   trash: '<path d="M3.5 5.5h13"/><path d="M8 5.5V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5"/><path d="M5 5.5l.8 10.6a1 1 0 0 0 1 .9h6.4a1 1 0 0 0 1-.9L15 5.5"/>',
   junk: '<circle cx="10" cy="10" r="7"/><path d="M5 15L15 5"/>',
   folder: '<path d="M2.5 6a1 1 0 0 1 1-1h4l1.5 1.5h7.5a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1z"/>',
+  smartFolder: '<path d="M9 16H3.5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4l1.5 1.5h7.5a1 1 0 0 1 1 1V9"/><circle cx="13.5" cy="12.5" r="2.5"/><path d="M15.3 14.3L17.5 16.5"/>',
   label: '<path d="M3 4.5a1 1 0 0 1 1-1h6.5l6 6.5-6 6.5H4a1 1 0 0 1-1-1z"/><circle cx="7" cy="8" r="1"/>',
   star: '<path d="M10 2.8l2.2 4.6 5 .6-3.7 3.4 1 5-4.5-2.5-4.5 2.5 1-5L2.8 8l5-.6z"/>',
   calendar: '<rect x="2.5" y="4" width="15" height="13" rx="1.5"/><path d="M2.5 8h15M6.5 2.5v3M13.5 2.5v3"/>',

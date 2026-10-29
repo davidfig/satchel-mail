@@ -251,9 +251,14 @@ pub struct ThreadQuery {
     /// Unified view across accounts by role (e.g. all inboxes).
     pub role: Option<MailboxRole>,
     pub account_id: Option<Id>,
+    /// A smart folder: its saved search, narrowed by `search` if given.
+    #[serde(default)]
+    pub smart_folder_id: Option<Id>,
     /// Search query (supports from:, to:, with:, subject:, has:attachment,
-    /// is:unread, is:flagged, before:, after:, in:). from:, to: and with: take a
-    /// comma-separated list; a full address matches exactly.
+    /// is:unread/read, is:flagged/unflagged, before:, after:, newer_than:7d,
+    /// older_than:1y, in:, in:anywhere, account:). from:, to:, with:, in: and
+    /// account: take a comma-separated list; a full address matches exactly.
+    /// Every term must hold; a leading `-` negates one.
     pub search: Option<String>,
     pub limit: Option<u32>,
     /// Keyset paging: threads older than this `last_date`...
@@ -296,4 +301,33 @@ pub struct OutgoingAttachment {
     pub mime_type: String,
     /// Base64 content.
     pub data_base64: String,
+}
+
+/// A saved search shown under Mail in the sidebar. It searches every folder
+/// of every account (Trash and Junk only with `in:anywhere`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SmartFolder {
+    /// Empty when creating one.
+    #[serde(default)]
+    pub id: Id,
+    pub name: String,
+    /// A search in the search box's language (see [`ThreadQuery::search`]).
+    pub query: String,
+    #[serde(default)]
+    pub badge: SmartBadge,
+    /// The number the badge shows (filled in by `ListSmartFolders`).
+    #[serde(default)]
+    pub count: u32,
+}
+
+/// What a smart folder's sidebar badge counts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SmartBadge {
+    /// Conversations with unread mail.
+    #[default]
+    Unread,
+    /// All matching conversations.
+    Total,
+    None,
 }

@@ -9,7 +9,39 @@ use serde_json::{Value, json};
 
 use crate::engine::{Caller, Engine, Mode};
 use crate::error::{err, forbidden, not_found};
-use crate::store::{StoredMessage, ThreadFilter};
+use crate::store::{MsgCond, MsgTerm, Store, StoredMessage, ThreadFilter};
+
+/// Add a search (the search box's language) to a filter. Unless it names a
+/// mailbox, or the filter already has one, Trash and Junk are left out.
+pub(crate) fn apply_search(store: &Store, f: &mut ThreadFilter, search: &str) -> Result<()> {
+    let p = crate::mail::search::parse_query(search);
+    if !p.names_mailbox() && f.mailbox_id.is_none() && f.role.is_none() {
+        f.exclude_trash_junk = true;
+    }
+    if !p.accounts.is_empty() {
+        f.account_ids = Some(search_accounts(store, f.account_ids.take(), &p.accounts)?);
+    }
+    f.conds.extend(p.conds);
+    Ok(())
+}
+
+/// Narrow `allowed` (None = every account) by `account:` terms: each value
+/// matches part of an account's address or name.
+fn search_accounts(store: &Store, allowed: Option<Vec<String>>, terms: &[(Vec<String>, bool)]) -> Result<Vec<String>> {
+    Ok(store
+        .list_accounts()?
+        .iter()
+        .filter(|a| allowed.as_ref().is_none_or(|ids| ids.contains(&a.id)))
+        .filter(|a| {
+            let (email, name) = (a.email.to_lowercase(), a.display_name.to_lowercase());
+            terms.iter().all(|(values, negate)| {
+                let hit = values.iter().map(|v| v.to_lowercase()).any(|v| email.contains(&v) || name.contains(&v));
+                hit != *negate
+            })
+        })
+        .map(|a| a.id.clone())
+        .collect())
+}
 
 impl Engine {
     pub(crate) fn list_threads(&self, caller: &Caller, q: &ThreadQuery) -> Result<Vec<ThreadSummary>> {
@@ -40,26 +72,14 @@ impl Engine {
         }
         f.account_ids = accounts;
         f.after = self.cutoff(caller);
-        if let Some(s) = q.search.as_deref().filter(|s| !s.trim().is_empty()) {
-            let p = crate::mail::search::parse_query(s);
-            f.from = p.from;
-            f.to = p.to;
-            f.with = p.with;
-            f.subject = p.subject;
-            f.has_attachment = p.has_attachment;
-            f.unread = p.unread;
-            f.flagged = p.flagged;
-            f.after = match (f.after, p.after) {
-                (Some(a), Some(b)) => Some(a.max(b)),
-                (a, b) => a.or(b),
-            };
-            f.msg_before = p.before;
-            if let Some(m) = p.in_mailbox {
-                f.in_mailbox_names = Some(vec![m]);
-            } else if q.mailbox_id.is_none() && q.role.is_none() {
-                f.exclude_trash_junk = true;
-            }
-            f.fts = crate::mail::search::fts_query(&p.text);
+        // A smart folder is its saved query; a search inside it narrows it further.
+        let folder_query = match &q.smart_folder_id {
+            Some(id) => Some(self.store.get_smart_folder(id)?.ok_or_else(|| not_found("smart folder"))?.query),
+            None => None,
+        };
+        let search = [folder_query.as_deref(), q.search.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" ");
+        if folder_query.is_some() || !search.trim().is_empty() {
+            apply_search(&self.store, &mut f, &search)?;
         }
         Ok(f)
     }
@@ -237,8 +257,9 @@ impl Engine {
             }
             p.contact_id = Some(c.id);
         }
-        let f = ThreadFilter { with: p.addresses.iter().map(|a| a.email.clone()).collect(), exclude_trash_junk: true, ..Default::default() };
-        if !f.with.is_empty() {
+        if !p.addresses.is_empty() {
+            let with = MsgTerm::With(p.addresses.iter().map(|a| a.email.clone()).collect());
+            let f = ThreadFilter { conds: vec![MsgCond::new(with)], exclude_trash_junk: true, ..Default::default() };
             p.threads = self.store.count_threads(&f)?;
         }
         Ok(p)

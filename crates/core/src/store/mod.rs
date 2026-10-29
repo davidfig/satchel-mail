@@ -15,6 +15,7 @@ mod messages;
 mod ops;
 mod people;
 mod sender_rules;
+mod smart_folders;
 #[cfg(test)]
 mod tests;
 mod threads;
@@ -189,13 +190,22 @@ fn open_conn(path: &Path) -> Result<Connection> {
 /// The schema version `schema.sql` creates. To change the schema, edit
 /// `schema.sql` to the new shape, bump this, and append to [`MIGRATIONS`] the
 /// SQL that takes a database from the previous version to this one.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` database to version `i + 2`.
 const MIGRATIONS: &[&str] = &[
     // 2: attachment-free copies and per-account storage limits (0036).
     "ALTER TABLE messages ADD COLUMN partial INTEGER NOT NULL DEFAULT 0;
      ALTER TABLE messages ADD COLUMN blob_size INTEGER NOT NULL DEFAULT 0;",
+    // 3: smart folders (0039).
+    "CREATE TABLE IF NOT EXISTS smart_folders (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        query       TEXT NOT NULL,
+        badge       TEXT NOT NULL DEFAULT 'unread',
+        position    INTEGER NOT NULL,
+        created_at  INTEGER NOT NULL
+    );",
 ];
 
 /// Create or upgrade the schema, tracked in `PRAGMA user_version`.

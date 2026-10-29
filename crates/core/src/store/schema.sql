@@ -268,6 +268,16 @@ CREATE TABLE IF NOT EXISTS sender_rules (
     created_at  INTEGER NOT NULL
 );
 
+-- Saved searches shown under Mail in the sidebar (0039). Local only.
+CREATE TABLE IF NOT EXISTS smart_folders (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    query       TEXT NOT NULL,
+    badge       TEXT NOT NULL DEFAULT 'unread',
+    position    INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL

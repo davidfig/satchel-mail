@@ -1,7 +1,9 @@
-//! Writing the AI folder: one Markdown file per thread, indexes, contacts and the agenda.
+//! Writing the AI folder: one Markdown file per thread, indexes, smart
+//! folders, contacts and the agenda.
 
 mod calendar;
 mod contacts;
+mod smart_folders;
 mod threads;
 
 pub(crate) use contacts::contact_file;

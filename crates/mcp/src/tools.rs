@@ -26,11 +26,13 @@ pub(crate) fn tools() -> Vec<Tool> {
         ro(Tool::new("whoami", "Show this agent's name, its access policy, and server info.", schema(json!({}), &[]))),
         ro(Tool::new("list_accounts", "List the mail accounts you can read.", schema(json!({}), &[]))),
         ro(Tool::new("list_mailboxes", "List folders/labels with unread and total counts.", schema(json!({ "account_id": { "type": "string" } }), &[]))),
+        ro(Tool::new("list_smart_folders", "List the user's smart folders (saved searches) with their queries and badge counts. Browse one with search_threads and smart_folder_id.", schema(json!({}), &[]))),
         ro(Tool::new(
             "search_threads",
-            "Search or list conversations, newest first. `query` supports free text and operators: from:, to:, with: (sender or recipient), subject:, has:attachment, is:unread, is:flagged, before:YYYY-MM-DD, after:YYYY-MM-DD, in:<mailbox>. from:, to: and with: take a comma-separated list; a full address matches exactly. Use role (inbox, sent, drafts, archive, trash, junk, flagged) or mailbox_id to browse.",
+            "Search or list conversations, newest first. `query` supports free text and operators: from:, to:, with: (sender or recipient), subject:, has:attachment, is:unread, is:read, is:flagged, is:unflagged, before:YYYY-MM-DD, after:YYYY-MM-DD, newer_than:7d, older_than:1y (d, w, m, y), in:<mailbox>, in:anywhere (include Trash and Junk), account:<address>. from:, to:, with:, in: and account: take a comma-separated list; a full address matches exactly. Every term must match; put - before a term to exclude it (-from:noreply). Use role (inbox, sent, drafts, archive, trash, junk, flagged), mailbox_id or smart_folder_id to browse.",
             schema(json!({
                 "query": { "type": "string" },
+                "smart_folder_id": { "type": "string", "description": "A smart folder from list_smart_folders; `query` narrows it further." },
                 "mailbox_id": { "type": "string" },
                 "role": { "type": "string", "enum": ["inbox", "sent", "drafts", "archive", "trash", "junk", "flagged", "all", "important"] },
                 "account_id": { "type": "string" },

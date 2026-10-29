@@ -8,6 +8,7 @@ export type CoreEvent =
   | { event: 'messages_changed'; account_id: Id }
   | { event: 'calendar_changed'; account_id: Id }
   | { event: 'contacts_changed' }
+  | { event: 'smart_folders_changed' }
   | { event: 'proposals_changed' }
   | { event: 'outbox_changed' }
   | { event: 'op_failed'; account_id: Id; description: string; error: string }

@@ -4,6 +4,7 @@
 import { api } from '../../api';
 import { debounce, h, icon, replace } from '../../lib/dom';
 import { formatAddress } from '../../lib/format';
+import { smartFolderDialog } from '../../lib/smart-folders';
 import { bind, contextMenu, errorToast, toast } from '../../lib/ui';
 import type { MenuItem } from '../../lib/ui';
 import { store } from '../../state';
@@ -70,10 +71,13 @@ export class MailView {
       if (changed.has('source')) void this.reload();
       // A folder renamed here or elsewhere keeps its title current.
       else if (changed.has('mailboxes') && store.state.source.kind === 'mailbox') this.renderHeader();
+      else if (changed.has('smartFolders') && store.state.source.kind === 'smart') this.renderHeader();
     });
     const refresh = debounce(() => void this.refresh(), 300);
     store.onEvent((e) => {
       if (e.event === 'messages_changed' || e.event === 'data_changed') refresh();
+      // An edited smart folder may now match different mail.
+      if (e.event === 'smart_folders_changed' && store.state.source.kind === 'smart') void this.reload();
     });
     this.renderHeader();
     this.renderEmptyReader();
@@ -92,6 +96,7 @@ export class MailView {
     const q: ThreadQuery = {};
     if (s.kind === 'role') q.role = s.role;
     else if (s.kind === 'mailbox') q.mailbox_id = s.mailbox_id;
+    else if (s.kind === 'smart') q.smart_folder_id = s.id;
     else if (s.kind === 'person') q.search = personQuery(s.emails, s.filter);
     else q.search = s.query;
     return q;
@@ -107,8 +112,10 @@ export class MailView {
       this.header,
       h('div.list-title',
         s.kind === 'person' && h('button.icon-btn', { title: `Back to ${s.back?.label ?? 'Inbox'}`, 'aria-label': 'Back', on: { click: () => store.set({ source: s.back ?? { kind: 'role', role: 'inbox', label: 'Inbox' } }) } }, icon('chevronLeft')),
-        h('h1', (s.kind === 'person' && this.person?.summary?.name) || (s.kind === 'mailbox' && store.mailbox(s.mailbox_id)?.path) || s.label),
+        h('h1', (s.kind === 'person' && this.person?.summary?.name) || (s.kind === 'mailbox' && store.mailbox(s.mailbox_id)?.path) || (s.kind === 'smart' && store.smartFolder(s.id)?.name) || s.label),
         h('span.spacer'),
+        s.kind === 'search' && h('button.icon-btn', { title: 'Save this search as a smart folder', 'aria-label': 'Save as smart folder', on: { click: () => void this.saveSearch(s.query) } }, icon('smartFolder')),
+        s.kind === 'smart' && h('button.icon-btn', { title: 'Edit this smart folder', 'aria-label': 'Edit smart folder', on: { click: () => void this.editSmart(s.id) } }, icon('draft')),
         h('button.icon-btn', { title: 'Refresh (sync now)', 'aria-label': 'Sync now', on: { click: () => void api.syncNow(null).then(() => toast('Syncing…')) } }, icon('refresh')),
         h('button.icon-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose'))),
       s.kind === 'person' ? this.personCard(s) : this.searchInput,
@@ -126,6 +133,17 @@ export class MailView {
             : h('button', { title: 'Mark as spam: these senders always go to Spam (!)', on: { click: () => void this.act('spam') } }, icon('junk', 16), 'Spam'),
           h('button.link', { title: 'Clear the selection', on: { click: () => { this.selected.clear(); this.renderHeader(); this.renderRows(); } } }, 'Clear')),
     );
+  }
+
+  private async saveSearch(query: string) {
+    const f = await smartFolderDialog({ query });
+    if (f) store.set({ source: { kind: 'smart', id: f.id, label: f.name }, selectedThread: null });
+  }
+
+  private async editSmart(id: string) {
+    const folder = store.smartFolder(id);
+    const saved = folder && (await smartFolderDialog({ folder }));
+    if (saved) store.set({ source: { kind: 'smart', id, label: saved.name } });
   }
 
   /** The summary for the person being shown, fetched once per set of addresses. */

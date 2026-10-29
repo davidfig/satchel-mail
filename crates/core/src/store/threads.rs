@@ -137,6 +137,46 @@ impl Store {
         format!("({})", ors.join(" OR "))
     }
 
+    /// SQL for one search term on message `m`, appending its params.
+    fn term_sql(term: &MsgTerm, p: &mut Vec<rusqlite::types::Value>) -> String {
+        use rusqlite::types::Value as V;
+        match term {
+            // An empty list (`from:,`) asks for nothing.
+            MsgTerm::From(v) | MsgTerm::To(v) | MsgTerm::With(v) | MsgTerm::InMailbox(v) if v.is_empty() => "1".into(),
+            MsgTerm::From(v) => Self::any_address(v, true, false, p),
+            MsgTerm::To(v) => Self::any_address(v, false, true, p),
+            MsgTerm::With(v) => Self::any_address(v, true, true, p),
+            MsgTerm::Subject(s) => {
+                p.push(V::Text(format!("%{}%", s.to_lowercase())));
+                "lower(m.subject) LIKE ?".into()
+            }
+            MsgTerm::HasAttachment => "m.has_attachments=1".into(),
+            MsgTerm::Unread => "m.seen=0".into(),
+            MsgTerm::Flagged => "m.flagged=1".into(),
+            MsgTerm::Before(d) => {
+                p.push(V::Integer(d.timestamp_millis()));
+                "m.date<?".into()
+            }
+            MsgTerm::After(d) => {
+                p.push(V::Integer(d.timestamp_millis()));
+                "m.date>=?".into()
+            }
+            MsgTerm::InMailbox(names) => {
+                let ph = vec!["?"; names.len()].join(",");
+                for _ in 0..2 {
+                    p.extend(names.iter().map(|n| V::Text(n.to_lowercase())));
+                }
+                format!(
+                    "EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND (lower(mb.name) IN ({ph}) OR mb.role IN ({ph})))"
+                )
+            }
+            MsgTerm::Text(q) => {
+                p.push(V::Text(q.clone()));
+                "m.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)".into()
+            }
+        }
+    }
+
     /// WHERE clause + params for a thread filter (excluding paging). `None`
     /// means the filter can match nothing.
     fn thread_where(c: &Connection, f: &ThreadFilter) -> Result<Option<(Vec<String>, Vec<rusqlite::types::Value>)>> {
@@ -174,18 +214,6 @@ impl Store {
                 p.push(V::Text(role_str(role).into()));
             }
         }
-        if let Some(names) = &f.in_mailbox_names {
-            let ph = vec!["?"; names.len()].join(",");
-            msg_conds.push(format!(
-                "EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND (lower(mb.name) IN ({ph}) OR mb.role IN ({ph})))"
-            ));
-            for n in names {
-                p.push(V::Text(n.to_lowercase()));
-            }
-            for n in names {
-                p.push(V::Text(n.to_lowercase()));
-            }
-        }
         if f.exclude_trash_junk {
             msg_conds.push("NOT EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND mb.role IN ('trash','junk'))".into());
         }
@@ -196,54 +224,33 @@ impl Store {
                 p.push(V::Text(x.clone()));
             }
         }
-        if !f.from.is_empty() {
-            msg_conds.push(Self::any_address(&f.from, true, false, &mut p));
-        }
-        if !f.to.is_empty() {
-            msg_conds.push(Self::any_address(&f.to, false, true, &mut p));
-        }
-        if !f.with.is_empty() {
-            msg_conds.push(Self::any_address(&f.with, true, true, &mut p));
-        }
-        if let Some(s) = &f.subject {
-            msg_conds.push("lower(m.subject) LIKE ?".into());
-            p.push(V::Text(format!("%{}%", s.to_lowercase())));
-        }
-        if f.has_attachment {
-            msg_conds.push("m.has_attachments=1".into());
-        }
-        if f.unread {
-            msg_conds.push("m.seen=0".into());
-        }
-        if f.flagged {
-            msg_conds.push("m.flagged=1".into());
-        }
         if let Some(d) = f.after {
             msg_conds.push("m.date>=?".into());
             p.push(V::Integer(d.timestamp_millis()));
         }
-        if let Some(d) = f.msg_before {
-            msg_conds.push("m.date<?".into());
-            p.push(V::Integer(d.timestamp_millis()));
-        }
-        if let Some(q) = &f.fts {
-            // Selective text (few matches): start from the text index. Broad text:
-            // walk threads newest-first and stop early. Either way the text and the
-            // other filters must hold for the same message.
-            let probe: i64 = c.query_row(
-                "SELECT COUNT(*) FROM (SELECT rowid FROM message_fts WHERE message_fts MATCH ? LIMIT 5001)",
-                [q],
-                |r| r.get(0),
-            )?;
-            if probe == 0 {
-                return Ok(None);
+        let mut probed = false;
+        for cond in &f.conds {
+            if let (MsgTerm::Text(q), false, false) = (&cond.term, cond.negate, probed) {
+                // Selective text (few matches): start from the text index. Broad text:
+                // walk threads newest-first and stop early. Either way the text and the
+                // other filters must hold for the same message.
+                probed = true;
+                let probe: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM (SELECT rowid FROM message_fts WHERE message_fts MATCH ? LIMIT 5001)",
+                    [q],
+                    |r| r.get(0),
+                )?;
+                if probe == 0 {
+                    return Ok(None);
+                }
+                if probe <= 5000 {
+                    pre_where.push("t.id IN (SELECT m3.thread_id FROM messages m3 WHERE m3.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?))".into());
+                    pre_p.push(V::Text(q.clone()));
+                }
             }
-            if probe <= 5000 {
-                pre_where.push("t.id IN (SELECT m3.thread_id FROM messages m3 WHERE m3.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?))".into());
-                pre_p.push(V::Text(q.clone()));
-            }
-            msg_conds.push("m.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)".into());
-            p.push(V::Text(q.clone()));
+            let sql = Self::term_sql(&cond.term, &mut p);
+            // A missing value (no sender, say) doesn't match, so negated it does.
+            msg_conds.push(if cond.negate { format!("NOT COALESCE(({sql}),0)") } else { sql });
         }
         if let Some(ids) = &f.message_ids {
             if ids.is_empty() {

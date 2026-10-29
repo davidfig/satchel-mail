@@ -2,11 +2,12 @@ import { api } from '../api';
 import { transport } from '../transport';
 import { h, icon, patch, replace } from '../lib/dom';
 import { deleteFolder, folderDialog, folderTree } from '../lib/folders';
+import { deleteSmartFolder, moveSmartFolder, smartFolderDialog } from '../lib/smart-folders';
 import { relative } from '../lib/format';
 import { bind, contextMenu, errorToast, setScope, toast } from '../lib/ui';
 import type { MenuItem } from '../lib/ui';
 import { type MailSource, type View, store } from '../state';
-import type { Account, Mailbox, MailboxRole } from '../types';
+import type { Account, Mailbox, MailboxRole, SmartFolder } from '../types';
 import { CalendarView } from '../views/calendar';
 import { ContactsView } from '../views/contacts';
 import { openComposer } from '../views/mail/composer';
@@ -40,7 +41,7 @@ export class Shell {
     store.subscribe((_, changed) => {
       if (changed.has('view')) this.showView();
       if (changed.has('view') || changed.has('source')) writeJson(LOCATION_KEY, { view: store.state.view, source: store.state.source });
-      if (['view', 'accounts', 'mailboxes', 'pendingProposals', 'source'].some((k) => changed.has(k as never))) this.renderSidebar();
+      if (['view', 'accounts', 'mailboxes', 'smartFolders', 'pendingProposals', 'source'].some((k) => changed.has(k as never))) this.renderSidebar();
     });
     this.renderSidebar();
     this.showView();
@@ -186,6 +187,7 @@ export class Shell {
       h('button.primary.compose-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose', 16), h('span', 'Compose')),
       h('div.nav',
         this.navItem('mail', 'Mail', 'mail'),
+        store.state.view === 'mail' && !collapsed && this.smartFolders(),
         this.navItem('calendar', 'Calendar', 'calendar'),
         this.navItem('contacts', 'Contacts', 'user'),
         this.navItem('review', 'Review', 'sparkle', pendingProposals),
@@ -204,6 +206,49 @@ export class Shell {
           : h('div.sync-status', syncing ? h('span.spinner') : icon('check', 14),
               syncing ? (accounts.find((a) => a.sync.detail)?.sync.detail ?? 'Syncing…') : accounts.length ? `Updated ${relative(accounts.map((a) => a.sync.last_success).filter(Boolean).sort().pop() ?? null)}` : 'No accounts')),
     );
+  }
+
+  /** Smart folders, under Mail: each searches every account's folders. */
+  private smartFolders() {
+    const s = store.state.source;
+    const folders = store.state.smartFolders;
+    return h('div.smart-folders',
+      folders.map((f, i) => {
+        const active = s.kind === 'smart' && s.id === f.id;
+        const open = () => this.go('mail', { kind: 'smart', id: f.id, label: f.name });
+        const el = h(`button.mb-item.smart-item${active ? '.active' : ''}`, {
+          title: `${f.name}: ${f.query}`,
+          on: { click: open, dblclick: () => void this.editSmartFolder(f) },
+        }, icon('smartFolder', 16), h('span.mb-name', f.name), f.badge !== 'none' && f.count > 0 && h('span.mb-count', String(f.count)));
+        contextMenu(el, () => [
+          { label: 'Open', icon: 'mailOpen', run: open },
+          { label: 'Edit…', icon: 'draft', run: () => void this.editSmartFolder(f) },
+          { label: 'Move up', disabled: i === 0, run: () => moveSmartFolder(f, -1) },
+          { label: 'Move down', disabled: i === folders.length - 1, run: () => moveSmartFolder(f, 1) },
+          '-',
+          { label: 'New smart folder…', icon: 'plus', run: () => void this.newSmartFolder() },
+          { label: 'Delete smart folder…', icon: 'trash', danger: true, run: () => void this.removeSmartFolder(f) },
+        ]);
+        return el;
+      }),
+      h('button.mb-item.smart-item.smart-add', { title: 'New smart folder: a saved search across all your mail', on: { click: () => void this.newSmartFolder() } },
+        icon('plus', 16), h('span.mb-name', folders.length ? 'New smart folder' : 'Add a smart folder')));
+  }
+
+  async newSmartFolder(query?: string) {
+    const f = await smartFolderDialog({ query });
+    if (f) this.go('mail', { kind: 'smart', id: f.id, label: f.name });
+  }
+
+  private async editSmartFolder(f: SmartFolder) {
+    const saved = await smartFolderDialog({ folder: f });
+    const s = store.state.source;
+    if (saved && s.kind === 'smart' && s.id === f.id) store.set({ source: { ...s, label: saved.name } });
+  }
+
+  private async removeSmartFolder(f: SmartFolder) {
+    const s = store.state.source;
+    if ((await deleteSmartFolder(f)) && s.kind === 'smart' && s.id === f.id) this.go('mail', { kind: 'role', role: 'inbox', label: 'Inbox' });
   }
 
   private accountSection(a: Account, boxes: Mailbox[]) {

@@ -22,13 +22,31 @@ fn a_database_from_before_versioning_counts_as_version_1() {
     let c = Connection::open(&path).unwrap();
     c.execute_batch(include_str!("schema.sql")).unwrap();
     // Back to the version 1 shape, so the migrations since run on it.
-    c.execute_batch("ALTER TABLE messages DROP COLUMN partial; ALTER TABLE messages DROP COLUMN blob_size;").unwrap();
+    c.execute_batch("ALTER TABLE messages DROP COLUMN partial; ALTER TABLE messages DROP COLUMN blob_size; DROP TABLE smart_folders;").unwrap();
     drop(c);
     drop(Store::open(&path).unwrap());
     let c = Connection::open(&path).unwrap();
     let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
     assert_eq!(v, SCHEMA_VERSION);
     c.query_row("SELECT partial, blob_size FROM messages", [], |_| Ok(())).optional().unwrap();
+    c.query_row("SELECT id, name, query, badge, position FROM smart_folders", [], |_| Ok(())).optional().unwrap();
+}
+
+#[test]
+fn smart_folders_keep_their_order() {
+    let s = Store::open_in_memory().unwrap();
+    let save = |name: &str| s.save_smart_folder(&SmartFolder { name: name.into(), query: "is:unread".into(), ..Default::default() }).unwrap();
+    let (a, b, c) = (save("A"), save("B"), save("C"));
+    let names = || s.list_smart_folders().unwrap().into_iter().map(|f| f.name).collect::<Vec<_>>();
+    assert_eq!(names(), ["A", "B", "C"]);
+    s.reorder_smart_folders(&[c.clone(), a.clone()]).unwrap();
+    assert_eq!(names(), ["C", "A", "B"]);
+    s.save_smart_folder(&SmartFolder { id: b.clone(), name: "Bee".into(), query: "is:flagged".into(), badge: SmartBadge::Total, count: 0 }).unwrap();
+    let bee = s.get_smart_folder(&b).unwrap().unwrap();
+    assert_eq!((bee.name.as_str(), bee.query.as_str(), bee.badge), ("Bee", "is:flagged", SmartBadge::Total));
+    assert!(s.delete_smart_folder(&a).unwrap());
+    assert_eq!(names(), ["C", "Bee"]);
+    assert!(s.save_smart_folder(&SmartFolder { id: a, name: "gone".into(), ..Default::default() }).is_err());
 }
 
 fn rec(remote: &str, mid: &str, irt: Option<&str>, subject: &str, mins: i64) -> MessageRecord {
@@ -171,11 +189,14 @@ fn with_search_and_person_summary() {
     for r in [&from_bob, &to_bob, &other] {
         s.upsert_message(&acc.id, r, &[(mb.clone(), None)]).unwrap();
     }
-    let with = |v: &[&str]| s.count_threads(&ThreadFilter { with: v.iter().map(|x| x.to_string()).collect(), ..Default::default() }).unwrap();
-    assert_eq!(with(&["bob@x.test"]), 1);
-    assert_eq!(with(&["bob@x.test", "bob@work.test"]), 2);
-    assert_eq!(with(&["bob"]), 3);
-    assert_eq!(s.count_threads(&ThreadFilter { from: vec!["bob@x.test".into()], ..Default::default() }).unwrap(), 1);
+    let count = |term: MsgTerm, negate: bool| s.count_threads(&ThreadFilter { conds: vec![MsgCond { term, negate }], ..Default::default() }).unwrap();
+    let list = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    assert_eq!(count(MsgTerm::With(list(&["bob@x.test"])), false), 1);
+    assert_eq!(count(MsgTerm::With(list(&["bob@x.test", "bob@work.test"])), false), 2);
+    assert_eq!(count(MsgTerm::With(list(&["bob"])), false), 3);
+    assert_eq!(count(MsgTerm::From(list(&["bob@x.test"])), false), 1);
+    assert_eq!(count(MsgTerm::From(list(&["bob@x.test"])), true), 2);
+    assert_eq!(count(MsgTerm::From(vec![]), false), 3);
 
     let p = s.person_summary(&["bob@x.test".into(), "BOB@work.test".into()]).unwrap();
     assert_eq!((p.received, p.sent, p.attachments), (1, 1, 1));

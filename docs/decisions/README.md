@@ -40,3 +40,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0034 | [Sender rules act on the server only for mail they're sure about](0034-sender-rules-act-only-on-authentic-mail.md) | Accepted |
 | 0035 | [Code layout: folders by domain, files under ~400 lines](0035-code-layout.md) | Accepted |
 | 0036 | [Download all mail without attachments, within a storage limit](0036-message-content-and-storage-limit.md) | Accepted |
+| 0039 | [Smart folders: saved searches under Mail](0039-smart-folders.md) | Accepted |

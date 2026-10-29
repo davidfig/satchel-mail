@@ -218,7 +218,7 @@ Initial sync strategy: headers + snippets for the last N months first (fast inbo
 - Keyboard-first (Gmail/Superhuman-style shortcuts), command palette.
 
 Views:
-1. **Mail** — accounts/mailboxes sidebar, unified inbox, thread list, reading pane, composer (rich text + plain), search with operators (`from: to: has:attachment before:`).
+1. **Mail** — accounts/mailboxes sidebar, unified inbox, thread list, reading pane, composer (rich text + plain), search with operators (`from: to: has:attachment before:`), smart folders (saved searches under Mail, 0039).
 2. **Calendar** — day/week/month/agenda, event editor, invite responses, free-time finder.
 3. **Review** — the proposal queue: grouped by agent and thread, inline diffs, edit-before-approve, bulk approve for low-risk ops (labels/archive), reject with note (fed back to the agent via `get_proposal_status`).
 4. **Settings** — accounts, AI agents & policies, mirror scope, privacy.

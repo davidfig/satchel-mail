@@ -153,24 +153,48 @@ pub struct ThreadFilter {
     pub mailbox_id: Option<String>,
     pub role: Option<MailboxRole>,
     pub account_ids: Option<Vec<String>>,
-    pub in_mailbox_names: Option<Vec<String>>,
     pub exclude_trash_junk: bool,
-    pub from: Vec<String>,
-    pub to: Vec<String>,
-    /// Sender or recipient (see `search::ParsedQuery::with`).
-    pub with: Vec<String>,
-    pub subject: Option<String>,
-    pub has_attachment: bool,
-    pub unread: bool,
-    pub flagged: bool,
+    /// Conditions that must all hold for one message of the thread (from a search).
+    pub conds: Vec<MsgCond>,
+    /// Only messages from this date on (an agent's date range).
     pub after: Option<DateTime<Utc>>,
-    pub msg_before: Option<DateTime<Utc>>,
     pub message_ids: Option<Vec<String>>,
-    /// FTS5 MATCH expression (see `search::fts_query`).
-    pub fts: Option<String>,
     pub before: Option<DateTime<Utc>>,
     /// Tie-breaker for `before`: threads at exactly `before` with a smaller id.
     pub before_id: Option<String>,
     pub offset: u32,
     pub limit: u32,
+}
+
+/// One search condition on a message (see `mail::search`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum MsgTerm {
+    /// Each address list matches any of its values; a full address matches exactly.
+    From(Vec<String>),
+    To(Vec<String>),
+    /// Sender or recipient.
+    With(Vec<String>),
+    Subject(String),
+    HasAttachment,
+    Unread,
+    Flagged,
+    Before(DateTime<Utc>),
+    After(DateTime<Utc>),
+    /// In a mailbox with one of these names or roles.
+    InMailbox(Vec<String>),
+    /// FTS5 MATCH expression (see `search::fts_query`).
+    Text(String),
+}
+
+/// A [`MsgTerm`] that must hold, or with `negate`, must not.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MsgCond {
+    pub term: MsgTerm,
+    pub negate: bool,
+}
+
+impl MsgCond {
+    pub fn new(term: MsgTerm) -> Self {
+        Self { term, negate: false }
+    }
 }

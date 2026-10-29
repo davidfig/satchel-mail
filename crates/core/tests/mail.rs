@@ -133,3 +133,51 @@ async fn a_second_move_finds_the_message_where_the_first_put_it() {
     assert_eq!(ids[0], vec!["r3".to_string()]);
     assert_eq!(ids[1], vec![format!("Archive#{invoice}")], "the second move uses the id the first one gave it");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn smart_folders_search_every_folder() {
+    let (engine, _fake, account, _dir) = setup().await;
+    while engine.index_batch(500).unwrap() > 0 {}
+    let user = Caller::User;
+    let save = |name: &str, query: &str| Command::SaveSmartFolder { folder: SmartFolder { name: name.into(), query: query.into(), badge: SmartBadge::Total, ..Default::default() } };
+    let folders = |caller: Caller| {
+        let engine = engine.clone();
+        async move { serde_json::from_value::<Vec<SmartFolder>>(engine.handle(&caller, Command::ListSmartFolders).await.unwrap()).unwrap() }
+    };
+    let threads = |id: &str, search: Option<&str>| {
+        let engine = engine.clone();
+        let query = ThreadQuery { smart_folder_id: Some(id.into()), search: search.map(String::from), ..Default::default() };
+        async move { inbox_threads(engine.handle(&Caller::User, Command::ListThreads { query }).await.unwrap()) }
+    };
+
+    let people: SmartFolder = serde_json::from_value(engine.handle(&user, save("People", "-from:bill")).await.unwrap()).unwrap();
+    let bills: SmartFolder = serde_json::from_value(engine.handle(&user, save("Bills", "from:bill")).await.unwrap()).unwrap();
+    let t = threads(&people.id, None).await;
+    assert_eq!(t.iter().map(|t| t.subject.as_str()).collect::<Vec<_>>(), ["Kickoff"]);
+    assert!(threads(&people.id, Some("invoice")).await.is_empty(), "a search narrows the folder");
+    assert_eq!(folders(user.clone()).await.iter().map(|f| (f.name.as_str(), f.count)).collect::<Vec<_>>(), [("People", 1), ("Bills", 1)]);
+
+    // Trash is left out unless the folder asks for it.
+    let invoice = engine.store().message_id_by_remote(&account, "r3").unwrap().unwrap();
+    engine.handle(&user, Command::Trash { message_ids: vec![invoice] }).await.unwrap();
+    assert!(threads(&bills.id, None).await.is_empty());
+    let mut anywhere = bills.clone();
+    anywhere.query = "from:bill in:anywhere".into();
+    engine.handle(&user, Command::SaveSmartFolder { folder: anywhere }).await.unwrap();
+    assert_eq!(threads(&bills.id, None).await.len(), 1);
+
+    // Names are unique, and a folder has to search for something.
+    assert!(engine.handle(&user, save("people", "is:unread")).await.is_err());
+    assert!(engine.handle(&user, save("Empty", "  ... ")).await.is_err());
+
+    // Agents can read smart folders but not change them.
+    let bot = agent(&engine, AgentPolicy::default()).await;
+    assert_eq!(folders(bot.clone()).await.len(), 2);
+    assert!(engine.handle(&bot, save("Mine", "is:unread")).await.is_err());
+    assert!(engine.handle(&bot, Command::DeleteSmartFolder { id: people.id.clone() }).await.is_err());
+
+    engine.handle(&user, Command::ReorderSmartFolders { ids: vec![bills.id.clone()] }).await.unwrap();
+    assert_eq!(folders(user.clone()).await[0].name, "Bills");
+    engine.handle(&user, Command::DeleteSmartFolder { id: people.id }).await.unwrap();
+    assert_eq!(folders(user).await.len(), 1);
+}

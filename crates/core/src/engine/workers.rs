@@ -125,6 +125,7 @@ impl Engine {
         if indexes || n > 0 {
             m.cleanup_orphans()?;
             m.write_indexes()?;
+            m.write_smart_folders()?;
             m.write_calendar()?;
         }
         if indexes || n > 0 || self.contacts_dirty.swap(false, std::sync::atomic::Ordering::Relaxed) {

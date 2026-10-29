@@ -10,6 +10,7 @@ import { UNIFIED } from './location';
 export interface PaletteHost {
   go(view: View, source?: MailSource): void;
   toggleSidebar(): void;
+  newSmartFolder(query?: string): Promise<void>;
 }
 
 /** The command palette (mod+k): jump anywhere or search mail. */
@@ -17,7 +18,9 @@ export function palette(host: PaletteHost) {
   const actions: { label: string; run: () => void }[] = [
     { label: 'Compose new message', run: () => openComposer({}) },
     ...UNIFIED.map((u) => ({ label: `Go to ${u.label}`, run: () => host.go('mail', { kind: 'role', role: u.role, label: u.label }) })),
+    ...store.state.smartFolders.map((f) => ({ label: `Go to ${f.name}`, run: () => host.go('mail', { kind: 'smart', id: f.id, label: f.name }) })),
     ...store.state.mailboxes.filter((m) => m.role === 'custom').map((m) => ({ label: `Go to ${m.path}`, run: () => host.go('mail', { kind: 'mailbox', mailbox_id: m.id, label: m.path }) })),
+    { label: 'New smart folder', run: () => void host.newSmartFolder() },
     { label: 'Open Calendar', run: () => host.go('calendar') },
     { label: 'Open Contacts', run: () => host.go('contacts') },
     { label: 'New contact', run: () => { host.go('contacts'); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.contacts-view .list-title .icon-btn')?.click()); } },
