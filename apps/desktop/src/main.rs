@@ -58,7 +58,7 @@ async fn choose_folder(app: tauri::AppHandle, title: String, start: Option<Strin
 }
 
 /// Ask where to save an attachment, then write it. Returns the chosen path.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 async fn save_file(app: tauri::AppHandle, filename: String, data_base64: String) -> Result<Option<String>, String> {
     let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64).map_err(|e| e.to_string())?;
     // Without the invisible marks that make "invoice\u{202E}fdp.exe" read as "invoiceexe.pdf".
