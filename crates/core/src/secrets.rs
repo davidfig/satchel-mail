@@ -1,12 +1,13 @@
 //! Credential storage. Desktop uses the OS keychain; tests and headless dev
 //! use a 0600 JSON file. Secrets never touch the main database.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use anyhow::{Result, anyhow};
 use satchel_api::Credential;
+use serde_json::Value;
 
 pub trait SecretStore: Send + Sync {
     fn get(&self, key: &str) -> Result<Option<Credential>>;
@@ -18,62 +19,134 @@ pub fn account_key(account_id: &str) -> String {
     format!("account:{account_id}")
 }
 
-/// OS keychain store. Values are cached after the first read: macOS asks the
-/// user before each access by a binary it doesn't trust yet (every unsigned
-/// dev rebuild), so we touch the keychain at most once per item per run.
+/// OS keychain store. Every credential lives in one keychain item, so macOS
+/// asks the user once per app instead of once per account (0052).
 #[cfg(feature = "keychain")]
-pub struct KeychainSecretStore {
-    service: String,
-    /// Serialized JSON as stored; `None` remembers a missing entry.
-    cache: Mutex<HashMap<String, Option<String>>>,
-}
+pub struct KeychainSecretStore(BundleStore<KeychainItems>);
 
 #[cfg(feature = "keychain")]
 impl KeychainSecretStore {
     pub fn new(service: impl Into<String>) -> Self {
-        Self { service: service.into(), cache: Mutex::new(HashMap::new()) }
-    }
-    fn entry(&self, key: &str) -> Result<keyring::Entry> {
-        keyring::Entry::new(&self.service, key).map_err(|e| anyhow!("keychain: {e}"))
+        Self(BundleStore::new(KeychainItems { service: service.into() }))
     }
 }
 
 #[cfg(feature = "keychain")]
 impl SecretStore for KeychainSecretStore {
     fn get(&self, key: &str) -> Result<Option<Credential>> {
-        let mut cache = self.cache.lock().unwrap();
-        let stored = match cache.get(key) {
-            Some(v) => v.clone(),
-            None => {
-                let v = match self.entry(key)?.get_password() {
-                    Ok(s) => Some(s),
-                    Err(keyring::Error::NoEntry) => None,
-                    Err(e) => return Err(anyhow!("keychain: {e}")),
-                };
-                cache.insert(key.to_string(), v.clone());
-                v
-            }
-        };
-        Ok(stored.map(|s| serde_json::from_str(&s)).transpose()?)
+        self.0.get(key)
     }
     fn set(&self, key: &str, value: &Credential) -> Result<()> {
-        let json = serde_json::to_string(value)?;
-        let mut cache = self.cache.lock().unwrap();
-        // Rewriting an unchanged item would still prompt.
-        if cache.get(key).is_some_and(|v| v.as_deref() == Some(json.as_str())) {
-            return Ok(());
-        }
-        self.entry(key)?.set_password(&json).map_err(|e| anyhow!("keychain: {e}"))?;
-        cache.insert(key.to_string(), Some(json));
-        Ok(())
+        self.0.set(key, value)
     }
     fn delete(&self, key: &str) -> Result<()> {
-        let mut cache = self.cache.lock().unwrap();
-        match self.entry(key)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
-            Err(e) => return Err(anyhow!("keychain: {e}")),
+        self.0.delete(key)
+    }
+}
+
+#[cfg(feature = "keychain")]
+struct KeychainItems {
+    service: String,
+}
+
+#[cfg(feature = "keychain")]
+impl KeychainItems {
+    fn entry(&self, name: &str) -> Result<keyring::Entry> {
+        keyring::Entry::new(&self.service, name).map_err(|e| anyhow!("keychain: {e}"))
+    }
+}
+
+#[cfg(feature = "keychain")]
+impl Items for KeychainItems {
+    fn get(&self, name: &str) -> Result<Option<String>> {
+        match self.entry(name)?.get_password() {
+            Ok(s) => Ok(Some(s)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(anyhow!("keychain: {e}")),
         }
-        cache.insert(key.to_string(), None);
+    }
+    fn set(&self, name: &str, value: &str) -> Result<()> {
+        self.entry(name)?.set_password(value).map_err(|e| anyhow!("keychain: {e}"))
+    }
+    fn delete(&self, name: &str) -> Result<()> {
+        match self.entry(name)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(anyhow!("keychain: {e}")),
+        }
+    }
+}
+
+/// Named string items in a backing store (the keychain, or a fake in tests).
+trait Items: Send + Sync {
+    fn get(&self, name: &str) -> Result<Option<String>>;
+    fn set(&self, name: &str, value: &str) -> Result<()>;
+    fn delete(&self, name: &str) -> Result<()>;
+}
+
+/// The item holding every credential, as a JSON object keyed like the trait.
+const BUNDLE: &str = "credentials";
+
+/// Keeps all credentials in the single `BUNDLE` item. Older versions stored
+/// one item per key; those move into the bundle the first time they're read.
+struct BundleStore<I> {
+    items: I,
+    /// The bundle as last read or written. A miss reloads it, since another
+    /// process (the CLI) may have added the key since.
+    cache: Mutex<Option<BTreeMap<String, Value>>>,
+}
+
+impl<I: Items> BundleStore<I> {
+    fn new(items: I) -> Self {
+        Self { items, cache: Mutex::new(None) }
+    }
+
+    fn load(&self) -> Result<BTreeMap<String, Value>> {
+        match self.items.get(BUNDLE)? {
+            Some(s) => serde_json::from_str(&s).map_err(|e| anyhow!("keychain item \"{BUNDLE}\" is damaged: {e}")),
+            None => Ok(BTreeMap::new()),
+        }
+    }
+
+    fn get(&self, key: &str) -> Result<Option<Credential>> {
+        let mut cache = self.cache.lock().unwrap();
+        if let Some(v) = cache.as_ref().and_then(|m| m.get(key)) {
+            return Ok(Some(serde_json::from_value(v.clone())?));
+        }
+        let mut map = self.load()?;
+        if !map.contains_key(key)
+            && let Some(old) = self.items.get(key)?
+        {
+            map.insert(key.to_string(), serde_json::from_str(&old)?);
+            self.items.set(BUNDLE, &serde_json::to_string(&map)?)?;
+            // Only once the bundle has it; a leftover item is harmless.
+            let _ = self.items.delete(key);
+        }
+        let found = map.get(key).cloned();
+        *cache = Some(map);
+        Ok(found.map(serde_json::from_value).transpose()?)
+    }
+
+    fn set(&self, key: &str, value: &Credential) -> Result<()> {
+        let mut cache = self.cache.lock().unwrap();
+        let mut map = self.load()?;
+        let value = serde_json::to_value(value)?;
+        // Rewriting an unchanged item can still prompt.
+        if map.get(key) != Some(&value) {
+            map.insert(key.to_string(), value);
+            self.items.set(BUNDLE, &serde_json::to_string(&map)?)?;
+        }
+        *cache = Some(map);
+        Ok(())
+    }
+
+    fn delete(&self, key: &str) -> Result<()> {
+        let mut cache = self.cache.lock().unwrap();
+        let mut map = self.load()?;
+        if map.remove(key).is_some() {
+            self.items.set(BUNDLE, &serde_json::to_string(&map)?)?;
+        }
+        self.items.delete(key)?;
+        *cache = Some(map);
         Ok(())
     }
 }
@@ -177,6 +250,67 @@ mod tests {
 
     fn pw(p: &str) -> Credential {
         Credential::Password { password: p.into() }
+    }
+
+    #[derive(Default)]
+    struct FakeItems(Mutex<HashMap<String, String>>, Mutex<usize>);
+
+    impl Items for FakeItems {
+        fn get(&self, name: &str) -> Result<Option<String>> {
+            Ok(self.0.lock().unwrap().get(name).cloned())
+        }
+        fn set(&self, name: &str, value: &str) -> Result<()> {
+            *self.1.lock().unwrap() += 1;
+            self.0.lock().unwrap().insert(name.into(), value.into());
+            Ok(())
+        }
+        fn delete(&self, name: &str) -> Result<()> {
+            self.0.lock().unwrap().remove(name);
+            Ok(())
+        }
+    }
+
+    fn password(c: Option<Credential>) -> Option<String> {
+        match c? {
+            Credential::Password { password } => Some(password),
+            Credential::OAuth { .. } => None,
+        }
+    }
+
+    #[test]
+    fn bundle_keeps_every_credential_in_one_item() {
+        let s = BundleStore::new(FakeItems::default());
+        s.set("account:a", &pw("one")).unwrap();
+        s.set("account:b", &pw("two")).unwrap();
+        s.set("account:b", &pw("two")).unwrap();
+        assert_eq!(*s.items.1.lock().unwrap(), 2, "an unchanged value isn't rewritten");
+        assert_eq!(s.items.0.lock().unwrap().keys().collect::<Vec<_>>(), vec![BUNDLE]);
+        s.delete("account:a").unwrap();
+        assert_eq!(password(s.get("account:a").unwrap()), None);
+        assert_eq!(password(s.get("account:b").unwrap()).as_deref(), Some("two"));
+    }
+
+    #[test]
+    fn bundle_moves_old_per_key_items_in() {
+        let items = FakeItems::default();
+        items.0.lock().unwrap().insert("account:a".into(), serde_json::to_string(&pw("old")).unwrap());
+        let s = BundleStore::new(items);
+        s.set("account:b", &pw("new")).unwrap();
+        assert_eq!(password(s.get("account:a").unwrap()).as_deref(), Some("old"));
+        let map = s.items.0.lock().unwrap();
+        assert!(!map.contains_key("account:a"));
+        assert!(map[BUNDLE].contains("old") && map[BUNDLE].contains("new"));
+    }
+
+    #[test]
+    fn bundle_sees_keys_another_process_added() {
+        let s = BundleStore::new(FakeItems::default());
+        assert!(s.get("account:a").unwrap().is_none());
+        let other = BundleStore::new(FakeItems::default());
+        other.set("account:a", &pw("cli")).unwrap();
+        let written = other.items.0.lock().unwrap()[BUNDLE].clone();
+        s.items.0.lock().unwrap().insert(BUNDLE.into(), written);
+        assert_eq!(password(s.get("account:a").unwrap()).as_deref(), Some("cli"));
     }
 
     #[test]

@@ -56,3 +56,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0049 | [Events move between calendars, unless they have guests](0049-move-events-between-calendars.md) | Accepted |
 | 0050 | [Location suggestions: history first, place lookups opt-in](0050-location-suggestions.md) | Accepted |
 | 0051 | [One sidebar: fixed mode rows, each view's own section below](0051-one-sidebar.md) | Accepted |
+| 0052 | [All credentials in one keychain item](0052-one-keychain-item.md) | Accepted |
