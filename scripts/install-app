@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Build Satchel Mail as a release app and install it in /Applications, so it
+# runs like any other app when you're not developing. Run it again to update.
+#
+#   scripts/install-app              build, quit the running copy, install
+#   scripts/install-app --dir DIR    install into DIR instead of /Applications
+#
+# OAuth client ids are read from .env (see scripts/run) and compiled in. The
+# app is signed with your "Apple Development" certificate if you have one
+# (see scripts/dev-sign), so the keychain's "Always Allow" survives updates.
+# It uses the default data directory, the same one `scripts/run` uses, so
+# quit one before starting the other.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+dest=/Applications
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir) dest="${2:?--dir needs a directory}"; shift ;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown argument: $1 (see scripts/install-app --help)" >&2; exit 1 ;;
+  esac
+  shift
+done
+
+if [[ "$(uname)" != Darwin ]]; then
+  echo "scripts/install-app only supports macOS; use scripts/release.sh for other platforms." >&2
+  exit 1
+fi
+
+if [[ -f .env ]]; then
+  set -a; source .env; set +a
+else
+  echo "warning: no .env, so Gmail and Microsoft sign-in won't be configured (docs/OAUTH.md)" >&2
+fi
+# The installed app must use the real data directory, never a test one.
+unset SATCHEL_DATA_DIR SATCHEL_SECRETS
+
+if [[ -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+  identity="$(security find-identity -v -p codesigning \
+    | sed -n 's/^ *[0-9]*) [0-9A-F]\{40\} "\(Apple Development: .*\)"$/\1/p' | head -1)"
+  if [[ -n "$identity" ]]; then
+    export APPLE_SIGNING_IDENTITY="$identity"
+  else
+    echo "warning: no Apple Development certificate; the app will be unsigned" >&2
+  fi
+fi
+
+BUNDLES=app scripts/release.sh
+
+triple="$(rustc -vV | sed -n 's/host: //p')"
+app="target/$triple/release/bundle/macos/Satchel Mail.app"
+[[ -d "$app" ]] || { echo "build finished but $app is missing" >&2; exit 1; }
+
+if pgrep -xq "satchel-mail"; then
+  echo "==> quitting the running Satchel Mail"
+  osascript -e 'quit app "Satchel Mail"' || true
+  for _ in {1..20}; do pgrep -xq "satchel-mail" || break; sleep 0.5; done
+fi
+
+echo "==> installing to $dest"
+mkdir -p "$dest"
+rm -rf "$dest/Satchel Mail.app"
+ditto "$app" "$dest/Satchel Mail.app"
+echo "Installed $dest/Satchel Mail.app"

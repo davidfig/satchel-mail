@@ -40,6 +40,7 @@ Current third-party dependencies and why:
 | rmcp | MCP protocol |
 | axum, tower-http, clap, tracing-subscriber | local HTTP server + static files, CLI parsing, logging |
 | tauri + plugins (opener, dialog, notification, single-instance, window-state, updater) | desktop shell; notification shows new-mail alerts in the macOS, Windows and Linux notification centers (0025); window-state reopens the window at its last position and size, including which monitor and whether it was maximized |
+| mac-notification-sys (macOS desktop) | sets which app new-mail notifications are posted as, so dev builds post as Satchel rather than Terminal. Already in the tree through the notification plugin, at the same version |
 | @tauri-apps/api; dev: vite, typescript, @tauri-apps/cli, linkedom | UI ↔ Tauri bridge; build tools; linkedom gives `node --test` a DOM for the UI's quote-detection tests (small, no native code; a test-only stand-in for the browser's DOMParser) |
 
 Removed: tantivy (see 0014), rand, urlencoding, bytes, thiserror.

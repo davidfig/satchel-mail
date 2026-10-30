@@ -99,6 +99,18 @@ claude mcp add satchel --env SATCHEL_AGENT_TOKEN=stk_… -- satchel mcp
 Details, the tool list, and the folder-based alternative are in
 [docs/AI_AGENTS.md](docs/AI_AGENTS.md).
 
+## Installing on your Mac
+
+```bash
+npm run install-app               # release build → /Applications/Satchel Mail.app
+```
+
+Runs it like a normal app when you're not developing; run it again to update.
+It compiles in the OAuth ids from `.env`, signs with your Apple Development
+certificate, and quits a running copy first. The installed app and
+`scripts/run` share the default data directory, so only one can run at a time.
+On another computer, copy `.env` over first (it isn't in git).
+
 ## Releases
 
 ```bash

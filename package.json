@@ -1,7 +1,7 @@
 {
   "name": "satchel-mail",
   "private": true,
-  "description": "Shortcuts for scripts/run and scripts/dev-servers; the UI's own package is ui/",
+  "description": "Shortcuts for scripts/run, scripts/install-app and scripts/dev-servers; the UI's own package is ui/",
   "scripts": {
     "app": "scripts/run",
     "web": "scripts/run web",
@@ -9,6 +9,7 @@
     "web:test": "scripts/run web --test",
     "dev": "scripts/run dev --test",
     "dev:real": "scripts/run dev",
+    "install-app": "scripts/install-app",
     "servers": "scripts/dev-servers start",
     "servers:reset": "scripts/dev-servers reset",
     "servers:stop": "scripts/dev-servers stop"

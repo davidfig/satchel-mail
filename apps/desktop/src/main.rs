@@ -189,6 +189,11 @@ fn main() {
     let builder = builder.menu(menu::build).on_menu_event(|app, e| menu::forward(app, e.id().as_ref()));
     builder
         .setup(|app| {
+            // Dev builds of the notification plugin post as Terminal, which macOS
+            // drops unless Terminal may notify. Only the first application set
+            // counts, so claim ours before the plugin's first notification.
+            #[cfg(target_os = "macos")]
+            let _ = mac_notification_sys::set_application(&app.config().identifier);
             let data_dir = satchel_core::default_data_dir();
             let Some(lock) = lock(&data_dir)? else {
                 app.dialog()

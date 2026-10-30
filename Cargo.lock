@@ -4415,6 +4415,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "libc",
+ "mac-notification-sys",
  "satchel-api",
  "satchel-core",
  "satchel-mime",
