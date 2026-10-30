@@ -14,6 +14,8 @@ pub struct ParsedQuery {
     pub has_attachment: bool,
     pub unread: bool,
     pub flagged: bool,
+    /// `is:favorite` — from a favorite sender.
+    pub favorite: bool,
     pub before: Option<chrono::DateTime<chrono::Utc>>,
     pub after: Option<chrono::DateTime<chrono::Utc>>,
     pub in_mailbox: Option<String>,
@@ -81,6 +83,7 @@ pub fn parse_query(q: &str) -> ParsedQuery {
             "has" if v.eq_ignore_ascii_case("attachment") => p.has_attachment = true,
             "is" if v.eq_ignore_ascii_case("unread") => p.unread = true,
             "is" if v.eq_ignore_ascii_case("flagged") || v.eq_ignore_ascii_case("starred") => p.flagged = true,
+            "is" if v.eq_ignore_ascii_case("favorite") || v.eq_ignore_ascii_case("favourite") => p.favorite = true,
             "before" => p.before = parse_date(&v),
             "after" | "since" => p.after = parse_date(&v),
             "in" => p.in_mailbox = Some(v),
@@ -141,6 +144,13 @@ mod tests {
         assert_eq!(p.in_mailbox.as_deref(), Some("inbox"));
         assert_eq!(p.text, "budget \"q3 numbers\"");
         assert!(p.after.is_some());
+    }
+
+    #[test]
+    fn favorites() {
+        assert!(parse_query("is:favorite").favorite);
+        assert!(parse_query("IS:Favourite budget").favorite);
+        assert!(!parse_query("is:flagged").favorite);
     }
 
     #[test]

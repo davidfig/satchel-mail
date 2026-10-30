@@ -1,4 +1,4 @@
-// Settings: accounts, AI agents, AI folder, privacy, appearance, activity.
+// Settings: accounts, AI agents, AI folder, privacy, favorites, appearance, activity.
 
 import { api } from '../../api';
 import { clear, h, icon, patch } from '../../lib/dom';
@@ -8,6 +8,7 @@ import type { SettingsSection as Section } from '../../state';
 import type { Settings } from '../../types';
 import { accounts } from './accounts';
 import { agents } from './agents';
+import { favorites } from './favorites';
 import { activity, general, mirror } from './general';
 import { privacy } from './privacy';
 
@@ -29,7 +30,7 @@ export class SettingsView {
       if (store.state.view !== 'settings' || this.editing) return;
       // A link (or the palette) asking for a section while Settings is open.
       if (changed.has('settingsSection') && store.state.settingsSection) return this.show();
-      if ((changed.has('accounts') && this.section === 'accounts') || changed.has('settings')) this.render();
+      if ((changed.has('accounts') && this.section === 'accounts') || (changed.has('favorites') && this.section === 'favorites') || changed.has('settings')) this.render();
     });
     this.root.addEventListener('input', () => (this.editing = true));
     this.root.addEventListener('change', () => (this.editing = true));
@@ -51,6 +52,7 @@ export class SettingsView {
       ['agents', 'AI agents', 'sparkle'],
       ['mirror', 'AI folder', 'folder'],
       ['privacy', 'Privacy', 'shield'],
+      ['favorites', 'Favorites', 'heart'],
       ['general', 'General', 'settings'],
       ['activity', 'Activity', 'clock'],
     ];
@@ -61,7 +63,7 @@ export class SettingsView {
     const content = this.content;
     if (this.drawn !== this.section) clear(content);
     this.drawn = this.section;
-    const r = { accounts: () => accounts(content), agents: () => agents(this, content), mirror: () => mirror(this, content), privacy: () => privacy(this, content), general: () => general(this, content), activity: () => activity(this, content) };
+    const r = { accounts: () => accounts(content), agents: () => agents(this, content), mirror: () => mirror(this, content), privacy: () => privacy(this, content), favorites: () => favorites(this, content), general: () => general(this, content), activity: () => activity(this, content) };
     void r[this.section]();
   }
 

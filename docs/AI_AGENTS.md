@@ -103,7 +103,7 @@ The desktop app shows the absolute path of its bundled `satchel` binary.
 read-only and writes proposals the app picks up immediately.
 
 Read: `whoami`, `list_accounts`, `list_mailboxes`, `search_threads` (free text +
-`from: to: with: subject: has:attachment is:unread is:flagged before: after: in:`),
+`from: to: with: subject: has:attachment is:unread is:flagged is:favorite before: after: in:`),
 `get_thread`, `get_message`, `get_attachment`, `list_calendars`, `list_events`,
 `get_event`, `find_free_time`, `search_contacts`, `get_contact`.
 

@@ -59,6 +59,12 @@ pub enum Command {
     ListSenderRules,
     /// Set or (with `verdict: null`) remove the rule for one address.
     SetSenderRule { email: String, verdict: Option<SenderVerdict> },
+    /// Favorite sender addresses (lowercase), sorted (0053).
+    ListFavoriteSenders,
+    /// Add addresses to the favorites, or remove them: all of one person's
+    /// addresses at once. Their conversations are highlighted and match
+    /// `is:favorite`.
+    SetFavoriteSenders { emails: Vec<String>, favorite: bool },
     /// Unsubscribe using the message's List-Unsubscribe header. Returns
     /// {via: "one_click" | "email" | "browser", url?}; "browser" means the
     /// client should open `url`.

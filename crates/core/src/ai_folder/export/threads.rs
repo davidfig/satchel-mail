@@ -322,6 +322,7 @@ impl Mirror<'_> {
                 "messages": t.message_count,
                 "unread": t.unread_count,
                 "flagged": t.flagged,
+                "favorite": t.favorite,
                 "mailboxes": t.mailbox_ids.iter().filter_map(|id| mailboxes.iter().find(|m| &m.id == id).map(|m| m.path.clone())).collect::<Vec<_>>(),
                 "path": folder(&t.thread_id)?.map(|rel| format!("{rel}/thread.md")),
             });

@@ -275,6 +275,13 @@ CREATE TABLE IF NOT EXISTS sender_rules (
     created_at  INTEGER NOT NULL
 );
 
+-- Senders the user marked as favorites (stored lowercase), highlighted in
+-- the thread list and found with `is:favorite` (0053). Local only.
+CREATE TABLE IF NOT EXISTS favorite_senders (
+    email       TEXT PRIMARY KEY,
+    created_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL

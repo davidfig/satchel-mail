@@ -27,6 +27,8 @@ button.avatar-link:hover .avatar { box-shadow: 0 0 0 2px var(--accent-soft); }
 .list-rows { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
 .empty-list { padding: 40px 20px; text-align: center; color: var(--text-3); }
 .thread-row { display: flex; gap: 10px; padding: 9px 12px 9px 10px; border-bottom: 1px solid var(--line); cursor: default; align-items: flex-start; overflow: hidden; position: relative; }
+/* From a favorite sender (0053): a tint under hover and selection, and a heart by the name. */
+.thread-row.favorite { background: var(--favorite-soft); }
 .thread-row:hover { background: var(--hover); }
 .thread-row.placeholder { pointer-events: none; }
 .thread-row.placeholder .thread-main { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
@@ -43,6 +45,9 @@ button.avatar-link:hover .avatar { box-shadow: 0 0 0 2px var(--accent-soft); }
 .thread-line1 .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .thread-line1 time { font-size: 12px; color: var(--text-3); flex: none; }
 .thread-line1 .icon { color: var(--text-3); }
+.thread-line1 .fav { display: inline-flex; flex: none; }
+.thread-line1 .fav .icon { color: var(--favorite); fill: var(--favorite); }
+.fav-toggle[aria-pressed=true] .icon { color: var(--favorite); fill: var(--favorite); }
 .count { font-size: 11px; color: var(--text-3); border: 1px solid var(--line-2); border-radius: 8px; padding: 0 5px; line-height: 15px; }
 .thread-subject { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
 .thread-snippet { font-size: 12.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

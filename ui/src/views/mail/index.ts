@@ -84,10 +84,12 @@ export class MailView {
       // A folder renamed here or elsewhere keeps its title current, and
       // Empty Spam/Trash knows when there's nothing left.
       else if (changed.has('mailboxes') && (store.state.source.kind === 'mailbox' || emptiable(store.state.source))) this.renderHeader();
+      else if (changed.has('favorites') && store.state.source.kind === 'person') this.renderHeader();
     });
     const refresh = debounce(() => void this.refresh(), 300);
     store.onEvent((e) => {
-      if (e.event === 'messages_changed' || e.event === 'data_changed') refresh();
+      // Rows say whether a favorite wrote them, and `is:favorite` lists them.
+      if (e.event === 'messages_changed' || e.event === 'data_changed' || e.event === 'favorites_changed') refresh();
     });
     this.renderHeader();
     this.renderEmptyReader();

@@ -4,7 +4,7 @@ import { api } from '../../api';
 import { h } from '../../lib/dom';
 import { shortName } from '../../lib/format';
 import { folderDialog } from '../../lib/folders';
-import { openPerson } from '../../lib/person';
+import { favoriteItem, openPerson } from '../../lib/person';
 import { confirmDialog, errorToast, popupMenu, toast } from '../../lib/ui';
 import type { Command, MenuItem } from '../../lib/ui';
 import { store } from '../../state';
@@ -58,7 +58,7 @@ export function rowMenu(view: MailView, t: ThreadSummary, at: { x: number; y: nu
       : [{ label: 'Mark as spam', icon: 'junk', hint: '!', run: () => void view.act('spam', threads) }]),
     { label: `Delete${n}`, icon: 'trash', hint: '#', danger: true, run: () => void view.act('trash', threads) },
     '-',
-    ...(person ? [{ label: `All mail with ${shortName(person)}`, icon: 'user', run: () => openPerson(person) }] : []),
+    ...(person ? [{ label: `All mail with ${shortName(person)}`, icon: 'user', run: () => openPerson(person) }, favoriteItem([person])] : []),
     { label: view.selected.has(t.thread_id) ? 'Deselect' : 'Select', icon: 'check', hint: 'x', run: () => view.toggleSelect(t) },
   ];
 }
@@ -236,13 +236,15 @@ export function paletteCommands(view: MailView): { context?: string; commands: C
         .filter((b) => !threads.every((x) => x.mailbox_ids.includes(b.id)))
         .map((b) => ({ label: `Move to ${b.path}`, icon: b.is_label ? 'label' : 'folder', run: () => void moveTo(view, threads, b) })),
       { label: 'Move to new folder…', icon: 'plus', run: () => void folderDialog(t.account_id).then((f) => f && moveTo(view, threads, f)) },
-      ...(person ? [{ label: `All mail with ${shortName(person)}`, icon: 'user', run: () => openPerson(person) }] : []),
+      ...(person ? [{ label: `All mail with ${shortName(person)}`, icon: 'user', run: () => openPerson(person) }, favoriteItem([person])] : []),
     ],
   };
 }
 
 export function moreMenu(view: MailView, anchor: HTMLElement, thread: Thread) {
   const lastMsg = thread.messages[thread.messages.length - 1];
+  const me = store.state.myEmails;
+  const sender = [...thread.messages].reverse().find((m) => m.from && !me.has(m.from.email.toLowerCase()))?.from;
   popupMenu(anchor, [
     { label: 'Mark as unread', icon: 'mail', hint: 'u', run: () => void view.act('unread') },
     ...(view.inSpam()
@@ -252,6 +254,7 @@ export function moreMenu(view: MailView, anchor: HTMLElement, thread: Thread) {
         ]
       : [{ label: 'Mark as spam', icon: 'junk', hint: '!', run: () => void view.act('spam') }]),
     { label: 'Forward', icon: 'forward', hint: 'f', run: () => void view.reply('forward') },
+    ...(sender ? [favoriteItem([sender])] : []),
     '-',
     { label: 'View source', icon: 'draft', run: () => void viewSource(lastMsg.id) },
   ]);

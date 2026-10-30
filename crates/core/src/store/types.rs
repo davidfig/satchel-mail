@@ -163,6 +163,8 @@ pub struct ThreadFilter {
     pub has_attachment: bool,
     pub unread: bool,
     pub flagged: bool,
+    /// From a favorite sender (0053).
+    pub favorite: bool,
     pub after: Option<DateTime<Utc>>,
     pub msg_before: Option<DateTime<Utc>>,
     pub message_ids: Option<Vec<String>>,

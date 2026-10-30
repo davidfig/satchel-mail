@@ -57,7 +57,7 @@ export function renderRows(view: MailView) {
     const active = t.thread_id === store.state.selectedThread;
     out.push(
       h(
-        `div.thread-row${t.unread_count ? '.unread' : ''}${active ? '.active' : ''}${idx === view.cursor ? '.cursor' : ''}${view.selected.has(t.thread_id) ? '.selected' : ''}`,
+        `div.thread-row${t.unread_count ? '.unread' : ''}${t.favorite ? '.favorite' : ''}${active ? '.active' : ''}${idx === view.cursor ? '.cursor' : ''}${view.selected.has(t.thread_id) ? '.selected' : ''}`,
         {
           role: 'option',
           'aria-selected': active ? 'true' : 'false',
@@ -78,6 +78,7 @@ export function renderRows(view: MailView) {
         store.state.accounts.length > 1 && h('span.acct-bar', { style: { background: store.accountColor(t.account_id) }, title: store.state.accounts.find((a) => a.id === t.account_id)?.email }),
         h('div.thread-main',
           h('div.thread-line1',
+            t.favorite && h('span.fav', { title: 'From a favorite' }, icon('heart', 13)),
             h('span.who', participantsLabel(t.participants, me)),
             t.participants.length === 1 && !me.has(t.participants[0].email.toLowerCase()) && h('span.domain', { title: t.participants[0].email }, domainOf(t.participants[0])),
             t.message_count > 1 && h('span.count', String(t.message_count)),

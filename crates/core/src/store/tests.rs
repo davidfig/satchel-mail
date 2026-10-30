@@ -92,6 +92,33 @@ fn threading_out_of_order() {
 }
 
 #[test]
+fn favorite_senders_mark_and_filter_threads() {
+    let s = Store::open_in_memory().unwrap();
+    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+    let mb = s.upsert_mailbox(&acc.id, "INBOX", "Inbox", "INBOX", MailboxRole::Inbox, false).unwrap();
+    let (from_bob, _) = s.upsert_message(&acc.id, &rec("1", "m1", None, "hi", 0), &[(mb.clone(), Some(1))]).unwrap();
+    let mut r = rec("2", "m2", None, "other", 1);
+    r.from = Some(Address::new("carol@x.test"));
+    s.upsert_message(&acc.id, &r, &[(mb.clone(), Some(2))]).unwrap();
+    let bob = s.thread_of(&from_bob).unwrap().unwrap();
+
+    // Stored lowercase, so the address's case doesn't matter.
+    assert_eq!(s.set_favorite_senders(&["Bob@X.test".into()], true).unwrap(), 1);
+    assert_eq!(s.set_favorite_senders(&["bob@x.test".into()], true).unwrap(), 0);
+    assert_eq!(s.list_favorite_senders().unwrap(), vec!["bob@x.test".to_string()]);
+    let all = s.list_threads(&ThreadFilter { mailbox_id: Some(mb.clone()), limit: 10, ..Default::default() }).unwrap();
+    assert_eq!(all.iter().filter(|t| t.favorite).map(|t| t.thread_id.clone()).collect::<Vec<_>>(), vec![bob.clone()]);
+    assert!(s.get_thread_summary(&bob).unwrap().unwrap().favorite);
+    let fav = ThreadFilter { favorite: true, limit: 10, ..Default::default() };
+    assert_eq!(s.list_threads(&fav).unwrap().len(), 1);
+    assert_eq!(s.count_threads(&fav).unwrap(), 1);
+
+    s.set_favorite_senders(&["bob@x.test".into()], false).unwrap();
+    assert!(s.list_favorite_senders().unwrap().is_empty());
+    assert_eq!(s.count_threads(&fav).unwrap(), 0);
+}
+
+#[test]
 fn renaming_a_folder_rekeys_only_its_messages() {
     let s = Store::open_in_memory().unwrap();
     let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();

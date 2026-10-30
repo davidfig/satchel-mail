@@ -11,6 +11,9 @@ export const UNIFIED: { role: MailboxRole; label: string; icon: string }[] = [
   { role: 'trash', label: 'Trash', icon: 'trash' },
 ];
 
+/** Mail from favorite senders (0053), in every account. */
+export const FAVORITES: MailSource = { kind: 'search', query: 'is:favorite', label: 'Favorites' };
+
 export const COLLAPSED_KEY = 'satchel.sidebarCollapsed';
 export const SECTIONS_KEY = 'satchel.sidebarOpenSections';
 export const LOCATION_KEY = 'satchel.lastLocation';

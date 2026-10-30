@@ -15,7 +15,7 @@ export interface PaletteHost {
 
 const RECENT_KEY = 'satchel.paletteRecent';
 const RECENT_MAX = 8;
-const SETTINGS: [SettingsSection, string][] = [['accounts', 'Accounts'], ['agents', 'AI agents'], ['mirror', 'AI folder'], ['privacy', 'Privacy'], ['general', 'General'], ['activity', 'Activity']];
+const SETTINGS: [SettingsSection, string][] = [['accounts', 'Accounts'], ['agents', 'AI agents'], ['mirror', 'AI folder'], ['privacy', 'Privacy'], ['favorites', 'Favorites'], ['general', 'General'], ['activity', 'Activity']];
 
 /** Commands that aren't a shortcut or a view's: places to go, and actions
  *  that start in another view. */

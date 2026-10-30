@@ -87,6 +87,9 @@ pub struct ThreadSummary {
     pub snippet: String,
     pub mailbox_ids: Vec<Id>,
     pub latest_message_id: Id,
+    /// A favorite sender wrote one of its messages (0053).
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 /// Everything exchanged with one person, across all of their addresses.
@@ -268,7 +271,7 @@ pub struct ThreadQuery {
     pub role: Option<MailboxRole>,
     pub account_id: Option<Id>,
     /// Search query (supports from:, to:, with:, subject:, has:attachment,
-    /// is:unread, is:flagged, before:, after:, in:). from:, to: and with: take a
+    /// is:unread, is:flagged, is:favorite, before:, after:, in:). from:, to: and with: take a
     /// comma-separated list; a full address matches exactly.
     pub search: Option<String>,
     pub limit: Option<u32>,

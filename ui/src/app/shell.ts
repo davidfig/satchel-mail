@@ -14,7 +14,7 @@ import { MailView } from '../views/mail';
 import { ReviewView } from '../views/review';
 import { SettingsView } from '../views/settings';
 import { showShortcuts } from './help';
-import { COLLAPSED_KEY, LOCATION_KEY, SECTIONS_KEY, UNIFIED, readCollapsed, readJson, writeJson } from './location';
+import { COLLAPSED_KEY, FAVORITES, LOCATION_KEY, SECTIONS_KEY, UNIFIED, readCollapsed, readJson, writeJson } from './location';
 import { installMenu } from './menu';
 import { palette } from './palette';
 
@@ -43,7 +43,7 @@ export class Shell {
     store.subscribe((_, changed) => {
       if (changed.has('view')) this.showView();
       if (changed.has('view') || changed.has('source')) writeJson(LOCATION_KEY, { view: store.state.view, source: store.state.source });
-      if (['view', 'accounts', 'mailboxes', 'pendingProposals', 'source'].some((k) => changed.has(k as never))) this.renderSidebar();
+      if (['view', 'accounts', 'mailboxes', 'pendingProposals', 'source', 'favorites'].some((k) => changed.has(k as never))) this.renderSidebar();
     });
     this.renderSidebar();
     this.showView();
@@ -124,7 +124,7 @@ export class Shell {
     return [
       { label: 'Open', icon: 'mailOpen', run: () => this.go('mail', source) },
       // Drafts show a total, not unread.
-      ...(role !== 'drafts' ? [{ label: 'Mark all as read', icon: 'check', disabled: unread === 0, run: () => void markRead() }] : []),
+      ...(role !== 'drafts' && source.kind !== 'search' ? [{ label: 'Mark all as read', icon: 'check', disabled: unread === 0, run: () => void markRead() }] : []),
       ...(empty ? [{ label: `Empty ${empty.label}…`, icon: 'trash', danger: true, disabled: empty.count === 0, run: () => void emptyFolder(source) }] : []),
       '-',
       { label: mb ? 'Sync this account now' : 'Sync all accounts now', icon: 'refresh', run: () => this.syncNow(mb?.account_id ?? null) },
@@ -161,7 +161,9 @@ export class Shell {
     const s = store.state.source;
     // With one account, "Inbox" (g i, the default) is that account's Inbox.
     const sole = store.state.accounts.length === 1 && s.kind === 'role' && source.kind === 'mailbox' && store.mailbox(source.mailbox_id)?.role === s.role;
-    const active = store.state.view === 'mail' && (sole || (s.kind === source.kind && (s.kind === 'role' ? s.role === (source as { role: string }).role : s.kind === 'mailbox' && s.mailbox_id === (source as { mailbox_id: string }).mailbox_id)));
+    const active = store.state.view === 'mail' && (sole || (s.kind === source.kind && (s.kind === 'role' ? s.role === (source as { role: string }).role
+      : s.kind === 'mailbox' ? s.mailbox_id === (source as { mailbox_id: string }).mailbox_id
+      : s.kind === 'search' && s.query === (source as { query: string }).query)));
     const el = h(`button.mb-item${active ? '.active' : ''}`, { title: source.label, style: opts.depth ? { paddingLeft: `${10 + opts.depth * 16}px` } : undefined, on: { click: () => this.go('mail', source) } },
       icon(ic, 16),
       h('span.mb-name', opts.text ?? source.label),
@@ -178,6 +180,10 @@ export class Shell {
     const errors = accounts.filter((a) => a.sync.state === 'error' || a.sync.state === 'offline');
     const combined = store.state.view === 'mail' && !collapsed && accounts.length > 1;
     const inboxUnread = unread('inbox');
+    // Shown once there's a favorite (and while it's open, so removing the
+    // last one doesn't pull the list out from under you).
+    const s = store.state.source;
+    const favorites = (store.state.favorites.size > 0 || (s.kind === 'search' && s.query === 'is:favorite')) && this.sourceItem(FAVORITES, 'heart', 0);
     transport.setTitle(inboxUnread > 0 ? `(${inboxUnread}) satchel.email` : 'satchel.email');
     // Patched, not replaced: this runs on every sync tick, and swapping the
     // nodes out from under the pointer made hover and tooltips flicker.
@@ -206,9 +212,7 @@ export class Shell {
           // Every account's Inbox, Flagged, … together, above the accounts.
           // Kept out of the nav so the mode rows above never move. With one
           // account its own section says it all.
-          combined && h('div.nav-sub',
-            UNIFIED.filter((u) => mailboxes.some((m) => m.role === u.role) || u.role === 'inbox').map((u) =>
-              this.sourceItem({ kind: 'role', role: u.role, label: u.label }, u.icon, unread(u.role)))),
+          combined ? h('div.nav-sub', this.unifiedItems(favorites || null, unread)) : favorites && h('div.nav-sub', favorites),
           accounts.map((a) => this.accountSection(a, mailboxes.filter((m) => m.account_id === a.id)))),
       // Another view's own section (Calendar's month and calendar list); the
       // view keeps it up to date.
@@ -228,6 +232,13 @@ export class Shell {
     for (const t of this.sidebar.querySelectorAll<HTMLElement>('.sync-text')) {
       if (t.scrollWidth > t.clientWidth) t.textContent = shortProgress(t.textContent ?? '');
     }
+  }
+
+  /** Every account's Inbox, Flagged, … with Favorites after Flagged (or Inbox). */
+  private unifiedItems(favorites: HTMLElement | null, unread: (role: MailboxRole) => number) {
+    const roles = UNIFIED.filter((u) => store.state.mailboxes.some((m) => m.role === u.role) || u.role === 'inbox');
+    const after = roles.some((u) => u.role === 'flagged') ? 'flagged' : 'inbox';
+    return roles.flatMap((u) => [this.sourceItem({ kind: 'role', role: u.role, label: u.label }, u.icon, unread(u.role)), ...(u.role === after && favorites ? [favorites] : [])]);
   }
 
   /** The sidebar's primary button for a view whose `n` shortcut creates something. */
@@ -271,6 +282,7 @@ export class Shell {
     bind('c', 'Compose', () => openComposer({}));
     bind('g i', 'Go to Inbox', () => this.go('mail', { kind: 'role', role: 'inbox', label: 'Inbox' }));
     bind('g s', 'Go to Flagged', () => this.go('mail', { kind: 'role', role: 'flagged', label: 'Flagged' }));
+    bind('g f', 'Go to Favorites', () => this.go('mail', FAVORITES));
     bind('g t', 'Go to Sent', () => this.go('mail', { kind: 'role', role: 'sent', label: 'Sent' }));
     bind('g d', 'Go to Drafts', () => this.go('mail', { kind: 'role', role: 'drafts', label: 'Drafts' }));
     bind('g c', 'Go to Calendar', () => this.go('calendar'));

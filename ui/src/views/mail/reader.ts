@@ -105,6 +105,7 @@ function summaryOf(thread: Thread): ThreadSummary {
     snippet: last?.snippet ?? '',
     mailbox_ids: [...new Set(ms.flatMap((m) => m.mailbox_ids))],
     latest_message_id: last?.id ?? '',
+    favorite: ms.some((m) => !!m.from && store.state.favorites.has(m.from.email.toLowerCase())),
   };
 }
 

@@ -179,6 +179,16 @@ impl Engine {
                 self.set_sender_rule(&email, verdict)?;
                 ok(json!({ "ok": true }))
             }
+            Command::ListFavoriteSenders => {
+                self.require_user(caller)?;
+                ok(self.store.list_favorite_senders()?)
+            }
+            Command::SetFavoriteSenders { emails, favorite } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                self.set_favorite_senders(&emails, favorite)?;
+                ok(json!({ "ok": true }))
+            }
             Command::Unsubscribe { message_id } => {
                 self.require_user(caller)?;
                 self.require_full()?;

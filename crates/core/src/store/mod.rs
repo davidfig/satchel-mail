@@ -9,6 +9,7 @@ mod bodies;
 mod calendars;
 mod contacts;
 mod drafts;
+mod favorites;
 mod mailboxes;
 mod message_reads;
 mod messages;
@@ -238,7 +239,7 @@ fn open_conn(path: &Path) -> Result<Connection> {
 /// The schema version `schema.sql` creates. To change the schema, edit
 /// `schema.sql` to the new shape, bump this, and append to [`MIGRATIONS`] the
 /// SQL that takes a database from the previous version to this one.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` database to version `i + 2`.
 const MIGRATIONS: &[&str] = &[
@@ -251,6 +252,8 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE messages ADD COLUMN auth_serv TEXT;",
     // 5: each event's location, for suggesting places (0050); filled in Rust below.
     "ALTER TABLE events ADD COLUMN location TEXT NOT NULL DEFAULT '';",
+    // 6: favorite senders (0053).
+    "CREATE TABLE IF NOT EXISTS favorite_senders (email TEXT PRIMARY KEY, created_at INTEGER NOT NULL);",
 ];
 
 /// Create or upgrade the schema, tracked in `PRAGMA user_version`.

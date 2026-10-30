@@ -68,6 +68,7 @@ impl Engine {
             f.has_attachment = p.has_attachment;
             f.unread = p.unread;
             f.flagged = p.flagged;
+            f.favorite = p.favorite;
             f.after = match (f.after, p.after) {
                 (Some(a), Some(b)) => Some(a.max(b)),
                 (a, b) => a.or(b),

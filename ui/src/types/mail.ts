@@ -34,6 +34,8 @@ export interface ThreadSummary {
   snippet: string;
   mailbox_ids: Id[];
   latest_message_id: Id;
+  /** A favorite sender wrote one of its messages (0053). */
+  favorite: boolean;
 }
 
 export interface Attachment {

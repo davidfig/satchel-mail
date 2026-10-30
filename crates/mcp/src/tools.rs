@@ -28,7 +28,7 @@ pub(crate) fn tools() -> Vec<Tool> {
         ro(Tool::new("list_mailboxes", "List folders/labels with unread and total counts.", schema(json!({ "account_id": { "type": "string" } }), &[]))),
         ro(Tool::new(
             "search_threads",
-            "Search or list conversations, newest first. `query` supports free text and operators: from:, to:, with: (sender or recipient), subject:, has:attachment, is:unread, is:flagged, before:YYYY-MM-DD, after:YYYY-MM-DD, in:<mailbox>. from:, to: and with: take a comma-separated list; a full address matches exactly. Use role (inbox, sent, drafts, archive, trash, junk, flagged) or mailbox_id to browse.",
+            "Search or list conversations, newest first. `query` supports free text and operators: from:, to:, with: (sender or recipient), subject:, has:attachment, is:unread, is:flagged, is:favorite (from a sender the user marked as a favorite), before:YYYY-MM-DD, after:YYYY-MM-DD, in:<mailbox>. from:, to: and with: take a comma-separated list; a full address matches exactly. Use role (inbox, sent, drafts, archive, trash, junk, flagged) or mailbox_id to browse.",
             schema(json!({
                 "query": { "type": "string" },
                 "mailbox_id": { "type": "string" },

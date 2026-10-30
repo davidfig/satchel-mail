@@ -3,7 +3,7 @@
 import { api } from '../../api';
 import { h, icon } from '../../lib/dom';
 import { displayName } from '../../lib/format';
-import { avatar } from '../../lib/person';
+import { avatar, isFavorite, setFavorite } from '../../lib/person';
 import { errorToast } from '../../lib/ui';
 import { store } from '../../state';
 import type { MailSource, PersonFilter } from '../../state';
@@ -38,15 +38,23 @@ export function personCard(view: MailView, s: Extract<MailSource, { kind: 'perso
     ['from', 'From them', 'Conversations with mail they sent'],
     ['files', 'Attachments', 'Conversations with attachments'],
   ];
+  const addresses = p?.addresses ?? s.emails.map((email) => ({ email }));
+  const fav = isFavorite(addresses);
   const since = p?.first_date && new Date(p.first_date).toLocaleDateString([], { year: 'numeric', month: 'short' });
   return h('div.person-card',
     h('div.person-id',
       avatar(main, true),
       h('div.grow',
-        h('div.person-emails', (p?.addresses ?? s.emails.map((email) => ({ email }))).map((a) => a.email).join(', ')),
+        h('div.person-emails', addresses.map((a) => a.email).join(', ')),
         h('div.muted.small', p
           ? [`${count(p.threads, 'conversation')} · ${p.received} received · ${p.sent} sent`, since ? ` · since ${since}` : ''].join('')
           : 'Loading…')),
+      h('button.icon-btn.fav-toggle', {
+        title: fav ? 'Remove from favorites' : 'Add to favorites: highlight their mail',
+        'aria-label': fav ? 'Remove from favorites' : 'Add to favorites',
+        'aria-pressed': String(fav),
+        on: { click: () => void setFavorite(addresses, !fav) },
+      }, icon('heart')),
       p?.contact_id && h('button.icon-btn', { title: 'Open contact', on: { click: () => store.set({ view: 'contacts', selectedContact: p.contact_id }) } }, icon('user')),
       h('button.icon-btn', { title: `Write to ${displayName(main)}`, 'aria-label': 'Write to them', on: { click: () => openComposer({ to: [main] }) } }, icon('compose'))),
     h('div.segmented', { role: 'group', 'aria-label': 'Show' },

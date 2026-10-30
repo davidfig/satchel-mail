@@ -11,6 +11,8 @@ pub enum CoreEvent {
     MessagesChanged { account_id: Id },
     CalendarChanged { account_id: Id },
     ContactsChanged,
+    /// The favorite senders changed (0053).
+    FavoritesChanged,
     ProposalsChanged,
     OutboxChanged,
     /// A queued operation failed permanently.

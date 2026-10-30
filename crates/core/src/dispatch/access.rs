@@ -114,6 +114,7 @@ mod tests {
             ("move", serde_json::json!({ "message_ids": ids, "mailbox_id": "x" })),
             ("set_flags", serde_json::json!({ "message_ids": ids, "seen": true, "flagged": null })),
             ("set_labels", serde_json::json!({ "message_ids": ids, "add": [], "remove": [] })),
+            ("set_favorite_senders", serde_json::json!({ "emails": ["bob@x.test"], "favorite": true })),
             ("create_event", serde_json::json!({ "event": event })),
             ("update_event", serde_json::json!({ "event": event })),
             ("delete_event", serde_json::json!({ "event_id": "e" })),

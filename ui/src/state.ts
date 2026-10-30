@@ -6,7 +6,7 @@ import type { Account, CoreEvent, Mailbox, MailboxRole, Settings } from './types
 import { notifyNewMail } from './lib/notify';
 import { toast } from './lib/ui';
 
-export type SettingsSection = 'accounts' | 'agents' | 'mirror' | 'privacy' | 'general' | 'activity';
+export type SettingsSection = 'accounts' | 'agents' | 'mirror' | 'privacy' | 'favorites' | 'general' | 'activity';
 export type View = 'mail' | 'calendar' | 'contacts' | 'review' | 'settings';
 
 /** What the mail list is showing. */
@@ -32,6 +32,8 @@ interface AppState {
   /** Settings section to open next. */
   settingsSection: SettingsSection | null;
   myEmails: Set<string>;
+  /** Favorite sender addresses, lowercase (0053). */
+  favorites: Set<string>;
 }
 
 type Listener = (s: AppState, changed: Set<keyof AppState>) => void;
@@ -48,6 +50,7 @@ class Store {
     selectedContact: null,
     settingsSection: null,
     myEmails: new Set(),
+    favorites: new Set(),
   };
   private listeners = new Set<Listener>();
   private eventListeners = new Set<(e: CoreEvent) => void>();
@@ -83,8 +86,12 @@ class Store {
     this.set({ pendingProposals: p.length + stale.length });
   }
 
+  async refreshFavorites() {
+    this.set({ favorites: new Set(await api.listFavoriteSenders()) });
+  }
+
   async init() {
-    const [settings] = await Promise.all([api.getSettings(), this.refreshAccounts(), this.refreshMailboxes(), this.refreshProposals()]);
+    const [settings] = await Promise.all([api.getSettings(), this.refreshAccounts(), this.refreshMailboxes(), this.refreshProposals(), this.refreshFavorites()]);
     this.set({ settings });
     applyTheme(settings.theme);
     const refresh = debounceAsync(async () => {
@@ -108,9 +115,13 @@ class Store {
         case 'proposals_changed':
           void this.refreshProposals();
           break;
+        case 'favorites_changed':
+          void this.refreshFavorites();
+          break;
         case 'data_changed':
           refresh();
           void this.refreshProposals();
+          void this.refreshFavorites();
           break;
         case 'op_failed':
           toast(`${e.description} failed: ${e.error}`, { kind: 'error', ms: 9000 });

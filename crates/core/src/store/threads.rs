@@ -110,7 +110,22 @@ impl Store {
             snippet: r.get("snippet")?,
             mailbox_ids: vec![],
             latest_message_id: r.get("latest_message_id")?,
+            favorite: false,
         })
+    }
+
+    /// What the threads table doesn't hold: the thread's mailboxes, and
+    /// whether a favorite sender wrote any of it.
+    fn fill_thread_extras(c: &Connection, t: &mut ThreadSummary) -> Result<()> {
+        let mut ms = c.prepare_cached(
+            "SELECT DISTINCT mm.mailbox_id FROM messages m JOIN message_mailboxes mm ON mm.message_id=m.id WHERE m.thread_id=?",
+        )?;
+        t.mailbox_ids = ms.query_map([&t.thread_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+        let mut fav = c.prepare_cached(
+            "SELECT EXISTS (SELECT 1 FROM messages m JOIN favorite_senders fs ON fs.email=lower(m.from_email) WHERE m.thread_id=?)",
+        )?;
+        t.favorite = fav.query_row([&t.thread_id], |r| r.get(0))?;
+        Ok(())
     }
 
     /// A message condition matching any of `values` as sender and/or
@@ -229,6 +244,9 @@ impl Store {
         if f.flagged {
             msg_conds.push("m.flagged=1".into());
         }
+        if f.favorite {
+            msg_conds.push("EXISTS (SELECT 1 FROM favorite_senders fs WHERE fs.email=lower(m.from_email))".into());
+        }
         if let Some(d) = f.after {
             msg_conds.push("m.date>=?".into());
             p.push(V::Integer(d.timestamp_millis()));
@@ -303,11 +321,8 @@ impl Store {
             p.push(V::Integer(f.offset as i64));
             let mut s = c.prepare(&sql)?;
             let mut rows = s.query_map(params_from_iter(p.iter()), Self::thread_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
-            let mut ms = c.prepare_cached(
-                "SELECT DISTINCT mm.mailbox_id FROM messages m JOIN message_mailboxes mm ON mm.message_id=m.id WHERE m.thread_id=?",
-            )?;
             for t in rows.iter_mut() {
-                t.mailbox_ids = ms.query_map([&t.thread_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+                Self::fill_thread_extras(c, t)?;
             }
             Ok(rows)
         })
@@ -328,10 +343,7 @@ impl Store {
     pub fn get_thread_summary(&self, id: &str) -> Result<Option<ThreadSummary>> {
         self.r(|c| {
             let Some(mut t) = c.query_row("SELECT * FROM threads WHERE id=?", [id], Self::thread_row).optional()? else { return Ok(None) };
-            let mut s = c.prepare_cached(
-                "SELECT DISTINCT mm.mailbox_id FROM messages m JOIN message_mailboxes mm ON mm.message_id=m.id WHERE m.thread_id=?",
-            )?;
-            t.mailbox_ids = s.query_map([id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+            Self::fill_thread_extras(c, &mut t)?;
             Ok(Some(t))
         })
     }
