@@ -12,7 +12,7 @@ export const UNIFIED: { role: MailboxRole; label: string; icon: string }[] = [
 ];
 
 export const COLLAPSED_KEY = 'satchel.sidebarCollapsed';
-export const SECTIONS_KEY = 'satchel.sidebarClosedSections';
+export const SECTIONS_KEY = 'satchel.sidebarOpenSections';
 export const LOCATION_KEY = 'satchel.lastLocation';
 
 export function readJson<T>(key: string): T | null {

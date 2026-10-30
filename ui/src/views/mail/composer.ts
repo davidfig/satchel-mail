@@ -1,7 +1,7 @@
 // Message composer (new, reply, forward, AI-proposed drafts).
 
 import { api } from '../../api';
-import { h, icon } from '../../lib/dom';
+import { h, icon, patch } from '../../lib/dom';
 import { formatAddress, humanSize, parseAddresses } from '../../lib/format';
 import { confirmDialog, errorToast, toast } from '../../lib/ui';
 import { store } from '../../state';
@@ -28,8 +28,9 @@ function addrField(label: string, value: string, onInput: (v: string) => void) {
     timer = window.setTimeout(async () => {
       try {
         const res = await api.suggestAddresses(token);
-        list.replaceChildren(
-          ...res.map((a) =>
+        // Patched: this redraws on every keystroke.
+        patch(list,
+          res.map((a) =>
             h('button.suggest-item', {
               type: 'button',
               on: {

@@ -238,7 +238,7 @@ fn open_conn(path: &Path) -> Result<Connection> {
 /// The schema version `schema.sql` creates. To change the schema, edit
 /// `schema.sql` to the new shape, bump this, and append to [`MIGRATIONS`] the
 /// SQL that takes a database from the previous version to this one.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` database to version `i + 2`.
 const MIGRATIONS: &[&str] = &[
@@ -249,6 +249,8 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE proposals ADD COLUMN processed_file TEXT;",
     // 4: each message's authserv-id, read lazily, for trusting Authentication-Results.
     "ALTER TABLE messages ADD COLUMN auth_serv TEXT;",
+    // 5: each event's location, for suggesting places (0050); filled in Rust below.
+    "ALTER TABLE events ADD COLUMN location TEXT NOT NULL DEFAULT '';",
 ];
 
 /// Create or upgrade the schema, tracked in `PRAGMA user_version`.
@@ -273,6 +275,10 @@ fn migrate(c: &mut Connection) -> Result<()> {
         let tx = c.transaction()?;
         tx.execute_batch(MIGRATIONS[(version - 1) as usize]).with_context(|| format!("migrating the database to schema {}", version + 1))?;
         version += 1;
+        // SQL can't read iCalendar, so the new column is filled here.
+        if version == 5 {
+            calendars::fill_event_locations(&tx)?;
+        }
         tx.pragma_update(None, "user_version", version)?;
         tx.commit()?;
     }

@@ -81,6 +81,8 @@ pub struct Engine {
     pub(crate) contact_files: Mutex<HashMap<String, String>>,
     /// Contacts changed since the AI folder last wrote them.
     pub(crate) contacts_dirty: std::sync::atomic::AtomicBool,
+    /// Recent place lookups by query, so retyping doesn't ask again.
+    pub(crate) place_cache: Mutex<HashMap<String, (std::time::Instant, Vec<PlaceSuggestion>)>>,
     pub mode: Mode,
     pub data_dir: PathBuf,
     workers: Mutex<Vec<JoinHandle<()>>>,
@@ -160,6 +162,7 @@ impl Engine {
             correspondents: Mutex::new(None),
             contact_files: Mutex::new(HashMap::new()),
             contacts_dirty: std::sync::atomic::AtomicBool::new(true),
+            place_cache: Mutex::new(HashMap::new()),
             mode: opts.mode,
             data_dir: opts.data_dir,
             workers: Mutex::new(vec![]),

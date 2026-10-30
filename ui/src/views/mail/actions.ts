@@ -6,7 +6,7 @@ import { shortName } from '../../lib/format';
 import { folderDialog } from '../../lib/folders';
 import { openPerson } from '../../lib/person';
 import { confirmDialog, errorToast, popupMenu, toast } from '../../lib/ui';
-import type { MenuItem } from '../../lib/ui';
+import type { Command, MenuItem } from '../../lib/ui';
 import { store } from '../../state';
 import type { Mailbox, MessageDetail, Thread, ThreadSummary, UnsubscribeEmail } from '../../types';
 import { openExternal, viewSource } from './message-body';
@@ -195,24 +195,50 @@ function unsubscribeEmailText(e: UnsubscribeEmail, m: MessageDetail): HTMLElemen
     e.other_domain && h('p', `Note: ${e.to} isn’t at ${domain ?? 'the sender’s domain'}. Mailing list services often use their own domain, but only continue if you recognize it.`));
 }
 
+/** Folders and labels the conversations can move to. */
+function moveTargets(accountId: string): Mailbox[] {
+  return store.state.mailboxes.filter((m) => m.account_id === accountId && m.role !== 'all' && m.role !== 'flagged');
+}
+
+async function moveTo(view: MailView, threads: ThreadSummary[], b: Mailbox) {
+  try {
+    await api.move(await view.messageIds(threads), b.id);
+    toast(`Moved to ${b.name}`);
+    void view.refresh();
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
 export function moveMenu(view: MailView, anchor: HTMLElement | { x: number; y: number }, threads = view.targetThreads()) {
   const t = threads[0];
   if (!t) return;
-  const boxes = store.state.mailboxes.filter((m) => m.account_id === t.account_id && m.role !== 'all' && m.role !== 'flagged');
-  const moveTo = async (b: Mailbox) => {
-    try {
-      await api.move(await view.messageIds(threads), b.id);
-      toast(`Moved to ${b.name}`);
-      void view.refresh();
-    } catch (e) {
-      errorToast(e);
-    }
-  };
   popupMenu(anchor, [
-    ...boxes.map((b) => ({ label: b.path, icon: b.is_label ? 'label' : 'folder', run: () => void moveTo(b) })),
+    ...moveTargets(t.account_id).map((b) => ({ label: b.path, icon: b.is_label ? 'label' : 'folder', run: () => void moveTo(view, threads, b) })),
     '-',
-    { label: 'New folder…', icon: 'plus', run: () => void folderDialog(t.account_id).then((f) => f && moveTo(f)) },
+    { label: 'New folder…', icon: 'plus', run: () => void folderDialog(t.account_id).then((f) => f && moveTo(view, threads, f)) },
   ]);
+}
+
+/** The palette's commands for the conversations the keys act on: a move to
+ *  each folder they aren't all in, and everything with the other person. */
+export function paletteCommands(view: MailView): { context?: string; commands: Command[] } {
+  const threads = view.targetThreads();
+  const t = threads[0];
+  if (!t) return { commands: [] };
+  const context = threads.length === 1 ? `“${t.subject || '(no subject)'}”` : `${threads.length} conversations`;
+  const me = store.state.myEmails;
+  const person = threads.length === 1 ? t.participants.find((a) => !me.has(a.email.toLowerCase())) : undefined;
+  return {
+    context,
+    commands: [
+      ...moveTargets(t.account_id)
+        .filter((b) => !threads.every((x) => x.mailbox_ids.includes(b.id)))
+        .map((b) => ({ label: `Move to ${b.path}`, icon: b.is_label ? 'label' : 'folder', run: () => void moveTo(view, threads, b) })),
+      { label: 'Move to new folder…', icon: 'plus', run: () => void folderDialog(t.account_id).then((f) => f && moveTo(view, threads, f)) },
+      ...(person ? [{ label: `All mail with ${shortName(person)}`, icon: 'user', run: () => openPerson(person) }] : []),
+    ],
+  };
 }
 
 export function moreMenu(view: MailView, anchor: HTMLElement, thread: Thread) {

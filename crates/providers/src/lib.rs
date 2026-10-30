@@ -8,6 +8,7 @@ pub mod jmap;
 pub mod microsoft;
 pub mod net;
 pub mod oauth;
+pub mod places;
 #[cfg(test)]
 mod test_mail;
 
@@ -15,7 +16,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use satchel_api::*;
-use satchel_core::provider::{CalendarProvider, ContactsProvider, CredentialHandle, OAuthDone, ProviderFactory, Providers};
+use satchel_core::provider::{CalendarProvider, ContactsProvider, CredentialHandle, OAuthDone, PlaceSearch, ProviderFactory, Providers};
 
 fn caldav_for(account: &Account, url: Option<&str>, username: &str, insecure: bool, creds: &CredentialHandle) -> Result<Option<Arc<dyn CalendarProvider>>> {
     match url.map(str::trim).filter(|u| !u.is_empty()) {
@@ -34,12 +35,26 @@ fn carddav_for(carddav: Option<&str>, caldav: Option<&str>, username: &str, inse
     }
 }
 
-#[derive(Default)]
-pub struct Factory {}
+pub struct Factory {
+    /// Places come from here: OpenStreetMap, or the platform's own service.
+    places: Arc<dyn PlaceSearch>,
+}
+
+impl Default for Factory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Factory {
     pub fn new() -> Self {
-        Self {}
+        Self { places: Arc::new(places::Photon::new(places::PHOTON_URL)) }
+    }
+
+    /// Look up places with a service the host has (Apple Maps in the Mac app).
+    pub fn with_places(mut self, places: Arc<dyn PlaceSearch>) -> Self {
+        self.places = places;
+        self
     }
 }
 
@@ -90,6 +105,10 @@ impl ProviderFactory for Factory {
             bail!("Sign-in for this provider isn't configured in this build. Set {var} (see docs/OAUTH.md).");
         };
         oauth::start(app, done)
+    }
+
+    fn places(&self) -> Option<Arc<dyn PlaceSearch>> {
+        Some(self.places.clone())
     }
 
     async fn one_click_unsubscribe(&self, url: &str) -> Result<()> {

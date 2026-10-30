@@ -1,6 +1,6 @@
 # 0039. Newer mail first; older mail syncs over time
 
-- **Status:** Accepted
+- **Status:** Accepted; per-pass budgets updated by 0047
 - **Date:** 2026-10-30
 
 ## Context

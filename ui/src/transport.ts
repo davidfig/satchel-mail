@@ -11,6 +11,10 @@ export interface Transport {
   subscribe(fn: (e: CoreEvent) => void): () => void;
   /** Links the host caught opening as popups (desktop: the message iframe's). The web has none. */
   onOpenLink(fn: (url: string) => void): void;
+  /** Clicks on the desktop menu bar's items, by id (see `apps/desktop/src/menu.rs`). The web has none. */
+  onMenu(fn: (id: string) => void): void;
+  /** Whether the desktop window is in full screen, now and on every change. The web has none. */
+  onFullscreen(fn: (on: boolean) => void): void;
   /** Sets the window title (the browser tab on the web). */
   setTitle(title: string): void;
   /** Whether we may show system notifications; `ask` prompts the user if undecided. */
@@ -66,6 +70,20 @@ class TauriTransport implements Transport {
     void import('@tauri-apps/api/event').then(({ listen }) => listen<string>('satchel://open-link', (msg) => fn(msg.payload)));
   }
 
+  onMenu(fn: (id: string) => void) {
+    void import('@tauri-apps/api/event').then(({ listen }) => listen<string>('satchel://menu', (msg) => fn(msg.payload)));
+  }
+
+  onFullscreen(fn: (on: boolean) => void) {
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      const w = getCurrentWindow();
+      const check = () => void w.isFullscreen().then(fn);
+      check();
+      // Entering and leaving full screen both resize the window.
+      void w.onResized(check);
+    });
+  }
+
   setTitle(title: string) {
     // The sidebar re-renders often; skip the IPC round trip when nothing changed.
     if (document.title === title) return;
@@ -116,6 +134,14 @@ class HttpTransport implements Transport {
 
   onOpenLink() {
     // Browsers open the iframe's popups themselves.
+  }
+
+  onMenu() {
+    // No menu bar on the web.
+  }
+
+  onFullscreen() {
+    // The browser's full screen has no title bar to leave room for.
   }
 
   private connecting = false;

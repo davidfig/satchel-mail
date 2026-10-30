@@ -86,6 +86,28 @@ pub struct Occurrence {
     pub color: String,
 }
 
+/// Where a place suggestion came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaceSource {
+    /// A location already used in one of your events.
+    History,
+    OpenStreetMap,
+    AppleMaps,
+}
+
+/// A suggestion for an event's location.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaceSuggestion {
+    /// What goes in the location field.
+    pub text: String,
+    /// The place's name, shown first.
+    pub label: String,
+    /// The address or area, shown muted.
+    pub detail: Option<String>,
+    pub source: PlaceSource,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FreeSlot {
     pub start: DateTime<Utc>,

@@ -91,22 +91,46 @@ export function listen(el: Element, ev: string, fn: EventListener) {
 }
 
 /** Like `replace`, but updates `el`'s existing children in place to match the
- *  new ones instead of swapping them out. Use it for views that re-render
- *  often (the sidebar on every sync tick): nodes under the pointer keep their
- *  :hover, tooltips stay up, images don't reload, animations don't restart.
- *  It syncs attributes, text and `listen` handlers, so render from scratch
- *  each time and set state through attributes, not DOM properties. */
+ *  new ones instead of swapping them out. Use it for anything that redraws
+ *  while it's on screen (sync ticks, scrolling, typing): nodes under the
+ *  pointer keep their :hover, tooltips stay up, images don't reload,
+ *  animations don't restart.
+ *
+ *  Render from scratch each time. Kept nodes get the new render's attributes,
+ *  text, `listen`/`on` handlers and form state (value, checked, selected; a
+ *  focused field keeps what's typed), so:
+ *  - attach listeners with `on` or `listen`, never `addEventListener`;
+ *  - handlers must not hold on to the elements they were built with (read
+ *    `e.currentTarget` instead): those may be thrown away;
+ *  - a node you keep yourself (a search box) passed straight in, and already
+ *    in `el`, stays exactly as it is.
+ *  Forms that hold references to their own fields use `replace`, and don't
+ *  redraw while being edited. */
 export function patch(el: Element, ...children: Child[]) {
+  // Stand-ins hold the kept nodes' places while the new tree is built.
+  const kept = new Map<Node, Node>();
+  const swap = (c: Child): Child => {
+    if (Array.isArray(c)) return c.map(swap);
+    if (!(c instanceof Node) || c.parentNode !== el) return c;
+    const stand = document.createComment('');
+    kept.set(stand, c);
+    return stand;
+  };
   const next = document.createElement('div');
-  append(next, children);
-  patchChildren(el, next);
+  append(next, children.map(swap));
+  patchChildren(el, next, kept);
 }
 
-function patchChildren(old: Node, next: Node) {
+function patchChildren(old: Node, next: Node, kept = new Map<Node, Node>()) {
   const want = [...next.childNodes];
+  const keeping = new Set(kept.values());
   for (let i = 0; i < want.length; i++) {
     const have = old.childNodes[i];
-    if (have && sameKind(have, want[i])) patchNode(have, want[i]);
+    const mine = kept.get(want[i]);
+    if (mine) {
+      if (have !== mine) old.insertBefore(mine, have ?? null);
+    } else if (have && keeping.has(have)) old.insertBefore(want[i], have);
+    else if (have && sameKind(have, want[i])) patchNode(have, want[i]);
     else if (have) old.replaceChild(want[i], have);
     else old.appendChild(want[i]);
   }
@@ -131,6 +155,22 @@ function patchNode(old: Node, next: Node) {
     handlers.get(old)!.set(ev, fns);
   }
   patchChildren(old, next);
+  patchFormState(old, next);
+}
+
+/** Form state lives in properties, not attributes; copy it too. After the
+ *  children, so a select's options are already in place. */
+function patchFormState(old: Element, next: Element) {
+  const o = old as HTMLInputElement;
+  const n = next as HTMLInputElement;
+  if (old.nodeName === 'INPUT' && o.checked !== n.checked) o.checked = n.checked;
+  if ((old.nodeName === 'INPUT' && o.type !== 'file') || old.nodeName === 'TEXTAREA') {
+    if (o.value !== n.value && old !== document.activeElement) o.value = n.value;
+  }
+  if (old.nodeName === 'OPTION') {
+    const [os, ns] = [old as HTMLOptionElement, next as HTMLOptionElement];
+    if (os.selected !== ns.selected) os.selected = ns.selected;
+  }
 }
 
 /** Inline SVG icons (stroke-based, 20px grid). */
@@ -169,11 +209,12 @@ const ICONS: Record<string, string> = {
   location: '<path d="M10 17.5s5.5-5 5.5-9a5.5 5.5 0 0 0-11 0c0 4 5.5 9 5.5 9z"/><circle cx="10" cy="8.5" r="2"/>',
   image: '<rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/><circle cx="7" cy="8" r="1.5"/><path d="M2.5 14l4-4 3 3 3-3 5 5"/>',
   more: '<circle cx="5" cy="10" r="1"/><circle cx="10" cy="10" r="1"/><circle cx="15" cy="10" r="1"/>',
+  lock: '<rect x="4.5" y="9" width="11" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/>',
   key: '<circle cx="6.5" cy="13.5" r="3.5"/><path d="M9 11l7-7M14 6l2 2M12 8l1.5 1.5"/>',
   shield: '<path d="M10 2.5l6 2.5v4.5c0 4-2.6 6.8-6 8-3.4-1.2-6-4-6-8V5z"/>',
   sun: '<circle cx="10" cy="10" r="3.5"/><path d="M10 2v1.5M10 16.5V18M2 10h1.5M16.5 10H18M4.3 4.3l1 1M14.7 14.7l1 1M4.3 15.7l1-1M14.7 5.3l1-1"/>',
   moon: '<path d="M16 12.5A6.5 6.5 0 0 1 7.5 4a6.5 6.5 0 1 0 8.5 8.5z"/>',
-  panel: '<rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/><path d="M7.5 3.5v13"/>',
+  notes: '<path d="M4 5h12M4 10h12M4 15h7.5"/>',
   copy: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 7V4.5a1 1 0 0 0-1-1H4.5a1 1 0 0 0-1 1V12a1 1 0 0 0 1 1H7"/>',
 };
 

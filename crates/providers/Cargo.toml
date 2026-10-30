@@ -28,3 +28,9 @@ tokio.workspace = true
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws-lc-rs"] }
 tracing.workspace = true
 url = "2"
+
+# Apple Maps place suggestions in the Mac app (0050).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSObject", "NSString"] }
+objc2-map-kit = { version = "0.3.2", default-features = false, features = ["std", "MKLocalSearchCompleter"] }

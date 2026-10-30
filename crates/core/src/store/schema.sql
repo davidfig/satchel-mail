@@ -167,6 +167,8 @@ CREATE TABLE IF NOT EXISTS events (
     uid          TEXT NOT NULL,
     ics          TEXT NOT NULL,
     title        TEXT NOT NULL,
+    -- The master's LOCATION, for suggesting places (0050).
+    location     TEXT NOT NULL DEFAULT '',
     -- Bounds of the whole series, for range queries.
     range_start  INTEGER NOT NULL,
     range_end    INTEGER NOT NULL,

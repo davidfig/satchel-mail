@@ -70,6 +70,8 @@ export interface MirrorSettings {
 export interface Settings {
   mirror: MirrorSettings;
   remote_image_senders: string[];
+  /** Load remote images in all mail except spam. */
+  load_remote_images: boolean;
   sync_ai_drafts_to_server: boolean;
   theme: 'system' | 'light' | 'dark' | string;
   initial_sync_days: number;
@@ -79,6 +81,8 @@ export interface Settings {
   storage_limit_mb: number | null;
   poll_interval_secs: number;
   notify_new_mail: boolean;
+  /** Send what's typed in an event's location to a place service for suggestions. */
+  look_up_places: boolean;
 }
 
 export interface AuditEntry {

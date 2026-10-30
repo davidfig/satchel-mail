@@ -106,7 +106,7 @@ impl Engine {
             let body: String = {
                 let p = satchel_ical::parse(&with_status);
                 let range = crate::calendar::series_range(&p.events);
-                let id = self.store.upsert_event(&c.cal.id, &acc.id, &format!("local:{}", new_id()), None, &ev.uid, &with_status, &ev.summary, range, ev.rrule.is_some(), true)?;
+                let id = self.store.upsert_event(&c.cal.id, &acc.id, &format!("local:{}", new_id()), None, &ev.uid, &with_status, &ev.summary, ev.location.trim(), range, ev.rrule.is_some(), true)?;
                 event_id = Some(id.clone());
                 id
             };

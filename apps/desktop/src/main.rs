@@ -3,6 +3,9 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "macos")]
+mod menu;
+
 use std::sync::Arc;
 
 use base64::Engine as _;
@@ -149,6 +152,20 @@ fn save_window_state_on_change(window: &tauri::WebviewWindow) {
     });
 }
 
+/// Providers for the engine; on macOS, places come from Apple Maps (0050).
+fn factory(app: &tauri::AppHandle) -> satchel_providers::Factory {
+    let f = satchel_providers::Factory::new();
+    #[cfg(target_os = "macos")]
+    let f = {
+        let app = app.clone();
+        let maps = satchel_providers::places::apple_maps::AppleMaps::new(Box::new(move |job| Ok(app.run_on_main_thread(job)?)));
+        f.with_places(Arc::new(maps))
+    };
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+    f
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,tantivy=warn".into()))
@@ -168,6 +185,8 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build());
     #[cfg(feature = "updater")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(menu::build).on_menu_event(|app, e| menu::forward(app, e.id().as_ref()));
     builder
         .setup(|app| {
             let data_dir = satchel_core::default_data_dir();
@@ -188,7 +207,7 @@ fn main() {
                     data_dir,
                     mode: Mode::Full,
                     secrets,
-                    factory: Arc::new(satchel_providers::Factory::new()),
+                    factory: Arc::new(factory(app.handle())),
                     start_workers: true,
                 })
             })?;

@@ -1,20 +1,23 @@
 // Settings: accounts, AI agents, AI folder, privacy, appearance, activity.
 
 import { api } from '../../api';
-import { h, icon, replace } from '../../lib/dom';
+import { clear, h, icon, patch } from '../../lib/dom';
 import { errorToast } from '../../lib/ui';
 import { store } from '../../state';
+import type { SettingsSection as Section } from '../../state';
 import type { Settings } from '../../types';
 import { accounts } from './accounts';
 import { agents } from './agents';
 import { activity, general, mirror } from './general';
 import { privacy } from './privacy';
 
-type Section = 'accounts' | 'agents' | 'mirror' | 'privacy' | 'general' | 'activity';
-
 export class SettingsView {
-  root = h('div.settings-view');
+  private nav = h('nav.settings-nav');
+  private content = h('div.settings-content');
+  root = h('div.settings-view', this.nav, this.content);
   private section: Section = 'accounts';
+  /** The section `content` currently holds. */
+  private drawn: Section | null = null;
 
   /** The user has typed into a form here since it was drawn. */
   private editing = false;
@@ -24,6 +27,8 @@ export class SettingsView {
     // constantly during a sync; only the Accounts page shows them.
     store.subscribe((_, changed) => {
       if (store.state.view !== 'settings' || this.editing) return;
+      // A link (or the palette) asking for a section while Settings is open.
+      if (changed.has('settingsSection') && store.state.settingsSection) return this.show();
       if ((changed.has('accounts') && this.section === 'accounts') || changed.has('settings')) this.render();
     });
     this.root.addEventListener('input', () => (this.editing = true));
@@ -31,6 +36,11 @@ export class SettingsView {
   }
 
   show() {
+    const wanted = store.state.settingsSection;
+    if (wanted) {
+      this.section = wanted;
+      store.set({ settingsSection: null });
+    }
     this.render();
   }
 
@@ -44,10 +54,13 @@ export class SettingsView {
       ['general', 'General', 'settings'],
       ['activity', 'Activity', 'clock'],
     ];
-    const content = h('div.settings-content');
-    replace(this.root,
-      h('nav.settings-nav', nav.map(([s, l, i]) => h(`button.nav-item${this.section === s ? '.active' : ''}`, { on: { click: () => { this.section = s; this.render(); } } }, icon(i), l))),
-      content);
+    // Patched, not replaced: the Accounts page redraws on every sync tick,
+    // and swapping the nodes out made it blink. A new section starts clean,
+    // since patching keeps the old nodes' DOM properties (input values, …).
+    patch(this.nav, nav.map(([s, l, i]) => h(`button.nav-item${this.section === s ? '.active' : ''}`, { on: { click: () => { this.section = s; this.render(); } } }, icon(i), l)));
+    const content = this.content;
+    if (this.drawn !== this.section) clear(content);
+    this.drawn = this.section;
     const r = { accounts: () => accounts(content), agents: () => agents(this, content), mirror: () => mirror(this, content), privacy: () => privacy(this, content), general: () => general(this, content), activity: () => activity(this, content) };
     void r[this.section]();
   }

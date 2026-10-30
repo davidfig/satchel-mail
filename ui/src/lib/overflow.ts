@@ -8,8 +8,9 @@ import type { MenuItem } from './ui';
 /** Keep `row` on one line by moving `items` (from the end) into a "…" menu
  *  when the row, or a truncating `watch` element in it, overflows. A `pinned`
  *  item (say, the active tab) goes last. Returns the "…" button, to be
- *  placed in the row where the menu should open. */
-export function overflowMenu(row: HTMLElement, items: { el: HTMLElement; item: () => MenuItem; pinned?: boolean }[], watch: HTMLElement[] = []): HTMLButtonElement {
+ *  placed in the row where the menu should open, and `fit`, to call when the
+ *  row's contents change. */
+export function overflowMenu(row: HTMLElement, items: { el: HTMLElement; item: () => MenuItem; pinned?: boolean }[], watch: HTMLElement[] = []): { more: HTMLButtonElement; fit: () => void } {
   let hidden: typeof items = [];
   const more = h('button.icon-btn.overflow-more', {
     title: 'More',
@@ -33,5 +34,5 @@ export function overflowMenu(row: HTMLElement, items: { el: HTMLElement; item: (
   };
   const observer = new ResizeObserver(fit);
   observer.observe(row);
-  return more;
+  return { more, fit };
 }

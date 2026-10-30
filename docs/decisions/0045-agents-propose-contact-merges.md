@@ -30,6 +30,9 @@ into it. In the AI folder it is a proposal file:
     why: Same person, writing from both addresses
     ---
 
+Over MCP it is the `propose_merge_contacts` tool, taking `contact_ids` in the
+same order.
+
 - It goes through `CreateProposal` like everything else.
   `Command::allowed_for_agent` doesn't change: agents still can't call
   `MergeContacts` themselves.

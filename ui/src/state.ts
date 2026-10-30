@@ -6,6 +6,7 @@ import type { Account, CoreEvent, Mailbox, MailboxRole, Settings } from './types
 import { notifyNewMail } from './lib/notify';
 import { toast } from './lib/ui';
 
+export type SettingsSection = 'accounts' | 'agents' | 'mirror' | 'privacy' | 'general' | 'activity';
 export type View = 'mail' | 'calendar' | 'contacts' | 'review' | 'settings';
 
 /** What the mail list is showing. */
@@ -28,6 +29,8 @@ interface AppState {
   selectedThread: string | null;
   /** Contact for the Contacts view to show next. */
   selectedContact: string | null;
+  /** Settings section to open next. */
+  settingsSection: SettingsSection | null;
   myEmails: Set<string>;
 }
 
@@ -43,6 +46,7 @@ class Store {
     source: { kind: 'role', role: 'inbox', label: 'Inbox' },
     selectedThread: null,
     selectedContact: null,
+    settingsSection: null,
     myEmails: new Set(),
   };
   private listeners = new Set<Listener>();

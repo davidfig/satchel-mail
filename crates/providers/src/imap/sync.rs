@@ -2,9 +2,6 @@
 
 use super::*;
 
-/// Headers of older mail fetched per sync pass, across all mailboxes.
-const BACKFILL_PER_PASS: usize = 5000;
-
 impl ImapProvider {
     pub(super) async fn list_mailboxes(&self, s: &mut Session) -> Result<Vec<(RemoteMailbox, bool)>> {
         let names: Vec<async_imap::types::Name> = s.list(Some(""), Some("*")).await?.try_collect().await?;
@@ -121,15 +118,18 @@ impl ImapProvider {
     }
 
     /// Headers of older mail, newest first, taking a chunk from each mailbox
-    /// in turn so they all move back in time together. Stops after
-    /// [`BACKFILL_PER_PASS`] and asks for another pass; each mailbox's cursor
-    /// keeps `backfill` set until it has everything.
-    pub(super) async fn backfill(&self, s: &mut Session, ctx: &SyncCtx, mut older: Vec<(&RemoteMailbox, u32, Vec<u32>)>) -> Result<()> {
+    /// in turn so they all move back in time together. Stops at `until` and
+    /// asks for another pass; each mailbox's cursor keeps `backfill` set
+    /// until it has everything.
+    pub(super) async fn fetch_older(&self, s: &mut Session, ctx: &SyncCtx, mut older: Vec<Older>, until: std::time::Instant) -> Result<()> {
         const CHUNK: usize = 250;
         let total: usize = older.iter().map(|(_, _, u)| u.len()).sum();
         let mut done = 0;
-        while done < BACKFILL_PER_PASS && older.iter().any(|(_, _, u)| !u.is_empty()) {
+        'pass: while older.iter().any(|(_, _, u)| !u.is_empty()) {
             for (mb, uv, uids) in older.iter_mut().filter(|(_, _, u)| !u.is_empty()) {
+                if std::time::Instant::now() >= until {
+                    break 'pass;
+                }
                 priority::yield_to_user().await;
                 ctx.progress(format!("Older mail {done}/{total}"));
                 let chunk: Vec<u32> = uids.drain(..CHUNK.min(uids.len())).collect();

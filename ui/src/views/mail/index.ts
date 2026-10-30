@@ -2,10 +2,10 @@
 // coordinates; the list, reader, actions and person header live beside it.
 
 import { api } from '../../api';
-import { debounce, h, icon, replace } from '../../lib/dom';
+import { debounce, h, icon, patch } from '../../lib/dom';
 import { emptiable, emptyFolder } from '../../lib/folders';
 import { formatAddress } from '../../lib/format';
-import { bind, contextMenu, errorToast, toast } from '../../lib/ui';
+import { bind, commandSource, contextMenu, errorToast, toast } from '../../lib/ui';
 import type { MenuItem } from '../../lib/ui';
 import { store } from '../../state';
 import type { MailSource } from '../../state';
@@ -73,7 +73,13 @@ export class MailView {
         this.scroller.focus();
       }
     });
+    let images = imageSettings();
     store.subscribe((_, changed) => {
+      // The open thread was drawn under the old remote image settings.
+      if (changed.has('settings') && imageSettings() !== images) {
+        images = imageSettings();
+        if (this.readerThread) void this.showThread(this.readerThread, false, true);
+      }
       if (changed.has('source')) void this.reload();
       // A folder renamed here or elsewhere keeps its title current, and
       // Empty Spam/Trash knows when there's nothing left.
@@ -111,7 +117,9 @@ export class MailView {
     if (s.kind === 'search' && this.searchInput.value !== s.query) this.searchInput.value = s.query;
     if (s.kind !== 'search' && document.activeElement !== this.searchInput) this.searchInput.value = '';
     const n = this.selected.size;
-    replace(
+    // Patched: this redraws on sync ticks while Spam, Trash or a folder is
+    // open, and the search box keeps its focus.
+    patch(
       this.header,
       h('div.list-title',
         s.kind === 'person' && h('button.icon-btn', { title: `Back to ${s.back?.label ?? 'Inbox'}`, 'aria-label': 'Back', on: { click: () => store.set({ source: s.back ?? { kind: 'role', role: 'inbox', label: 'Inbox' } }) } }, icon('chevronLeft')),
@@ -220,6 +228,9 @@ export class MailView {
 
   private bindKeys() {
     const s = 'mail';
+    // For the palette: whether there's a conversation to act on, or one open.
+    const some = () => this.targetThreads().length > 0;
+    const reading = () => !!this.openThread;
     bind('j', 'Next conversation', () => void this.move(1), s);
     bind('ArrowDown', 'Next conversation', () => void this.move(1), s);
     bind('k', 'Previous conversation', () => void this.move(-1), s);
@@ -227,20 +238,21 @@ export class MailView {
     bind('Enter', 'Open conversation', () => void this.openAtCursor(), s);
     bind('o', 'Open conversation', () => void this.openAtCursor(), s);
     bind('x', 'Select conversation', () => { const t = this.list.at(this.cursor); if (t) this.toggleSelect(t); }, s);
-    bind('e', 'Archive', () => void this.act('archive'), s);
-    bind('#', 'Delete', () => void this.act('trash'), s);
+    bind('e', 'Archive', () => void this.act('archive'), s, some);
+    bind('#', 'Delete', () => void this.act('trash'), s, some);
     bind('Backspace', 'Delete', () => void this.act('trash'), s);
     bind('Delete', 'Delete', () => void this.act('trash'), s);
-    bind('u', 'Mark unread', () => void this.act('unread'), s);
-    bind('shift+i', 'Mark read', () => void this.act('read'), s);
-    bind('!', 'Mark as spam / Not spam', () => void this.act(this.inSpam() ? 'not_spam' : 'spam'), s);
-    bind('s', 'Flag / unflag', () => { const t = this.targetThreads()[0]; if (t) void this.flagThread(t); }, s);
-    bind('r', 'Reply', () => this.replyBox?.focus('reply'), s);
-    bind('a', 'Reply all', () => this.replyBox?.focus('reply_all'), s);
-    bind('f', 'Forward', () => void this.reply('forward'), s);
-    bind('v', 'Move to…', () => { const b = this.reader.querySelector<HTMLElement>('[aria-label="Move"]'); if (b) this.moveMenu(b); }, s);
+    bind('u', 'Mark unread', () => void this.act('unread'), s, some);
+    bind('shift+i', 'Mark read', () => void this.act('read'), s, some);
+    bind('!', 'Mark as spam / Not spam', () => void this.act(this.inSpam() ? 'not_spam' : 'spam'), s, some);
+    bind('s', 'Flag / unflag', () => { const t = this.targetThreads()[0]; if (t) void this.flagThread(t); }, s, some);
+    bind('r', 'Reply', () => this.replyBox?.focus('reply'), s, reading);
+    bind('a', 'Reply all', () => this.replyBox?.focus('reply_all'), s, reading);
+    bind('f', 'Forward', () => void this.reply('forward'), s, reading);
+    bind('v', 'Move to…', () => { const b = this.reader.querySelector<HTMLElement>('[aria-label="Move"]'); if (b) this.moveMenu(b); }, s, reading);
     bind('/', 'Search', () => { this.searchInput.focus(); this.searchInput.select(); }, s);
     bind('Escape', 'Close conversation', () => { store.set({ selectedThread: null }); this.renderEmptyReader(); this.renderRows(); this.scroller.focus(); }, s);
+    commandSource(() => actions.paletteCommands(this), s);
   }
 
   // Helpers in the sibling modules, which take this view as their first argument.
@@ -267,4 +279,10 @@ export class MailView {
 
 export function addressList(list: { email: string; name?: string | null }[]) {
   return list.map(formatAddress).join(', ');
+}
+
+/** The settings that decide which remote images load, as one comparable value. */
+function imageSettings() {
+  const s = store.state.settings;
+  return s ? `${s.load_remote_images}|${s.remote_image_senders.join(',')}` : '';
 }

@@ -42,6 +42,10 @@ for the layout and `docs/` for design and decisions.
   `title: '…'` in `h()` (rendered by `tooltip.ts`, never the browser's), and
   every button has one, with its shortcut in parentheses if it has one. See
   `docs/decisions/0021-shared-ui-components.md`.
+- **Redraw with `patch`, not `replace`,** anywhere a view redraws while it's
+  on screen (sync ticks, events, typing), or it blinks. Listeners go through
+  `on`/`listen`, and handlers read `e.currentTarget`, not a captured element
+  (0046).
 - Email content is untrusted: sanitize HTML in the core, render it in the
   sandboxed iframe, never `innerHTML` untrusted text.
 
@@ -85,7 +89,7 @@ folder's `mod.rs` (or `index.ts`) says what's in it (0035).
   - `provider/` — the traits providers implement, and `SyncCtx`.
 - `crates/providers/src` — by vendor: `imap/`, `jmap/`, `google/` (Gmail,
   Calendar, Contacts), `microsoft/` (mail, calendar, contacts), `dav/`
-  (CalDAV, CardDAV); `net.rs`, `oauth.rs`.
+  (CalDAV, CardDAV), `places/` (Photon, Apple Maps); `net.rs`, `oauth.rs`.
 - `crates/ical`, `crates/mime` — parsing and building, split by concern.
 - `crates/mcp` — MCP tools. `crates/cli` — `satchel` binary + HTTP server.
 - `crates/core/tests` — integration tests by area, with fakes in `support/`.

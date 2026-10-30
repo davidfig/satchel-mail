@@ -42,10 +42,17 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0036 | [Download all mail without attachments, within a storage limit](0036-message-content-and-storage-limit.md) | Accepted |
 | 0037 | [The user's requests go before background sync](0037-user-requests-before-sync.md) | Accepted |
 | 0038 | [Background reads use their own connection](0038-separate-read-connections.md) | Accepted |
-| 0039 | [Newer mail first; older mail syncs over time](0039-newer-mail-first.md) | Accepted |
+| 0039 | [Newer mail first; older mail syncs over time](0039-newer-mail-first.md) | Accepted (per-pass budgets updated by 0047) |
 | 0040 | [Hardening after the October security review](0040-security-review-hardening.md) | Accepted |
 | 0041 | [Changing the AI folder's location moves it](0041-moving-the-ai-folder.md) | Accepted |
 | 0042 | [Hardening after the second security pass](0042-second-security-pass.md) | Accepted |
 | 0043 | [Convert HTML mail to text ourselves](0043-html-to-text-in-tree.md) | Accepted |
 | 0044 | [Approved drafts can be sent straight from Review](0044-send-from-review.md) | Accepted |
 | 0045 | [Agents can propose merging contacts](0045-agents-propose-contact-merges.md) | Accepted |
+| 0046 | [Views that redraw on their own use `patch`, not a framework](0046-redraw-with-patch.md) | Accepted |
+| 0046 | [Opt-in setting loads remote images, except in spam](0046-always-load-remote-images.md) | Accepted |
+| 0047 | [Short sync passes while older mail fills in](0047-short-sync-passes.md) | Accepted |
+| 0048 | [The command palette is built from the shortcuts](0048-command-palette-from-shortcuts.md) | Accepted |
+| 0049 | [Events move between calendars, unless they have guests](0049-move-events-between-calendars.md) | Accepted |
+| 0050 | [Location suggestions: history first, place lookups opt-in](0050-location-suggestions.md) | Accepted |
+| 0051 | [One sidebar: fixed mode rows, each view's own section below](0051-one-sidebar.md) | Accepted |

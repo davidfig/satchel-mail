@@ -164,6 +164,9 @@ pub struct Settings {
     pub mirror: MirrorSettings,
     /// Senders whose remote images load automatically.
     pub remote_image_senders: Vec<String>,
+    /// Load remote images in all mail except spam.
+    #[serde(default)]
+    pub load_remote_images: bool,
     /// Push AI drafts to the server Drafts folder before approval (still never sent).
     pub sync_ai_drafts_to_server: bool,
     pub theme: String,
@@ -182,6 +185,10 @@ pub struct Settings {
     /// Show a desktop notification when new mail arrives in an inbox.
     #[serde(default = "yes")]
     pub notify_new_mail: bool,
+    /// Send what's typed in an event's location to a place service
+    /// (OpenStreetMap, or Apple Maps in the Mac app) for suggestions.
+    #[serde(default)]
+    pub look_up_places: bool,
 }
 
 fn yes() -> bool {
@@ -193,6 +200,7 @@ impl Default for Settings {
         Self {
             mirror: MirrorSettings::default(),
             remote_image_senders: vec![],
+            load_remote_images: false,
             sync_ai_drafts_to_server: false,
             theme: "system".into(),
             initial_sync_days: 90,
@@ -200,6 +208,7 @@ impl Default for Settings {
             storage_limit_mb: None,
             poll_interval_secs: 120,
             notify_new_mail: true,
+            look_up_places: false,
         }
     }
 }

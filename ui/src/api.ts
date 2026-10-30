@@ -22,6 +22,7 @@ import type {
   Occurrence,
   OutboxItem,
   PartStat,
+  PlaceSuggestion,
   PersonSummary,
   Proposal,
   ProposalAction,
@@ -39,7 +40,8 @@ import type {
 const call = <T>(cmd: string, args?: unknown) => transport.invoke<T>(cmd, args);
 
 export const api = {
-  info: () => call<{ version: string; mode: string; data_dir: string; mirror_root: string }>('info'),
+  /** `places_service`: who looks up places when that's turned on ("Apple Maps"), or null. */
+  info: () => call<{ version: string; mode: string; data_dir: string; mirror_root: string; places_service: string | null }>('info'),
 
   listAccounts: () => call<Account[]>('list_accounts'),
   testAccount: (config: AccountConfig, credential: Credential) => call<{ ok: boolean }>('test_account', { config, credential }),
@@ -92,6 +94,7 @@ export const api = {
   deleteEvent: (event_id: Id) => call('delete_event', { event_id }),
   respondToInvite: (event_id: Id, response: PartStat) => call('respond_to_invite', { event_id, response }),
   respondToEmailInvite: (message_id: Id, response: PartStat) => call<{ ok: boolean; via: string }>('respond_to_email_invite', { message_id, response }),
+  suggestLocations: (query: string) => call<PlaceSuggestion[]>('suggest_locations', { query }),
   findFreeTime: (from: string, to: string, duration_minutes: number, timezone: string) =>
     call<FreeSlot[]>('find_free_time', { from, to, duration_minutes, day_start_hour: 9, day_end_hour: 17, timezone }),
 

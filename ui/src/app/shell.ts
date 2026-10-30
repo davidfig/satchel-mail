@@ -3,7 +3,7 @@ import { transport } from '../transport';
 import { h, icon, patch, replace } from '../lib/dom';
 import { deleteFolder, emptiable, emptyFolder, folderDialog, folderTree } from '../lib/folders';
 import { fullDate, relative, relativeShort, shortProgress } from '../lib/format';
-import { bind, contextMenu, errorToast, setScope, toast } from '../lib/ui';
+import { bind, contextMenu, errorToast, setScope, toast, trigger } from '../lib/ui';
 import type { MenuItem } from '../lib/ui';
 import { type MailSource, type View, store } from '../state';
 import type { Account, Mailbox, MailboxRole } from '../types';
@@ -15,6 +15,7 @@ import { ReviewView } from '../views/review';
 import { SettingsView } from '../views/settings';
 import { showShortcuts } from './help';
 import { COLLAPSED_KEY, LOCATION_KEY, SECTIONS_KEY, UNIFIED, readCollapsed, readJson, writeJson } from './location';
+import { installMenu } from './menu';
 import { palette } from './palette';
 
 /** Each account's built-in folders, in sidebar order: the ones the
@@ -30,9 +31,11 @@ export class Shell {
   private sidebar = h('nav.sidebar', { 'aria-label': 'Navigation' });
   private content = h('main.content');
   private app = h('div.app', this.sidebar, this.content);
-  private views: Partial<Record<View, { root: HTMLElement; show?: () => void }>> = {};
-  /** Sidebar account sections the user has shrunk, by account id. */
-  private closedSections = new Set(readJson<string[]>(SECTIONS_KEY) ?? []);
+  /** Each view, and what it adds to the sidebar under the nav. `side` is an
+   *  `<aside>`, so patching the sidebar never reuses it as another node. */
+  private views: Partial<Record<View, { root: HTMLElement; show?: () => void; side?: HTMLElement }>> = {};
+  /** Sidebar account sections the user has expanded, by account id; the rest start shrunk. */
+  private openSections = new Set(readJson<string[]>(SECTIONS_KEY) ?? []);
 
   constructor() {
     this.app.classList.toggle('collapsed', readCollapsed());
@@ -45,6 +48,7 @@ export class Shell {
     this.renderSidebar();
     this.showView();
     this.bindKeys();
+    installMenu(this);
   }
 
   toggleSidebar() {
@@ -58,14 +62,14 @@ export class Shell {
   }
 
   private toggleSection(id: string) {
-    if (!this.closedSections.delete(id)) this.closedSections.add(id);
-    writeJson(SECTIONS_KEY, [...this.closedSections]);
+    if (!this.openSections.delete(id)) this.openSections.add(id);
+    writeJson(SECTIONS_KEY, [...this.openSections]);
     this.renderSidebar();
   }
 
   /** A section header that expands or shrinks the items under it. */
   private sectionHeader(id: string, ...label: (Node | string | null)[]) {
-    const open = !this.closedSections.has(id);
+    const open = this.openSections.has(id);
     const el = h('button.mb-section.mb-toggle', { 'aria-expanded': String(open), on: { click: () => this.toggleSection(id) } },
       icon(open ? 'chevronDown' : 'chevronRight', 12), ...label);
     const account = store.state.accounts.find((a) => a.id === id);
@@ -147,9 +151,9 @@ export class Shell {
     store.set(source ? { view, source, selectedThread: null } : { view });
   }
 
-  private navItem(view: View, label: string, ic: string, badge?: number, parent = false) {
+  private navItem(view: View, label: string, ic: string, badge?: number) {
     const active = store.state.view === view;
-    return h(`button.nav-item${active ? '.active' : ''}${parent ? '.parent' : ''}`, { title: label, 'aria-label': label, 'aria-current': active ? 'page' : undefined, on: { click: () => this.go(view) } },
+    return h(`button.nav-item${active ? '.active' : ''}`, { title: label, 'aria-label': label, 'aria-current': active ? 'page' : undefined, on: { click: () => this.go(view) } },
       icon(ic), h('span', label), badge ? h('span.badge', String(badge)) : null);
   }
 
@@ -186,21 +190,29 @@ export class Shell {
           'aria-expanded': String(!collapsed),
           on: { click: () => this.toggleSidebar() },
         }, icon(collapsed ? 'chevronRight' : 'chevronLeft', 16))),
-      h('button.primary.compose-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose', 16), h('span', 'Compose')),
+      // The primary action follows the view: a new event in Calendar, a new
+      // contact in Contacts, otherwise a new message.
+      store.state.view === 'calendar' || store.state.view === 'contacts'
+        ? this.newButton(store.state.view === 'calendar' ? 'New event' : 'New contact')
+        : h('button.primary.compose-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose', 16), h('span', 'Compose')),
       h('div.nav',
-        this.navItem('mail', 'Mail', 'mail', undefined, combined),
-        // Every account's Inbox, Flagged, … together, under Mail. With one
-        // account its own section below says it all.
-        combined && h('div.nav-sub',
-          UNIFIED.filter((u) => mailboxes.some((m) => m.role === u.role) || u.role === 'inbox').map((u) =>
-            this.sourceItem({ kind: 'role', role: u.role, label: u.label }, u.icon, unread(u.role), { depth: 1 }))),
+        this.navItem('mail', 'Mail', 'mail'),
         this.navItem('calendar', 'Calendar', 'calendar'),
         this.navItem('contacts', 'Contacts', 'user'),
         this.navItem('review', 'AI Proposals', 'sparkle', pendingProposals),
         this.navItem('settings', 'Settings', 'settings')),
       store.state.view === 'mail' && !collapsed &&
         h('div.mailboxes',
+          // Every account's Inbox, Flagged, … together, above the accounts.
+          // Kept out of the nav so the mode rows above never move. With one
+          // account its own section says it all.
+          combined && h('div.nav-sub',
+            UNIFIED.filter((u) => mailboxes.some((m) => m.role === u.role) || u.role === 'inbox').map((u) =>
+              this.sourceItem({ kind: 'role', role: u.role, label: u.label }, u.icon, unread(u.role)))),
           accounts.map((a) => this.accountSection(a, mailboxes.filter((m) => m.account_id === a.id)))),
+      // Another view's own section (Calendar's month and calendar list); the
+      // view keeps it up to date.
+      store.state.view !== 'mail' && !collapsed && this.view(store.state.view).side,
       h('div.sidebar-foot',
         errors.length
           ? h('button.sync-status.error', { title: errors.map((a) => `${a.email}: ${a.sync.error}`).join('\n'), on: { click: () => this.go('settings') } }, icon('warning', 14), `${errors.length} account${errors.length > 1 ? 's' : ''} need attention`)
@@ -218,9 +230,14 @@ export class Shell {
     }
   }
 
+  /** The sidebar's primary button for a view whose `n` shortcut creates something. */
+  private newButton(label: string) {
+    return h('button.primary.compose-btn', { title: `${label} (n)`, 'aria-label': label, on: { click: () => trigger('n') } }, icon('plus', 16), h('span', label));
+  }
+
   private accountSection(a: Account, boxes: Mailbox[]) {
     const err = a.sync.state === 'error' || a.sync.state === 'offline';
-    const open = !this.closedSections.has(a.id);
+    const open = this.openSections.has(a.id);
     const labels = boxes.some((m) => m.is_label);
     return h('div.account-section',
       h('div.mb-section-row',

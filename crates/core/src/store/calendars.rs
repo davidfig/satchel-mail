@@ -97,6 +97,7 @@ impl Store {
         uid: &str,
         ics: &str,
         title: &str,
+        location: &str,
         range: (DateTime<Utc>, DateTime<Utc>),
         recurring: bool,
         pending: bool,
@@ -107,16 +108,16 @@ impl Store {
                 .optional()?;
             if let Some(id) = existing {
                 c.execute(
-                    "UPDATE events SET etag=?, uid=?, ics=?, title=?, range_start=?, range_end=?, is_recurring=?, pending=?, version=version+1 WHERE id=?",
-                    params![etag, uid, ics, title, range.0.timestamp_millis(), range.1.timestamp_millis(), recurring, pending, id],
+                    "UPDATE events SET etag=?, uid=?, ics=?, title=?, location=?, range_start=?, range_end=?, is_recurring=?, pending=?, version=version+1 WHERE id=?",
+                    params![etag, uid, ics, title, location, range.0.timestamp_millis(), range.1.timestamp_millis(), recurring, pending, id],
                 )?;
                 return Ok(id);
             }
             let id = new_id();
             c.execute(
-                "INSERT INTO events (id, calendar_id, account_id, remote_id, etag, uid, ics, title, range_start, range_end, is_recurring, pending)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                params![id, calendar_id, account_id, remote_id, etag, uid, ics, title, range.0.timestamp_millis(), range.1.timestamp_millis(), recurring, pending],
+                "INSERT INTO events (id, calendar_id, account_id, remote_id, etag, uid, ics, title, location, range_start, range_end, is_recurring, pending)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                params![id, calendar_id, account_id, remote_id, etag, uid, ics, title, location, range.0.timestamp_millis(), range.1.timestamp_millis(), recurring, pending],
             )?;
             Ok(id)
         })
@@ -195,17 +196,31 @@ impl Store {
         })
     }
 
-    pub fn update_event_ics(&self, id: &str, ics: &str, title: &str, range: (DateTime<Utc>, DateTime<Utc>), recurring: bool) -> Result<()> {
+    pub fn update_event_ics(&self, id: &str, ics: &str, title: &str, location: &str, range: (DateTime<Utc>, DateTime<Utc>), recurring: bool) -> Result<()> {
         self.w(|c| {
             c.execute(
-                "UPDATE events SET ics=?, title=?, range_start=?, range_end=?, is_recurring=?, pending=1, version=version+1 WHERE id=?",
-                params![ics, title, range.0.timestamp_millis(), range.1.timestamp_millis(), recurring, id],
+                "UPDATE events SET ics=?, title=?, location=?, range_start=?, range_end=?, is_recurring=?, pending=1, version=version+1 WHERE id=?",
+                params![ics, title, location, range.0.timestamp_millis(), range.1.timestamp_millis(), recurring, id],
             )?;
             Ok(())
         })
     }
 
     /// Returns whether the event existed (so concurrent deletes push one op).
+    /// Locations used in events, most used first (then most recent), that
+    /// contain `query` (any case). An empty query lists the most used.
+    pub fn location_history(&self, query: &str, limit: usize) -> Result<Vec<String>> {
+        let pattern = format!("%{}%", query.trim().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        self.r(|c| {
+            let mut st = c.prepare(
+                "SELECT location FROM events WHERE location <> '' AND location LIKE ? ESCAPE '\\'
+                 GROUP BY location ORDER BY COUNT(*) DESC, MAX(range_start) DESC LIMIT ?",
+            )?;
+            let rows = st.query_map(params![pattern, limit as i64], |r| r.get(0))?;
+            Ok(rows.collect::<rusqlite::Result<Vec<String>>>()?)
+        })
+    }
+
     pub fn delete_event(&self, id: &str) -> Result<bool> {
         self.w(|c| Ok(c.execute("DELETE FROM events WHERE id=?", [id])? > 0))
     }
@@ -216,4 +231,21 @@ impl Store {
             Ok(())
         })
     }
+}
+
+/// Schema 5 added `events.location`; read it from each stored event.
+pub(super) fn fill_event_locations(c: &Connection) -> Result<()> {
+    let rows: Vec<(String, String)> = {
+        let mut st = c.prepare("SELECT id, ics FROM events")?;
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+    };
+    let mut up = c.prepare("UPDATE events SET location=? WHERE id=?")?;
+    for (id, ics) in rows {
+        let parsed = satchel_ical::parse(&ics);
+        let master = parsed.events.iter().find(|e| e.recurrence_id.is_none()).or(parsed.events.first());
+        if let Some(m) = master.filter(|m| !m.location.trim().is_empty()) {
+            up.execute(params![m.location.trim(), id])?;
+        }
+    }
+    Ok(())
 }

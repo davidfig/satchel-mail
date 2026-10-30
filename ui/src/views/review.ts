@@ -2,12 +2,14 @@
 
 import { api } from '../api';
 import { readJson, writeJson } from '../app/location';
-import { h, icon, replace } from '../lib/dom';
+import { h, icon, patch } from '../lib/dom';
 import { displayName, formatAddress, fullDate, parseAddresses, relative, timeRange } from '../lib/format';
-import { copyBlock, errorToast, modal, toast } from '../lib/ui';
+import { errorToast, modal, toast } from '../lib/ui';
 import { store } from '../state';
 import type { CalEvent, Contact, Draft, Proposal, ProposalAction } from '../types';
+import { agentPromptBlock } from './agent-prompt';
 import { openComposer, sendWithUndo } from './mail/composer';
+import { eventRepeatText } from '../lib/repeat-text';
 
 // Not 'labels': adding Trash or Junk as a label moves mail there (0040 second pass, #3).
 const LOW_RISK = new Set(['archive', 'mark_read', 'flag']);
@@ -62,7 +64,9 @@ export class ReviewView {
     const shown = this.tab === 'pending' ? pending : history;
     const lowRisk = pending.filter((p) => p.status === 'pending' && LOW_RISK.has(p.action.type) && !p.warnings.length);
     const cards = await Promise.all(shown.map((p) => this.card(p)));
-    replace(
+    // Patched: this redraws whenever an agent writes, and the drafts being
+    // reviewed keep their scroll and selection.
+    patch(
       this.root,
       h('header.page-head',
         h('h1', 'AI Proposals'),
@@ -89,17 +93,9 @@ export class ReviewView {
     if (readJson<boolean>(HELP_KEY)) {
       return h('button.link.small', { title: 'Show how to let an AI tool propose changes', on: { click: () => toggle(false) } }, 'How do I connect an AI tool?');
     }
-    const mi = store.state.settings?.mirror;
     const root = (await api.info().catch(() => null))?.mirror_root ?? '~/Satchel';
     const close = h('button.icon-btn', { title: 'Hide these instructions', 'aria-label': 'Hide', on: { click: () => toggle(true) } }, icon('close', 16));
-    if (mi && (!mi.enabled || !mi.accept_proposals)) {
-      return h('div.get-started',
-        h('div.get-started-head', h('p.small', 'To let AI tools propose changes, turn on the AI folder and proposal files in Settings → AI folder. Tools that use MCP can connect in Settings → AI agents.'), close));
-    }
-    return h('div.get-started',
-      h('div.get-started-head', h('p.small', 'To get started, paste this into an AI tool that can read and write files on this computer (Claude Code, Codex, Cursor and similar). It needs no setup.'), close),
-      copyBlock(agentPrompt(root)),
-      h('p.muted.small', 'Tools that use MCP can connect in Settings → AI agents instead.'));
+    return agentPromptBlock(root, 'Tools that use MCP can connect in Settings → AI agents instead.', close);
   }
 
   private async approveAll(list: Proposal[]) {
@@ -155,13 +151,11 @@ export class ReviewView {
   }
 
   private draftEditor(d: Draft): HTMLElement {
-    const to = h('input', { type: 'text', value: d.to.map(formatAddress).join(', '), 'aria-label': 'To' });
-    const subject = h('input', { type: 'text', value: d.subject, 'aria-label': 'Subject' });
-    const body = h('textarea.draft-body', { rows: 10, 'aria-label': 'Message' });
+    const text = (e: Event) => (e.currentTarget as HTMLInputElement).value;
+    const to = h('input', { type: 'text', value: d.to.map(formatAddress).join(', '), 'aria-label': 'To', on: { input: (e: Event) => (d.to = parseAddresses(text(e))) } });
+    const subject = h('input', { type: 'text', value: d.subject, 'aria-label': 'Subject', on: { input: (e: Event) => (d.subject = text(e)) } });
+    const body = h('textarea.draft-body', { rows: 10, 'aria-label': 'Message', on: { input: (e: Event) => (d.body_text = text(e)) } });
     body.value = d.body_text;
-    to.addEventListener('input', () => (d.to = parseAddresses(to.value)));
-    subject.addEventListener('input', () => (d.subject = subject.value));
-    body.addEventListener('input', () => (d.body_text = body.value));
     const acct = store.state.accounts.find((a) => a.id === d.account_id);
     return h('div.draft-preview',
       h('div.kv', h('span', 'From'), h('span', acct?.email ?? d.account_id)),
@@ -281,21 +275,6 @@ export class ReviewView {
   }
 }
 
-/** Instructions for an AI tool with file access; the folder's README has the details. */
-function agentPrompt(root: string): string {
-  const sep = root.includes('\\') ? '\\' : '/';
-  const at = (p: string) => `${root}${sep}${p.replaceAll('/', sep)}`;
-  return `You can help me with my email, calendar and contacts through Satchel Mail. It keeps an up-to-date, plain-text copy of them in this folder:
-
-${root}
-
-Start by reading ${at('README.md')}: it explains the layout and how to propose changes. Read and search the files directly. Editing the mail or calendar files changes nothing; they are a copy.
-
-To act (reply, draft a message, archive, move, label, add or change an event, save a contact), write a proposal file to ${at('proposals/inbox/')} as the README describes, with a short "why:" and "agent: <your name>" in its header. I review every proposal in Satchel before anything happens. Check ${at('proposals/processed/')} to see what became of yours.
-
-Never try to send mail or change my accounts any other way.`;
-}
-
 /** A click handler that disables the button's group until `run` finishes, so a double click acts once. */
 function busy(run: () => Promise<void>): (e: Event) => void {
   return (e) => {
@@ -341,7 +320,7 @@ export function eventPreview(e: CalEvent): HTMLElement {
   return h('div.event-card',
     h('div.event-title', e.title),
     h('div.muted', icon('clock', 14), ` ${new Date(e.start).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} · ${timeRange(e.start, e.end, e.all_day)}${e.timezone ? ` (${e.timezone})` : ''}`),
-    e.rrule && h('div.muted.small', `Repeats: ${e.rrule}`),
+    e.rrule && h('div.muted.small', eventRepeatText(e)),
     e.location && h('div.muted', icon('location', 14), ` ${e.location}`),
     e.attendees.length > 0 && h('div.muted.small', icon('user', 14), ` ${e.attendees.map((a) => a.name || a.email).join(', ')}`),
     e.description && h('p.small', e.description),

@@ -24,7 +24,7 @@ impl JmapProvider {
     /// The recent window from scratch, newest first: new messages are
     /// downloaded, ones we have are brought up to date, and ones in the
     /// window the server no longer lists are removed. Older mail follows in
-    /// [`Self::backfill`] (0039).
+    /// [`Self::older_page`] (0039).
     pub(super) async fn full_sync(&self, ctx: &SyncCtx, acc: &str) -> Result<()> {
         let cutoff = Utc::now() - chrono::Duration::days(ctx.settings.initial_sync_days.max(7) as i64);
         let filter = json!({ "after": utc_date(cutoff) });
@@ -93,11 +93,11 @@ impl JmapProvider {
         Ok(())
     }
 
-    /// Older mail, a page at a time, newest first. The cursor is the date
-    /// the next page ends before, or "done".
-    pub(super) async fn backfill(&self, ctx: &SyncCtx, acc: &str) -> Result<()> {
-        const PAGE: usize = 1000;
-        let Some(before) = ctx.cursor("jmap:backfill")?.filter(|c| c != "done") else { return Ok(()) };
+    /// One page of older mail, newest first. The cursor is the date the
+    /// next page ends before, or "done". Returns whether more is left.
+    pub(super) async fn older_page(&self, ctx: &SyncCtx, acc: &str) -> Result<bool> {
+        const PAGE: usize = 500;
+        let Some(before) = ctx.cursor("jmap:backfill")?.filter(|c| c != "done") else { return Ok(false) };
         let r = self
             .call(vec![
                 json!(["Email/query", { "accountId": acc, "filter": { "before": before }, "sort": newest_first(), "limit": PAGE }, "q"]),
@@ -126,10 +126,7 @@ impl JmapProvider {
             _ => "done".to_string(),
         };
         ctx.set_cursor("jmap:backfill", &next)?;
-        if next != "done" {
-            ctx.more_to_sync();
-        }
-        Ok(())
+        Ok(next != "done")
     }
 
     pub(super) async fn delta_sync(&self, ctx: &SyncCtx, acc: &str, since: &str) -> Result<()> {

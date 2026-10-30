@@ -116,8 +116,7 @@ async function renderThread(view: MailView, thread: Thread, seq: number) {
   const people = new Map<string, Address>();
   for (const m of thread.messages) for (const a of [m.from, ...m.to, ...m.cc]) if (a && !mine(a)) people.set(a.email.toLowerCase(), a);
   const spam = isJunk(thread.messages.flatMap((m) => m.mailbox_ids));
-  const convo = new Conversation(thread, (mode, id) => void view.reply(mode, id), { spam });
-  const unsub = [...thread.messages].reverse().find((m) => m.unsubscribe);
+  const convo = new Conversation(thread, (mode, id) => void view.reply(mode, id), { spam, onUnsubscribe: (m) => void view.unsubscribe(m, spam) });
   const blocked = thread.messages.find((m) => m.sender_verdict === 'spam' && m.from);
   const replyBox = new ReplyBox(thread);
   const page = h('div.reader-page',
@@ -126,7 +125,6 @@ async function renderThread(view: MailView, thread: Thread, seq: number) {
         h('h2.reader-subject', thread.subject || '(no subject)'),
         h('div.muted.small.reader-people', [...people.values()].map((a) => [personLink(a, shortName(a)), ', ']), 'you')),
       h('div.reader-actions',
-        unsub && h('button.unsubscribe', { title: 'Ask the sender to stop sending you this mail', on: { click: () => void view.unsubscribe(unsub, spam) } }, 'Unsubscribe'),
         spam
           ? [
               h('button.icon-btn', { title: 'Not spam (!)', 'aria-label': 'Not spam', on: { click: () => void view.act('not_spam') } }, icon('inbox')),

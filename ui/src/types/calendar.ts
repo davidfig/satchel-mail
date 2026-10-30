@@ -44,6 +44,17 @@ export interface Occurrence {
   color: string;
 }
 
+export type PlaceSource = 'history' | 'open_street_map' | 'apple_maps';
+
+/** A suggestion for an event's location. */
+export interface PlaceSuggestion {
+  /** What goes in the location field. */
+  text: string;
+  label: string;
+  detail: string | null;
+  source: PlaceSource;
+}
+
 export interface FreeSlot {
   start: ISODate;
   end: ISODate;

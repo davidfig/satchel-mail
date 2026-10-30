@@ -217,8 +217,16 @@ impl MailProvider for JmapProvider {
             },
             _ => self.full_sync(ctx, &acc).await?,
         }
-        if let Err(e) = self.backfill(ctx, &acc).await {
-            warn!("JMAP older mail: {e:#}");
+        Ok(())
+    }
+
+    async fn backfill(&self, ctx: &SyncCtx, until: std::time::Instant) -> Result<()> {
+        let acc = self.session().await?.account_id;
+        while self.older_page(ctx, &acc).await? {
+            if std::time::Instant::now() >= until {
+                ctx.more_to_sync();
+                break;
+            }
         }
         Ok(())
     }

@@ -1,7 +1,7 @@
 // Settings → Accounts: the account list and adding or reconnecting accounts.
 
 import { api } from '../../api';
-import { h, icon, replace } from '../../lib/dom';
+import { h, icon, patch } from '../../lib/dom';
 import { relative } from '../../lib/format';
 import { confirmDialog, errorToast, modal, toast } from '../../lib/ui';
 import { store } from '../../state';
@@ -30,7 +30,8 @@ const PRESETS: Preset[] = [
 
 export function accounts(el: HTMLElement) {
   const { accounts } = store.state;
-  replace(el,
+  // Patched: this redraws on every sync tick (see SettingsView.render).
+  patch(el,
     h('h1', 'Accounts'),
     !accounts.length && h('div.banner', icon('mail', 16), 'Add your first account to start syncing mail and calendars.'),
     h('div.card-list', accounts.map((a) =>

@@ -125,6 +125,32 @@ async fn image_trust_needs_an_authentic_sender() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn always_load_images_skips_spam() {
+    let (engine, fake, account, _dir) = setup().await;
+    let mut s = engine.settings();
+    s.load_remote_images = true;
+    engine.handle(&Caller::User, Command::UpdateSettings { settings: s }).await.unwrap();
+    engine.handle(&Caller::User, Command::SetSenderRule { email: "spammer@y.test".into(), verdict: Some(SenderVerdict::Spam) }).await.unwrap();
+    let html = |id: &str, from: &str| {
+        format!(
+            "From: {from}\r\nTo: me@x.test\r\nSubject: Pics {id}\r\nMessage-ID: <{id}@x.test>\r\nDate: Tue, 20 Oct 2026 10:00:00 +0000\r\n\
+             Content-Type: text/html\r\n\r\n<p>Hi <img src=\"https://img.test/{id}.png\"></p>\r\n"
+        )
+        .into_bytes()
+    };
+    deliver(&fake, "a1", html("a1", "dave@z.test"), "INBOX");
+    deliver(&fake, "a2", html("a2", "dave@z.test"), "Junk");
+    deliver(&fake, "a3", html("a3", "spammer@y.test"), "INBOX");
+    sync_until(&engine, &account, "a3").await;
+    let inbox = get(&engine, &account, "a1").await;
+    assert!(inbox.remote_images_allowed && inbox.html_body.unwrap().contains("img.test/a1.png"));
+    for id in ["a2", "a3"] {
+        let spam = get(&engine, &account, id).await;
+        assert!(!spam.remote_images_allowed && spam.remote_images_blocked, "{id}: spam stays blocked");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_forged_organizer_cant_act_on_or_remove_a_real_meeting() {
     let (engine, fake, account, _dir) = setup().await;
     // Bob's real meeting is on the synced calendar.

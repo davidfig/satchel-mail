@@ -3,8 +3,9 @@
 use super::*;
 
 const SELECT: &str = "id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,bccRecipients,replyTo,receivedDateTime,isRead,isDraft,flag,hasAttachments,bodyPreview,parentFolderId";
-/// Pages of older mail (200 messages each) fetched per sync pass.
-const BACKFILL_PAGES: usize = 25;
+/// Pages of older mail (200 messages each) fetched from a folder before
+/// moving on to the next.
+const PAGES_PER_TURN: usize = 5;
 const WELL_KNOWN: [(&str, MailboxRole); 6] = [
     ("inbox", MailboxRole::Inbox),
     ("sentitems", MailboxRole::Sent),
@@ -44,11 +45,14 @@ pub fn record(m: &Value) -> MessageRecord {
 
 pub struct GraphMailProvider {
     api: ApiClient,
+    /// Folders the last sync left with older mail to fetch, for
+    /// [`MailProvider::backfill`].
+    behind: std::sync::Mutex<Vec<RemoteMailbox>>,
 }
 
 impl GraphMailProvider {
     pub fn new(creds: CredentialHandle) -> Result<Self> {
-        Ok(Self { api: api_client(creds)? })
+        Ok(Self { api: api_client(creds)?, behind: Default::default() })
     }
 
     async fn get(&self, url: &str, what: &str) -> Result<Value> {
@@ -144,6 +148,19 @@ impl GraphMailProvider {
         Ok(false)
     }
 
+    /// The newest messages in a folder whose delta round is still going.
+    /// Mail that arrived after the round began only comes with the next
+    /// round, so without this it would wait for the whole backfill (0047).
+    async fn newest(&self, ctx: &SyncCtx, folder: &RemoteMailbox) -> Result<()> {
+        let url = format!("{ME}/mailFolders/{}/messages?$select={SELECT}&$orderby=receivedDateTime%20desc&$top=50", crate::net::enc(&folder.remote_id));
+        let v = self.get(&url, "newest messages").await?;
+        for m in v["value"].as_array().cloned().unwrap_or_default() {
+            let parent = m["parentFolderId"].as_str().unwrap_or(&folder.remote_id).to_string();
+            ctx.put_record(record(&m), &[(parent, None)])?;
+        }
+        Ok(())
+    }
+
     async fn mime_upload(&self, url: &str, raw: &[u8], what: &str) -> Result<Value> {
         let body = base64::engine::general_purpose::STANDARD.encode(raw);
         self.api.json(|h, t| with_prefs(h.post(url)).bearer_auth(t).header("Content-Type", "text/plain").body(body.clone()), what).await
@@ -170,35 +187,42 @@ impl MailProvider for GraphMailProvider {
         ctx.set_mailboxes(&folders)?;
         let mut order: Vec<&RemoteMailbox> = folders.iter().collect();
         order.sort_by_key(|f| if f.role == MailboxRole::Inbox { 0 } else { 1 });
-        // Recent mail in every folder first, then older mail a few pages
-        // per folder in turn, up to a budget per pass (0039).
+        // Recent mail in every folder; older mail follows in `backfill` (0047).
         let window = Utc::now() - chrono::Duration::days(ctx.settings.initial_sync_days.max(7) as i64);
         let mut behind = vec![];
         for f in order {
             match self.sync_folder(ctx, f, Some(window), usize::MAX).await {
                 Ok(true) => {}
-                Ok(false) => behind.push(f),
+                Ok(false) => {
+                    if let Err(e) = self.newest(ctx, f).await {
+                        warn!(folder = %f.path, "Graph newest mail: {e:#}");
+                    }
+                    behind.push(f.clone());
+                }
                 Err(e) => {
                     warn!(folder = %f.path, "Graph sync: {e:#}");
                     return Err(e);
                 }
             }
         }
-        let mut budget = BACKFILL_PAGES;
-        while budget > 0 && !behind.is_empty() {
+        *self.behind.lock().unwrap() = behind;
+        Ok(())
+    }
+
+    /// A few pages per folder in turn, so they all move back in time together.
+    async fn backfill(&self, ctx: &SyncCtx, until: std::time::Instant) -> Result<()> {
+        let mut behind = std::mem::take(&mut *self.behind.lock().unwrap());
+        while !behind.is_empty() {
             let mut still = vec![];
             for f in behind {
-                if budget == 0 {
-                    still.push(f);
-                    continue;
-                }
-                let pages = budget.min(5);
-                budget -= pages;
-                if !self.sync_folder(ctx, f, None, pages).await? {
+                if std::time::Instant::now() >= until || !self.sync_folder(ctx, &f, None, PAGES_PER_TURN).await? {
                     still.push(f);
                 }
             }
             behind = still;
+            if std::time::Instant::now() >= until {
+                break;
+            }
         }
         if !behind.is_empty() {
             ctx.more_to_sync();

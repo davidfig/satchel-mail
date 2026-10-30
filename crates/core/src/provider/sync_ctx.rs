@@ -268,6 +268,7 @@ impl SyncCtx {
             &master.uid,
             ics,
             &master.summary,
+            master.location.trim(),
             (start, end),
             master.rrule.is_some(),
             false,

@@ -1,12 +1,13 @@
 // Settings → AI agents: connected MCP agents and their access.
 
 import { api } from '../../api';
-import { h, icon, replace } from '../../lib/dom';
+import { h, icon, patch } from '../../lib/dom';
 import { relative } from '../../lib/format';
 import { confirmDialog, copyBlock, errorToast, modal } from '../../lib/ui';
 import { store } from '../../state';
 import { transport } from '../../transport';
 import type { Agent, AgentPolicy } from '../../types';
+import { agentPromptBlock } from '../agent-prompt';
 import { field } from './form';
 import type { SettingsView } from './index';
 
@@ -19,9 +20,12 @@ export async function agents(view: SettingsView, el: HTMLElement) {
     errorToast(e);
   }
   const active = agents.filter((a) => !a.revoked && !a.builtin);
-  replace(el,
+  patch(el,
     h('h1', 'AI agents'),
     h('p.muted', 'Most AI tools work through the AI folder and need no setup here. Connect an agent for tools that use MCP, or to give one tool its own access limits. Every proposal waits in AI Proposals until you approve it. Agents can never send, delete or change settings.'),
+    h('h2', 'Tools with file access'),
+    agentPromptBlock(info?.mirror_root ?? '~/Satchel'),
+    h('h2', 'MCP agents'),
     h('div.card-list', active.map((a) =>
       h('div.account-card',
         icon('sparkle'),

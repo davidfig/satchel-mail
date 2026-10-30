@@ -110,7 +110,9 @@ export function modal(title: string, content: Node, opts: { wide?: boolean; onCl
     prev?.focus?.();
   };
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
+    // An open menu or suggestion list closes first, and only the top dialog
+    // closes when one is open over another.
+    if (e.key === 'Escape' && !document.querySelector('.menu') && root === [...document.querySelectorAll('.modal-backdrop')].pop()) {
       e.stopPropagation();
       close();
     }
@@ -214,18 +216,76 @@ export function popupMenu(anchor: HTMLElement | { x: number; y: number }, items:
 // ---------------------------------------------------------------- shortcuts
 
 type Handler = (e: KeyboardEvent) => void;
-const bindings = new Map<string, { scope: string; fn: Handler; desc: string }[]>();
+const bindings = new Map<string, { scope: string; fn: Handler; desc: string; when?: () => boolean }[]>();
 let activeScope = 'mail';
 
 export function setScope(s: string) {
   activeScope = s;
 }
 
-/** Register a key like "j", "shift+3", "mod+k", "g i". */
-export function bind(key: string, desc: string, fn: Handler, scope = 'global') {
+/** Register a key like "j", "shift+3", "mod+k", "g i". `when` says whether
+ *  it has anything to act on, so the command palette can leave it out. */
+export function bind(key: string, desc: string, fn: Handler, scope = 'global', when?: () => boolean) {
   const list = bindings.get(key) ?? [];
-  list.push({ scope, fn, desc });
+  list.push({ scope, fn, desc, when });
   bindings.set(key, list);
+}
+
+/** How a key reads on screen: ⌘K on a Mac (Ctrl+K elsewhere), Shift+I. */
+export function keyLabel(key: string): string {
+  const mac = navigator.platform.includes('Mac');
+  return key
+    .replace(/mod\+(.)$/, (_, c: string) => (mac ? '⌘' : 'Ctrl+') + c.toUpperCase())
+    .replace(/shift\+(.)$/, (_, c: string) => `Shift+${c.toUpperCase()}`);
+}
+
+/** Something the command palette can run. */
+export interface Command {
+  label: string;
+  run: () => void;
+  /** Its shortcut, as `keyLabel` shows it. */
+  hint?: string;
+  /** Secondary text, such as the account a folder belongs to. */
+  detail?: string;
+  icon?: string;
+}
+
+/** Commands a view adds to the palette, built when it opens, and what they
+ *  act on ("“Lunch on Friday”"), shown above them. */
+export type CommandSource = () => { context?: string; commands: Command[] };
+const sources: { scope: string; fn: CommandSource }[] = [];
+
+export function commandSource(fn: CommandSource, scope = 'global') {
+  sources.push({ scope, fn });
+}
+
+/** Keys that move around a list or close things; not worth a palette entry. */
+const NOT_COMMANDS = new Set(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Backspace', 'Delete', 'j', 'k', 'o', 'x', 'mod+k']);
+
+/** What the palette offers now: the current view's shortcuts and commands,
+ *  then the global ones. A shortcut's command shows its key. */
+export function activeCommands(): { context?: string; commands: Command[] } {
+  const out: Command[] = [];
+  const seen = new Set<string>();
+  const add = (c: Command) => {
+    if (seen.has(c.label)) return;
+    seen.add(c.label);
+    out.push(c);
+  };
+  let context: string | undefined;
+  for (const scope of [activeScope, 'global']) {
+    for (const key of bindings.keys()) {
+      const b = binding(key);
+      if (b?.scope !== scope || NOT_COMMANDS.has(key) || (b.when && !b.when())) continue;
+      add({ label: b.desc, hint: keyLabel(key), run: () => b.fn(new KeyboardEvent('keydown')) });
+    }
+    for (const s of sources.filter((x) => x.scope === scope)) {
+      const r = s.fn();
+      context ??= r.context;
+      r.commands.forEach(add);
+    }
+  }
+  return { context, commands: out };
 }
 
 export function shortcutList(): { key: string; desc: string; scope: string }[] {
@@ -247,6 +307,18 @@ function keyName(e: KeyboardEvent): string {
   return [...mods, k].join('+');
 }
 
+/** The handler `key` runs in the current view, if any. */
+function binding(key: string) {
+  return bindings.get(key)?.filter((b) => b.scope === 'global' || b.scope === activeScope).pop();
+}
+
+/** Runs what pressing `key` would, for menus that offer the same action.
+ *  Like the keyboard, plain keys do nothing while a dialog is open. */
+export function trigger(key: string) {
+  if (document.querySelector('.modal-backdrop') && !key.startsWith('mod+')) return;
+  binding(key)?.fn(new KeyboardEvent('keydown'));
+}
+
 export function installShortcuts() {
   document.addEventListener('keydown', (e) => {
     const t = e.target as HTMLElement;
@@ -256,13 +328,11 @@ export function installShortcuts() {
     if (document.querySelector('.modal-backdrop') && !k.startsWith('mod+')) return;
     const full = pendingPrefix ? `${pendingPrefix} ${k}` : k;
     const run = (key: string) => {
-      const list = bindings.get(key)?.filter((b) => b.scope === 'global' || b.scope === activeScope);
-      if (list?.length) {
-        e.preventDefault();
-        list[list.length - 1].fn(e);
-        return true;
-      }
-      return false;
+      const b = binding(key);
+      if (!b) return false;
+      e.preventDefault();
+      b.fn(e);
+      return true;
     };
     if (pendingPrefix) {
       pendingPrefix = null;

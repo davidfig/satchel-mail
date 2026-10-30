@@ -110,9 +110,10 @@ Read: `whoami`, `list_accounts`, `list_mailboxes`, `search_threads` (free text +
 Propose: `propose_reply`, `propose_draft`, `propose_archive`, `propose_move`,
 `propose_labels`, `propose_mark_read`, `propose_flag`, `propose_event`,
 `propose_event_change`, `propose_cancel_event`, `propose_invite_response`,
-`propose_contact` (create or change a contact; agents never delete or merge
-contacts, and adding an address to someone or renaming them is flagged as a
-risk in Review).
+`propose_contact` (create or change a contact; adding an address to someone
+or renaming them is flagged as a risk in Review), `propose_merge_contacts`
+(the first contact is kept; always flagged as a risk, decision 0045). Agents
+never delete contacts.
 
 Follow-up: `get_proposal_status`, `list_my_proposals`.
 

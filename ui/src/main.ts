@@ -18,6 +18,8 @@ async function boot(): Promise<boolean> {
     // Overlay title bar: leave room for the window controls and make the strip draggable.
     document.body.classList.add('tauri-mac');
     document.body.appendChild(h('div.titlebar-drag', { 'data-tauri-drag-region': '' }));
+    // Full screen hides the window controls, so it needs no room for them.
+    transport.onFullscreen((on) => document.body.classList.toggle('fullscreen', on));
   }
   try {
     await store.init();

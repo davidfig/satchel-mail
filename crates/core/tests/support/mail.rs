@@ -44,6 +44,8 @@ pub struct Fake {
     pub slim: Mutex<std::collections::HashMap<String, satchel_mime::Slim>>,
     /// How many times `fetch_raw` ran.
     pub raw_fetches: std::sync::atomic::AtomicUsize,
+    /// Queries sent to the place service.
+    pub place_queries: Mutex<Vec<String>>,
 }
 
 pub fn raw(id: &str, from: &str, subject: &str, irt: Option<&str>) -> Vec<u8> {
@@ -191,7 +193,10 @@ pub struct SharedCal(pub Arc<Fake>);
 #[async_trait]
 impl CalendarProvider for SharedCal {
     async fn sync(&self, ctx: &SyncCtx) -> Result<()> {
-        let map = ctx.set_calendars(&[RemoteCalendar { remote_id: "cal".into(), name: "Calendar".into(), color: None, read_only: false }])?;
+        let map = ctx.set_calendars(&[
+            RemoteCalendar { remote_id: "cal".into(), name: "Calendar".into(), color: None, read_only: false },
+            RemoteCalendar { remote_id: "personal".into(), name: "Personal".into(), color: None, read_only: false },
+        ])?;
         let events: Vec<_> = self.0.events.lock().unwrap().drain(..).collect();
         for (rid, ics) in events {
             ctx.put_event(&map["cal"], &rid, None, &ics)?;
@@ -209,6 +214,23 @@ impl CalendarProvider for SharedCal {
 impl ProviderFactory for FakeFactory {
     fn create(&self, _account: &Account, _creds: CredentialHandle) -> Result<Providers> {
         Ok(Providers { mail: Some(Arc::new(Shared(self.0.clone()))), calendar: Some(Arc::new(SharedCal(self.0.clone()))), contacts: None })
+    }
+    fn places(&self) -> Option<Arc<dyn PlaceSearch>> {
+        Some(Arc::new(FakePlaces(self.0.clone())))
+    }
+}
+
+/// A place service that finds "<query> Cafe".
+pub struct FakePlaces(pub Arc<Fake>);
+#[async_trait]
+impl PlaceSearch for FakePlaces {
+    fn name(&self) -> &'static str {
+        "Fake Maps"
+    }
+    async fn suggest(&self, query: &str) -> Result<Vec<PlaceSuggestion>> {
+        self.0.place_queries.lock().unwrap().push(query.to_string());
+        let name = format!("{query} Cafe");
+        Ok(vec![PlaceSuggestion { text: format!("{name}, 1 Main St"), label: name, detail: Some("1 Main St".into()), source: PlaceSource::OpenStreetMap }])
     }
 }
 

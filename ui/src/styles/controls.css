@@ -15,7 +15,7 @@ button.link { border: none; background: none; color: var(--accent); padding: 0 4
 button.link:hover { text-decoration: underline; background: none; }
 .icon-btn { border: none; background: transparent; width: 30px; padding: 0; justify-content: center; color: var(--text-2); }
 .icon-btn:hover { color: var(--text); }
-input[type=text], input[type=email], input[type=password], input[type=url], input[type=number], input[type=search], input[type=datetime-local], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=url], input[type=number], input[type=search], input[type=datetime-local], input[type=date], input[type=time], select, textarea {
   border: 1px solid var(--line-2); border-radius: 7px; background: var(--panel); padding: 6px 9px; min-height: 30px; width: 100%;
 }
 textarea { resize: vertical; line-height: 1.5; }

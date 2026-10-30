@@ -83,7 +83,9 @@ pub fn rrule_to_graph(rule: &str, start: DateTime<Utc>, tz: &str) -> Option<Valu
         }
     }
     let interval: u32 = parts.get("INTERVAL").and_then(|v| v.parse().ok()).unwrap_or(1);
-    let local = tz.parse::<chrono_tz::Tz>().map(|z| start.with_timezone(&z).date_naive()).unwrap_or(start.date_naive());
+    let zone = tz.parse::<chrono_tz::Tz>().ok();
+    let local_date = |t: DateTime<Utc>| zone.map(|z| t.with_timezone(&z).date_naive()).unwrap_or(t.date_naive());
+    let local = local_date(start);
     let days = |v: &str| -> Vec<&'static str> {
         v.split(',')
             .filter_map(|d| match d.trim_start_matches(|c: char| c == '-' || c == '+' || c.is_ascii_digit()) {
@@ -104,7 +106,24 @@ pub fn rrule_to_graph(rule: &str, start: DateTime<Utc>, tz: &str) -> Option<Valu
             let d = parts.get("BYDAY").map(|v| days(v)).unwrap_or_else(|| vec![["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"][local.weekday().num_days_from_monday() as usize]]);
             json!({ "type": "weekly", "interval": interval, "daysOfWeek": d, "firstDayOfWeek": "monday" })
         }
-        "MONTHLY" => json!({ "type": "absoluteMonthly", "interval": interval, "dayOfMonth": local.day() }),
+        // "BYDAY=-1FR": the last Friday; Graph's index has no fifth.
+        "MONTHLY" => match parts.get("BYDAY").and_then(|v| v.split_once(|c: char| c.is_ascii_alphabetic()).map(|(n, _)| (n.to_string(), days(v)))) {
+            Some((n, d)) if !n.is_empty() && d.len() == 1 => {
+                let index = match n.trim_start_matches('+') {
+                    "1" => "first",
+                    "2" => "second",
+                    "3" => "third",
+                    "4" => "fourth",
+                    "-1" => "last",
+                    _ => return None,
+                };
+                json!({ "type": "relativeMonthly", "interval": interval, "daysOfWeek": d, "index": index })
+            }
+            _ => {
+                let day = parts.get("BYMONTHDAY").and_then(|v| v.parse::<u32>().ok()).unwrap_or(local.day());
+                json!({ "type": "absoluteMonthly", "interval": interval, "dayOfMonth": day })
+            }
+        },
         "YEARLY" => json!({ "type": "absoluteYearly", "interval": interval, "dayOfMonth": local.day(), "month": local.month() }),
         _ => return None,
     };
@@ -112,9 +131,12 @@ pub fn rrule_to_graph(rule: &str, start: DateTime<Utc>, tz: &str) -> Option<Valu
     let range = if let Some(c) = parts.get("COUNT").and_then(|v| v.parse::<u32>().ok()) {
         json!({ "type": "numbered", "startDate": start_date, "numberOfOccurrences": c })
     } else if let Some(u) = parts.get("UNTIL") {
-        let d = &u[..8.min(u.len())];
-        let end = format!("{}-{}-{}", &d[0..4], &d[4..6], &d[6..8]);
-        json!({ "type": "endDate", "startDate": start_date, "endDate": end })
+        // A UTC UNTIL can fall on the next day in UTC; Graph wants the local date.
+        let end = match chrono::NaiveDateTime::parse_from_str(u, "%Y%m%dT%H%M%SZ") {
+            Ok(t) => local_date(t.and_utc()),
+            Err(_) => chrono::NaiveDate::parse_from_str(u.get(..8)?, "%Y%m%d").ok()?,
+        };
+        json!({ "type": "endDate", "startDate": start_date, "endDate": end.format("%Y-%m-%d").to_string() })
     } else {
         json!({ "type": "noEnd", "startDate": start_date })
     };
@@ -352,6 +374,19 @@ mod tests {
         let m = rrule_to_graph("FREQ=MONTHLY;UNTIL=20261231T000000Z", start, "UTC").unwrap();
         assert_eq!(m["pattern"]["dayOfMonth"], 5);
         assert_eq!(m["range"]["endDate"], "2026-12-31");
+    }
+
+    #[test]
+    fn monthly_by_weekday_and_local_until() {
+        // 6 PM in Los Angeles is 2 AM UTC the next day.
+        let start = Utc.with_ymd_and_hms(2026, 10, 31, 1, 0, 0).unwrap();
+        let r = rrule_to_graph("FREQ=MONTHLY;BYDAY=-1FR;UNTIL=20270130T010000Z", start, "America/Los_Angeles").unwrap();
+        assert_eq!(r["pattern"]["type"], "relativeMonthly");
+        assert_eq!(r["pattern"]["index"], "last");
+        assert_eq!(r["pattern"]["daysOfWeek"], json!(["friday"]));
+        assert_eq!(r["range"]["startDate"], "2026-10-30");
+        assert_eq!(r["range"]["endDate"], "2027-01-29");
+        assert_eq!(rrule_to_graph("FREQ=MONTHLY;BYDAY=2TU", start, "UTC").unwrap()["pattern"]["index"], "second");
     }
 
     #[test]

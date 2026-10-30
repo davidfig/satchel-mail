@@ -12,6 +12,11 @@ use tracing::{debug, warn};
 
 use crate::provider::{Providers, SyncCtx, priority};
 
+/// How long one pass spends downloading message content, and then older
+/// mail, before it starts over and checks for new mail (0047).
+const BODIES_FOR: Duration = Duration::from_secs(30);
+const OLDER_FOR: Duration = Duration::from_secs(60);
+
 /// Aborts the task when dropped, so aborting the supervisor stops its loop too.
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
 
@@ -74,7 +79,8 @@ impl Engine {
                 engine.run_due_ops(&ctx, &providers).await;
                 if result.is_ok() {
                     // The newest mail is in, so the account counts as synced
-                    // even while bodies, older mail and the calendar follow.
+                    // even while bodies, older mail and the calendar follow,
+                    // each for a bounded time (0047).
                     // Progress reports from here on keep this time.
                     ctx.account.sync.last_success = Some(Utc::now());
                     engine.set_status(&account_id, SyncStatus { state: SyncState::Syncing, last_success: ctx.account.sync.last_success, error: None, detail: None });
@@ -87,7 +93,13 @@ impl Engine {
                     {
                         warn!(account = %ctx.account.email, "sender rules: {e:#}");
                     }
-                    engine.fetch_bodies(&ctx, &providers, if first { 300 } else { 100 }).await;
+                    let until = std::time::Instant::now() + BODIES_FOR;
+                    engine.fetch_bodies(&ctx, &providers, if first { 300 } else { 100 }, until).await;
+                    engine.run_due_ops(&ctx, &providers).await;
+                    let until = std::time::Instant::now() + OLDER_FOR;
+                    if let Err(e) = priority::in_background(gate.clone(), mail.backfill(&ctx, until)).await {
+                        warn!(account = %ctx.account.email, "older mail: {e:#}");
+                    }
                 }
             }
             if let Some(cal) = &providers.calendar {

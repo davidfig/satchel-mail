@@ -1,6 +1,6 @@
 import { api } from '../api';
 import { h } from '../lib/dom';
-import { errorToast, modal, shortcutList } from '../lib/ui';
+import { errorToast, keyLabel, modal, shortcutList } from '../lib/ui';
 import { applyTheme, store } from '../state';
 
 export function toggleTheme() {
@@ -20,5 +20,5 @@ export function showShortcuts() {
     seen.add(k);
     return !['ArrowDown', 'ArrowUp', 'Backspace', 'o'].includes(s.key);
   });
-  modal('Keyboard shortcuts', h('table.shortcuts', h('tbody', rows.map((r) => h('tr', h('td', h('kbd', r.key.replace('mod', navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'))), h('td', r.desc), h('td.muted.small', r.scope))))));
+  modal('Keyboard shortcuts', h('table.shortcuts', h('tbody', rows.map((r) => h('tr', h('td', h('kbd', keyLabel(r.key))), h('td', r.desc), h('td.muted.small', r.scope))))));
 }

@@ -95,6 +95,7 @@ button.avatar-link:hover .avatar { box-shadow: 0 0 0 2px var(--accent-soft); }
 .msg-warnings .icon { flex: none; margin-top: 2px; }
 .msg-warnings strong { display: block; }
 .bubble .msg-warnings { margin: 4px 0 8px; }
+.reply-box .msg-warnings { margin: 6px 0; }
 .spam-banner { margin: 12px 24px 0; max-width: 812px; align-self: center; width: calc(100% - 48px); }
 .spam-banner .icon { flex: none; }
 .spam-banner .grow { flex: 1; min-width: 200px; }
@@ -146,6 +147,11 @@ button.unsubscribe { height: 28px; padding: 0 10px; font-size: 12.5px; margin-ri
 .reply-input:focus-visible { outline: none; }
 .reply-foot { display: flex; align-items: center; gap: 6px; }
 .reply-foot button:not(.icon-btn) { height: 28px; }
+.reply-head .icon-btn { width: 24px; height: 24px; flex-shrink: 0; }
+.reply-reopen { display: none; }
+.reply-box.dismissed { width: fit-content; margin: 0 16px 14px auto; padding: 0; border-radius: 16px; }
+.reply-box.dismissed > :not(.reply-reopen) { display: none; }
+.reply-box.dismissed .reply-reopen { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border: none; border-radius: 16px; background: transparent; }
 
 pre.source { max-height: 70vh; overflow: auto; white-space: pre-wrap; font-size: 12px; }
 /* The full unsubscribe email, wrapped and scrollable (on top of .draft-text). */

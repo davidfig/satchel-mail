@@ -43,6 +43,7 @@ impl Engine {
                 // Agents use the AI folder; where the database lives is the user's business.
                 if matches!(caller, Caller::User) {
                     info["data_dir"] = json!(self.data_dir);
+                    info["places_service"] = json!(self.factory.places().map(|p| p.name()));
                 }
                 ok(info)
             }
@@ -258,6 +259,7 @@ impl Engine {
                 self.check_calendar_access(caller)?;
                 ok(self.find_free_time(caller, from, to, duration_minutes, day_start_hour, day_end_hour, timezone.as_deref())?)
             }
+            Command::SuggestLocations { query } => ok(self.suggest_locations(&query).await?),
 
             // ---------------------------------------------------------- contacts
             Command::ListContacts { search, limit } => ok(self.list_contacts(caller, search.as_deref(), limit)?),

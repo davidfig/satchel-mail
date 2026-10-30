@@ -2,7 +2,7 @@
 // with search, editing, merging and deleting.
 
 import { api } from '../api';
-import { debounce, h, icon, replace } from '../lib/dom';
+import { clear, debounce, h, icon, patch, replace } from '../lib/dom';
 import { relative } from '../lib/format';
 import { avatar, openPerson } from '../lib/person';
 import { bind, confirmDialog, errorToast, modal, toast } from '../lib/ui';
@@ -110,11 +110,12 @@ export class ContactsView {
 
   private renderList() {
     this.countEl.textContent = this.list.length ? String(this.list.length) : '';
+    // Patched, like the detail: both redraw whenever a sync touches contacts.
     if (!this.list.length) {
-      replace(this.listEl, h('div.empty-list', this.search.value ? 'No contacts match.' : 'No contacts yet. People you write to appear here automatically.'));
+      patch(this.listEl, h('div.empty-list', this.search.value ? 'No contacts match.' : 'No contacts yet. People you write to appear here automatically.'));
       return;
     }
-    replace(this.listEl, this.list.map((c) =>
+    patch(this.listEl, this.list.map((c) =>
       h(`button.contact-row${c.id === this.selected ? '.active' : ''}`, { role: 'option', 'aria-selected': String(c.id === this.selected), on: { click: () => c.id && this.select(c.id) } },
         contactAvatar(c),
         h('span.contact-row-main',
@@ -125,8 +126,10 @@ export class ContactsView {
 
   private renderDetail() {
     const c = this.current();
+    // The editor's fields have their own listeners; don't patch over them.
+    if (this.detail.querySelector('.contact-form')) clear(this.detail);
     if (!c) {
-      replace(this.detail, h('div.reader-empty', icon('user', 36), h('p', 'No contact selected')));
+      patch(this.detail, h('div.reader-empty', icon('user', 36), h('p', 'No contact selected')));
       return;
     }
     const accountEmail = (id: string) => store.state.accounts.find((a) => a.id === id)?.email ?? '';
@@ -134,7 +137,7 @@ export class ContactsView {
       ? c.sources.map((s) => h('span.chip', { title: `Saved in this address book of ${accountEmail(s.account_id)}` }, `${s.name} · ${accountEmail(s.account_id)}`))
       : [h('span.chip', c.origin === 'auto' ? 'Added from your mail' : 'Only in Satchel')];
     const first = c.emails[0]?.email;
-    replace(this.detail,
+    patch(this.detail,
       h('header.reader-head',
         h('div.contact-head', contactAvatar(c, true),
           h('div.reader-title',

@@ -100,6 +100,9 @@ pub enum Command {
         day_end_hour: Option<u32>,
         timezone: Option<String>,
     },
+    /// Places for an event's location: ones you've used, then (if the user
+    /// turned on `look_up_places`) a lookup with the host's place service.
+    SuggestLocations { query: String },
 
     // contacts
     /// Contacts sorted by name, optionally filtered by name, address or organization.

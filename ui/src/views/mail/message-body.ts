@@ -1,7 +1,7 @@
 // Message bodies: text and HTML rendering, invitations, attachments, links.
 
 import { api } from '../../api';
-import { h, icon, replace } from '../../lib/dom';
+import { h, icon, patch } from '../../lib/dom';
 import { humanSize, timeRange } from '../../lib/format';
 import { confirmDialog, errorToast, modal, toast } from '../../lib/ui';
 import { transport } from '../../transport';
@@ -25,9 +25,11 @@ export function attachments(m: MessageDetail): HTMLElement | null {
       }, icon(a.risky ? 'warning' : 'paperclip', 16), h('span.name', a.filename), h('span.muted.small', humanSize(a.size)))));
 }
 
-/** The core's phishing and safety warnings for one message. */
-export function warnings(m: MessageDetail): HTMLElement | null {
-  const list = m.warnings ?? [];
+/** The core's phishing and safety warnings for one message. A different
+ *  Reply-To only matters when answering, so the reply box shows that one
+ *  (`replyTo: true`) and the message leaves it out. */
+export function warnings(m: MessageDetail, replyTo = false): HTMLElement | null {
+  const list = (m.warnings ?? []).filter((w) => (w.kind === 'reply_to') === replyTo);
   if (!list.length) return null;
   return h('div.banner.warn.msg-warnings', { role: 'note' },
     icon('warning', 16),
@@ -50,7 +52,7 @@ export function inviteCard(m: MessageDetail, inSpam: boolean): HTMLElement {
   }
   const card = h('div.invite');
   const render = (status: PartStat | null) => {
-    replace(card,
+    patch(card,
       icon('calendar', 22),
       h('div.grow',
         h('strong', inv.title),
@@ -153,7 +155,7 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
   const csp = `default-src 'none'; img-src ${img}; style-src 'unsafe-inline'; font-src data:`;
   const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>
     html,body{margin:0;padding:0;background:transparent;color:#1d1d1f;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere}
-    img{max-width:100%;height:auto} table{max-width:100%} blockquote{border-left:3px solid #ccc;margin:0 0 0 .5em;padding-left:.75em;color:#555}
+    img{max-width:100%} img[width]{height:auto} table{max-width:100%} blockquote{border-left:3px solid #ccc;margin:0 0 0 .5em;padding-left:.75em;color:#555}
     a{color:#2a62d9}
   </style></head><body>${transport.kind === 'http' ? routeLinks(html, location.origin, cautious) : html}</body></html>`;
   catchFramePopups();

@@ -1,6 +1,6 @@
 // The virtualized thread list: scroll geometry and row rendering.
 
-import { h, icon, patch, replace } from '../../lib/dom';
+import { h, icon, patch } from '../../lib/dom';
 import { domainOf, listDate, participantsLabel } from '../../lib/format';
 import { store } from '../../state';
 import type { MailView } from './index';
@@ -38,7 +38,7 @@ export function renderRows(view: MailView) {
   const total = view.list.total;
   view.spacer.style.height = `${Math.max(Math.min(total * ROW_H, MAX_SCROLL_PX), 1)}px`;
   if (!total) {
-    replace(view.rows, h('div.empty-list', view.list.loaded ? emptyMessage() : 'Loading…'));
+    patch(view.rows, h('div.empty-list', view.list.loaded ? emptyMessage() : 'Loading…'));
     view.rows.style.transform = '';
     return;
   }

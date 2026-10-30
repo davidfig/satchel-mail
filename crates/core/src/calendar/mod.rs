@@ -1,8 +1,9 @@
-//! Calendars: occurrence expansion and free-time search here; writes and
-//! emailed invitations in the submodules.
+//! Calendars: occurrence expansion and free-time search here; writes,
+//! emailed invitations and place suggestions in the submodules.
 
 mod events;
 mod invites;
+mod places;
 
 use std::collections::HashMap;
 

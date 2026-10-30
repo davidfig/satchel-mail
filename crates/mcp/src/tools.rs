@@ -91,7 +91,7 @@ pub(crate) fn tools() -> Vec<Tool> {
         Tool::new("propose_invite_response", "Propose accepting, declining or tentatively accepting an invitation.", schema(json!({ "event_id": { "type": "string" }, "response": { "type": "string", "enum": ["accept", "decline", "tentative"] }, "source_thread_ids": src, "rationale": rationale_prop() }), &["event_id", "response", "rationale"])),
         ro(Tool::new("search_contacts", "Search the user's contacts by name, address, phone or organization (omit query to list them).", schema(json!({ "query": { "type": "string" }, "limit": { "type": "integer", "minimum": 1, "maximum": 500 } }), &[]))),
         ro(Tool::new("get_contact", "Get one contact with all its addresses.", schema(json!({ "contact_id": { "type": "string" } }), &["contact_id"]))),
-        Tool::new("propose_contact", "Propose a new contact (no contact_id) or a change to one. Omit fields you don't want to change; `emails` replaces the list, `add_emails` appends. Contacts are never deleted or merged by agents.", schema(json!({
+        Tool::new("propose_contact", "Propose a new contact (no contact_id) or a change to one. Omit fields you don't want to change; `emails` replaces the list, `add_emails` appends. Contacts are never deleted by agents; use propose_merge_contacts for duplicates.", schema(json!({
             "contact_id": { "type": "string" }, "name": { "type": "string" },
             "emails": addr_prop("All addresses (replaces the list)."), "add_emails": addr_prop("Addresses to add."),
             "phones": ids_prop("Phone numbers (replaces the list)."),
@@ -100,6 +100,10 @@ pub(crate) fn tools() -> Vec<Tool> {
             "notes": { "type": "string" },
             "source_thread_ids": src, "rationale": rationale_prop()
         }), &["rationale"])),
+        Tool::new("propose_merge_contacts", "Propose merging duplicate contacts for one person. The first contact is kept and the others are merged into it. A merge can't be undone from Satchel, so it always waits for the user's review.", schema(json!({
+            "contact_ids": ids_prop("Two or more contact ids; the first is kept."),
+            "source_thread_ids": src, "rationale": rationale_prop()
+        }), &["contact_ids", "rationale"])),
         ro(Tool::new("get_proposal_status", "Check whether the user approved, edited, or rejected a proposal (with their note).", schema(json!({ "proposal_id": { "type": "string" } }), &["proposal_id"]))),
         ro(Tool::new("list_my_proposals", "List proposals you made, optionally filtered by status.", schema(json!({ "status": { "type": "string", "enum": ["pending", "applied", "rejected", "stale", "failed"] } }), &[]))),
     ]

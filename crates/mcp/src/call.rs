@@ -214,6 +214,7 @@ impl SatchelMcp {
                 }
                 self.run(propose(ProposalAction::SaveContact { contact }, ids("source_thread_ids")?)).await
             }
+            "propose_merge_contacts" => self.run(propose(ProposalAction::MergeContacts { contact_ids: ids("contact_ids")? }, ids("source_thread_ids")?)).await,
             "get_proposal_status" => {
                 let v = self.run(Command::GetProposal { proposal_id: req("proposal_id")? }).await?;
                 Ok(json!({ "status": v["status"], "summary": v["summary"], "review_note": v["review_note"], "decided_at": v["decided_at"] }))

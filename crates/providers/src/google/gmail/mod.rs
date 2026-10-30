@@ -17,7 +17,7 @@ use satchel_api::*;
 use satchel_core::provider::{ApplyOutcome, CredentialHandle, Download, MailProvider, RemoteMailbox, ResolvedOp, SyncCtx};
 use satchel_core::store::{MessageRecord, MessageRef};
 use serde_json::{Value, json};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::oauth::ApiClient;
 
@@ -118,11 +118,13 @@ fn html_unescape(s: &str) -> String {
 
 pub struct GmailProvider {
     api: ApiClient,
+    /// Label ids from the last sync, for [`MailProvider::backfill`].
+    labels: std::sync::Mutex<HashSet<String>>,
 }
 
 impl GmailProvider {
     pub fn new(creds: CredentialHandle) -> Result<Self> {
-        Ok(Self { api: api_client(creds)? })
+        Ok(Self { api: api_client(creds)?, labels: Default::default() })
     }
 
     async fn get(&self, url: &str, what: &str) -> Result<Value> {
@@ -215,8 +217,20 @@ impl MailProvider for GmailProvider {
             }
             None => self.full_sync(ctx, &labels).await?,
         }
-        if let Err(e) = self.backfill(ctx, &labels).await {
-            warn!("Gmail backfill: {e:#}");
+        *self.labels.lock().unwrap() = labels;
+        Ok(())
+    }
+
+    async fn backfill(&self, ctx: &SyncCtx, until: std::time::Instant) -> Result<()> {
+        let labels = self.labels.lock().unwrap().clone();
+        if labels.is_empty() {
+            return Ok(());
+        }
+        while self.older_page(ctx, &labels).await? {
+            if std::time::Instant::now() >= until {
+                ctx.more_to_sync();
+                break;
+            }
         }
         Ok(())
     }

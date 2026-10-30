@@ -4,15 +4,34 @@ import { api } from '../../api';
 import { h, icon } from '../../lib/dom';
 import { displayName, shortName } from '../../lib/format';
 import { errorToast, toast } from '../../lib/ui';
-import type { Draft, Proposal, ReplyMode, Thread } from '../../types';
+import type { Address, Draft, Proposal, ReplyMode, Thread } from '../../types';
 import { splitQuote } from '../../lib/thread';
 import { openComposer, sendWithUndo } from './composer';
 import { type Mine, mineFor } from './conversation';
+import { warnings } from './message-body';
 
 /** Unsent inline replies by thread, so switching threads doesn't lose them. */
 const pendingText = new Map<string, string>();
 
-/** Always-open reply box under a conversation; shows an agent's pending draft when there is one. */
+/** no-reply@, noreply@, do-not-reply@, donotreply@, notifications-noreply@ and the like. */
+const NO_REPLY = /(^|[._+-])(no|do[._-]?not)[._-]?reply([._+-]|$)/i;
+
+function isNoReply(a: Address | null | undefined): boolean {
+  return !!a && NO_REPLY.test(a.email.split('@')[0]);
+}
+
+/** Mail nobody expects an answer to, in a thread you've never written in: the
+ *  latest message from someone else has a List-Unsubscribe header, or replies
+ *  to it would go to a no-reply address. */
+function isBulk(thread: Thread, mine: Mine): boolean {
+  const theirs = thread.messages.filter((m) => !mine(m.from));
+  const last = theirs[theirs.length - 1];
+  if (!last || theirs.length !== thread.messages.length) return false;
+  const replyTo = last.reply_to.length ? last.reply_to : [last.from];
+  return !!last.unsubscribe || replyTo.every(isNoReply);
+}
+
+/** Reply box under a conversation, open unless it's list or no-reply mail; shows an agent's pending draft when there is one. */
 export class ReplyBox {
   root = h('div.reply-box');
   private input = h('textarea.reply-input', { rows: 1, placeholder: 'Write a reply…', 'aria-label': 'Reply' });
@@ -48,7 +67,11 @@ export class ReplyBox {
       void this.load(this.mode === 'reply_all' ? 'reply' : 'reply_all');
     });
     this.root.append(
-      h('div.reply-head', this.to, this.note),
+      h('button.reply-reopen', { title: 'Reply (r)', on: { click: () => this.focus() } }, icon('reply', 14), 'Reply'),
+      h('div.reply-head', this.to, this.note,
+        h('span.spacer'),
+        h('button.icon-btn', { title: 'Hide reply box (r to reopen)', 'aria-label': 'Hide reply box', on: { click: () => this.dismiss() } }, icon('close', 14))),
+      warnings(msgs.find((m) => m.id === this.target)!, true) ?? '',
       this.input,
       h('div.reply-foot',
         h('button.icon-btn', { title: 'Open in full composer', 'aria-label': 'Open in full composer', on: { click: () => this.expand() } }, icon('compose', 16)),
@@ -56,12 +79,22 @@ export class ReplyBox {
         h('button.discard', { hidden: true, title: 'Throw away this reply draft', on: { click: () => void this.discard() } }, 'Discard'),
         h('button.primary', { title: 'Send (⌘↩)', on: { click: () => void this.send() } }, 'Send')),
     );
+    // List and no-reply mail rarely gets a reply, so start it as the "Reply" button unless something's already typed.
+    if (isBulk(thread, this.mine) && !this.input.value) this.root.classList.add('dismissed');
     void this.init();
   }
 
   focus(mode?: ReplyMode) {
     if (mode && mode !== this.mode && !this.proposal) void this.load(mode);
+    this.root.classList.remove('dismissed');
+    this.grow();
     this.input.focus();
+  }
+
+  /** Shrinks the box to a "Reply" button to free up reading space; typed text is kept. */
+  private dismiss() {
+    this.root.classList.add('dismissed');
+    this.input.blur();
   }
 
   private grow() {
@@ -81,6 +114,7 @@ export class ReplyBox {
         if (!this.input.value) this.input.value = splitQuote(p.action.draft.body_text)[0];
         this.note.textContent = `Draft from ${p.agent_name} — edit or send`;
         this.root.classList.add('proposed');
+        this.root.classList.remove('dismissed');
         this.root.querySelector<HTMLElement>('.discard')!.hidden = false;
         this.showRecipients();
         this.grow();

@@ -55,7 +55,13 @@ pub struct ImapProvider {
     creds: CredentialHandle,
     session: Mutex<Option<Session>>,
     caps: Mutex<HashSet<String>>,
+    /// Older mail the last sync found missing, for [`MailProvider::backfill`].
+    older: Mutex<Vec<Older>>,
 }
+
+/// A mailbox, its UIDVALIDITY, and the UIDs of older mail not fetched yet,
+/// newest first.
+type Older = (RemoteMailbox, u32, Vec<u32>);
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct MailboxCursor {
@@ -69,7 +75,7 @@ struct MailboxCursor {
 
 impl ImapProvider {
     pub fn new(cfg: ImapSettings, creds: CredentialHandle) -> Self {
-        Self { cfg, creds, session: Mutex::new(None), caps: Mutex::new(HashSet::new()) }
+        Self { cfg, creds, session: Mutex::new(None), caps: Mutex::new(HashSet::new()), older: Mutex::new(vec![]) }
     }
 
     fn password(&self) -> Result<String> {
@@ -221,14 +227,13 @@ impl MailProvider for ImapProvider {
             // One folder the server won't open (a shared folder without
             // access, a glitch) must not stop the rest. The account shows an
             // error only when the Inbox fails or the connection itself broke.
-            // Recent mail in every folder first; older mail after, a batch
-            // per pass (0039).
+            // Recent mail only; older mail follows in `backfill` (0047).
             let mut inbox_err = None;
             let mut older = vec![];
             for (mb, _) in order {
                 priority::yield_to_user().await;
                 match self.sync_mailbox(&mut s, ctx, mb).await {
-                    Ok((uv, uids)) if !uids.is_empty() => older.push((mb, uv, uids)),
+                    Ok((uv, uids)) if !uids.is_empty() => older.push((mb.clone(), uv, uids)),
                     Ok(_) => {}
                     Err(e) => {
                         warn!(mailbox = %mb.path, "sync failed: {e:#}");
@@ -241,10 +246,23 @@ impl MailProvider for ImapProvider {
                     }
                 }
             }
-            self.backfill(&mut s, ctx, older).await?;
+            *self.older.lock().await = older;
             inbox_err.map_or(Ok(()), Err)
         }
         .await;
+        if r.is_ok() {
+            self.release(s).await;
+        }
+        r
+    }
+
+    async fn backfill(&self, ctx: &SyncCtx, until: std::time::Instant) -> Result<()> {
+        let older = std::mem::take(&mut *self.older.lock().await);
+        if older.is_empty() {
+            return Ok(());
+        }
+        let mut s = self.session().await?;
+        let r = self.fetch_older(&mut s, ctx, older, until).await;
         if r.is_ok() {
             self.release(s).await;
         }

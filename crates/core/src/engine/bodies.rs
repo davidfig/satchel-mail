@@ -18,12 +18,12 @@ const MAX_ESTIMATE: u64 = 1024 * 1024;
 
 impl Engine {
     /// Download content for up to `limit` messages that lack it, newest
-    /// first: all mail, or the last `download_days`. With a storage limit,
+    /// first, until `until`: all mail, or the last `download_days`. With a storage limit,
     /// the oldest content is freed to make room for newer mail, and
     /// downloading stops when only older mail is left to free.
     /// Gives way to the user: pauses while they wait on the account, and
     /// pushes their queued changes between messages (0037).
-    pub(crate) async fn fetch_bodies(&self, ctx: &SyncCtx, providers: &Providers, limit: u32) {
+    pub(crate) async fn fetch_bodies(&self, ctx: &SyncCtx, providers: &Providers, limit: u32, until: std::time::Instant) {
         let Some(mail) = providers.mail.as_deref() else { return };
         let gate = self.gate(&ctx.account.id);
         let s = &ctx.settings;
@@ -37,6 +37,9 @@ impl Engine {
         // The whole backlog, not just this batch, so progress means something.
         let left = ctx.store.count_without_body(&ctx.account.id, since).unwrap_or(ids.len() as u64);
         for (i, (id, date, size)) in ids.into_iter().enumerate() {
+            if std::time::Instant::now() >= until {
+                break;
+            }
             if let Some(cap) = cap {
                 let need = if size == 0 { UNKNOWN_SIZE } else { size.min(MAX_ESTIMATE) };
                 match self.free_space(ctx, cap.saturating_sub(need), Some(date)) {

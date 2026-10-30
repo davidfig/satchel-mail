@@ -19,8 +19,6 @@
 .nav-item:hover, .mb-item:hover { background: var(--hover); }
 .nav-item.active, .mb-item.active { background: var(--active); color: var(--accent); font-weight: 550; }
 /* Mail with its combined list open: the selected item below carries the highlight. */
-.nav-item.active.parent { background: none; }
-.nav-item.active.parent:hover { background: var(--hover); }
 .nav-sub { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
 .badge { margin-left: auto; background: var(--accent); color: var(--accent-text); border-radius: 10px; font-size: 11px; font-weight: 650; padding: 0 7px; line-height: 18px; }
 .mailboxes { overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 1px; margin-top: 6px; }
@@ -46,7 +44,7 @@
 .state-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .state-dot.err { background: var(--danger); }
 .acct-dot.busy { animation: pulse 1s infinite alternate; }
-.sidebar-foot { border-top: 1px solid var(--line); padding: 8px 6px 0; }
+.sidebar-foot { margin-top: auto; border-top: 1px solid var(--line); padding: 8px 6px 0; }
 .sync-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); border: none; background: none; height: auto; padding: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sync-status.error { color: var(--danger); }
 .sync-text { overflow: hidden; text-overflow: ellipsis; }
@@ -55,5 +53,6 @@
 .content { min-width: 0; min-height: 0; overflow: hidden; background: var(--panel); }
 
 .titlebar-drag { position: fixed; top: 0; left: 0; right: 0; height: 30px; z-index: 30; }
-.tauri-mac .sidebar { padding-top: 40px; }
-.tauri-mac .list-head, .tauri-mac .reader-head, .tauri-mac .cal-head, .tauri-mac .page-head, .tauri-mac .settings-content, .tauri-mac .settings-nav, .tauri-mac .cal-side { padding-top: 34px; }
+.tauri-mac:not(.fullscreen) .sidebar { padding-top: 40px; }
+.tauri-mac:not(.fullscreen) :is(.list-head, .reader-head, .cal-head, .page-head, .settings-content, .settings-nav) { padding-top: 34px; }
+.fullscreen .titlebar-drag { display: none; }

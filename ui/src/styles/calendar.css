@@ -1,25 +1,31 @@
 /* ------------------------------------------------------------ calendar */
-.calendar-view { display: grid; grid-template-columns: 228px 1fr; height: 100%; }
-.calendar-view.side-collapsed { grid-template-columns: 1fr; }
+.calendar-view { display: grid; grid-template-columns: 1fr; height: 100%; }
+/* The sidebar's New event button does this, except on narrow screens. */
 .cal-new { display: none; }
-.side-collapsed .cal-new { display: inline-flex; }
-.cal-side { border-right: 1px solid var(--line); padding: 14px 12px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; background: var(--panel-2); }
-.cal-side > .primary { justify-content: center; height: 34px; }
+/* In the app sidebar, under the nav, where Mail lists its mailboxes. */
+.cal-side { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; margin-top: 6px; padding: 4px 4px 0; }
 .mini-head { font-weight: 600; font-size: 13px; margin-bottom: 6px; padding-left: 4px; }
 .mini-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
 .mini-dow { font-size: 10.5px; text-align: center; color: var(--text-3); }
-.mini-day { height: 26px; padding: 0; border: none; background: none; justify-content: center; font-size: 12px; border-radius: 50%; }
+.mini-day { width: 26px; height: 26px; justify-self: center; padding: 0; border: none; background: none; justify-content: center; font-size: 12px; border-radius: 50%; }
 .mini-day.other { color: var(--text-3); }
 .mini-day.today { color: var(--accent); font-weight: 700; }
 .mini-day.sel { background: var(--accent); color: var(--accent-text); }
+.mini-day.busy { position: relative; }
+.mini-day.busy::after { content: ""; position: absolute; bottom: 2px; left: calc(50% - 2px); width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .5; }
 .cal-list { display: flex; flex-direction: column; gap: 4px; }
 .cal-list .mb-section { padding-left: 2px; }
 .cal-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; padding: 2px; }
-.swatch { width: 10px; height: 10px; border-radius: 3px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.cal-name { flex: 1; min-width: 0; }
+.cal-lock { display: inline-flex; flex-shrink: 0; color: var(--text-3); }
 .cal-main { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
 /* Previous, current and next period side by side; the previous one sits off to
    the left, so at rest only the current one shows. Swiping moves the track. */
-.cal-track { flex: 1; display: flex; min-height: 0; }
+.cal-body { flex: 1; display: flex; min-height: 0; container-type: inline-size; }
+/* Clips the neighbouring periods, which the track holds just out of view. */
+.cal-clip { flex: 1; min-width: 0; display: flex; overflow: hidden; }
+.cal-track { flex: 1; min-width: 0; display: flex; min-height: 0; }
 .cal-pane { flex: 0 0 100%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .cal-pane.prev { margin-left: -100%; }
 .cal-pane > * { flex: 1; min-height: 0; }
@@ -32,9 +38,17 @@
 .segmented button + button { border-left: 1px solid var(--line-2); }
 .segmented button.active { background: var(--active); color: var(--accent); font-weight: 600; }
 .time-grid { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.grid-head, .allday-row, .time-body { display: grid; grid-template-columns: 56px repeat(var(--days), 1fr); }
-.time-grid.days-7 { --days: 7; }
 .time-grid.days-1 { --days: 1; }
+.grid-head, .allday-row, .time-body { display: grid; grid-template-columns: 56px repeat(var(--days), 1fr); }
+/* The week view: a strip of days in one grid, a week of it in view, scrolling
+   sideways under a header and hour gutter that stay put. */
+.cal-pane { container-type: inline-size; }
+.time-grid.free { display: block; overflow: auto; overscroll-behavior-x: contain; }
+.time-grid.free :is(.grid-head, .allday-row, .time-body) { grid-template-columns: 56px repeat(var(--days), calc((100cqw - 56px) / 7)); width: max-content; }
+.time-grid.free .grid-top { position: sticky; top: 0; z-index: 6; background: var(--bg); }
+.time-grid.free .allday-cell { height: max(25px, calc(var(--allday-rows) * 22px + 2px)); overflow: hidden; }
+.time-grid.free .allday-cell .event-chip { flex: none; height: 20px; }
+.time-grid.free .gutter { grid-column: 1; position: sticky; left: 0; z-index: 5; background: var(--bg); }
 .day-head { padding: 6px 8px; display: flex; gap: 6px; align-items: baseline; border-left: 1px solid var(--line); }
 .day-head .dow { font-size: 12px; color: var(--text-2); text-transform: uppercase; }
 .day-head .dom { font-size: 18px; font-weight: 600; }
@@ -46,9 +60,9 @@
 .time-body { position: relative; height: calc(24 * 48px); }
 .hours { position: relative; }
 .hour-label { position: absolute; right: 8px; font-size: 10.5px; color: var(--text-3); transform: translateY(-7px); }
-.day-col { position: relative; border-left: 1px solid var(--line); }
-.day-col.today { background: color-mix(in srgb, var(--accent) 3%, transparent); }
-.hour-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
+/* Hour lines are a background, not elements: the week view draws ~120 days. */
+.day-col { position: relative; border-left: 1px solid var(--line); background-image: repeating-linear-gradient(to bottom, var(--line) 0 1px, transparent 1px 48px); }
+.day-col.today { background-color: color-mix(in srgb, var(--accent) 3%, transparent); }
 .now-line { position: absolute; left: -1px; right: 0; border-top: 2px solid var(--danger); z-index: 3; }
 .now-line::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
 .event-chip { --ev: var(--accent); display: flex; align-items: flex-start; gap: 4px; height: auto; min-height: 20px; padding: 2px 6px; font-size: 12px; border: none; border-radius: 5px; background: color-mix(in srgb, var(--ev) 18%, var(--panel)); color: var(--text); border-left: 3px solid var(--ev); text-align: left; overflow: hidden; width: 100%; white-space: nowrap; }
@@ -82,8 +96,57 @@
 .event-desc { white-space: pre-wrap; color: var(--text-2); }
 .rsvp-bar { border-top: 1px solid var(--line); padding-top: 10px; }
 .rsvp-bar button.active { background: var(--active); color: var(--accent); border-color: var(--accent); }
-.event-form { display: flex; flex-direction: column; gap: 10px; }
-.event-form > input:first-child { font-size: 17px; font-weight: 600; border: none; border-bottom: 1px solid var(--line-2); border-radius: 0; padding-left: 0; }
-.event-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-2); }
-.event-form label.row { flex-direction: row; align-items: center; }
-.event-form label.row > select, .event-form label.row > input:not([type=checkbox]) { flex: 1; }
+.event-form { display: flex; flex-direction: column; gap: 12px; }
+.event-form .ev-title { font-size: 18px; font-weight: 600; border: none; border-bottom: 1px solid var(--line); border-radius: 0; padding: 4px 0 8px 34px; min-height: 0; }
+.event-form .ev-title:focus-visible { outline: none; border-bottom-color: var(--accent); }
+/* Each line: an icon in a gutter, then its fields. */
+.ev-line { display: flex; gap: 12px; align-items: flex-start; }
+.ev-icon { flex: none; width: 22px; height: 30px; display: grid; place-items: center; color: var(--text-3); }
+.ev-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.ev-body > textarea { min-height: 64px; }
+.ev-when { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; }
+.ev-when > .muted { font-size: 12.5px; min-width: 40px; }
+.ev-when input { min-width: 0; }
+.ev-when input[type=time] { width: 116px; }
+.ev-when input[type=time][hidden] { display: none; }
+.ev-when:has(input[type=time][hidden]) { grid-template-columns: auto minmax(0, 1fr); }
+.ev-opts { display: flex; align-items: center; gap: 14px; }
+.ev-opts > label { font-size: 13px; color: var(--text-2); flex: none; }
+.ev-location { display: flex; align-items: center; gap: 4px; }
+.ev-location > input { flex: 1; min-width: 0; }
+.ev-location > .icon-btn[hidden] { display: none; }
+.ev-zone { flex: 1; min-width: 0; position: relative; }
+.ev-zone > input { padding-right: 28px; text-overflow: ellipsis; }
+.ev-zone > .icon { position: absolute; right: 8px; top: 50%; translate: 0 -50%; color: var(--text-3); pointer-events: none; }
+.ev-zone[hidden], .ev-hint[hidden] { display: none; }
+.ev-hint { margin-top: -2px; }
+/* The repeat picker (calendar-repeat.ts). */
+.repeat { display: flex; flex-direction: column; gap: 8px; }
+.repeat-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--hover); }
+.repeat-panel[hidden], .repeat-row[hidden], .repeat-row > [hidden] { display: none; }
+.repeat-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.repeat-row > .muted { font-size: 12.5px; min-width: 40px; }
+.repeat-row > input[type=number] { width: 64px; }
+.repeat-row > select { width: auto; flex: 1; min-width: 0; max-width: 220px; }
+.repeat-row > input[type=date] { width: auto; flex: 1; max-width: 170px; }
+.day-chips { display: flex; gap: 4px; }
+.day-chip { width: 30px; height: 30px; padding: 0; justify-content: center; border-radius: 50%; font-size: 12px; font-weight: 550; color: var(--text-2); }
+.day-chip[aria-pressed=true] { background: var(--accent); border-color: transparent; color: var(--accent-text); }
+.day-chip[aria-pressed=true]:hover { background: var(--accent); filter: brightness(1.06); }
+@media (max-width: 480px) {
+  .ev-when { gap: 6px; }
+  .ev-when > .muted { min-width: 0; }
+  .ev-when input { padding: 6px 5px; font-size: 13px; }
+  .ev-when input[type=time] { width: 104px; }
+  .ev-opts { gap: 10px; }
+}
+/* The day's agenda, beside the day, as on a Mac.
+   Dropped when there isn't room for both. */
+.day-panel { flex: 0 0 min(340px, 42%); border-left: 1px solid var(--line); padding: 14px 16px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+.day-agenda h3 { margin: 0 0 6px; font-size: 13px; color: var(--text-2); }
+.day-agenda .agenda-item { display: grid; grid-template-columns: 10px 1fr; column-gap: 10px; row-gap: 1px; align-items: baseline; text-align: left; }
+.day-agenda .agenda-item > * { grid-column: 2; }
+.day-agenda .agenda-item > .swatch { grid-column: 1; grid-row: 1; }
+.day-agenda .agenda-title { order: -1; }
+.day-agenda .agenda-time { width: auto; font-size: 12px; }
+@container (max-width: 640px) { .day-panel { display: none; } }

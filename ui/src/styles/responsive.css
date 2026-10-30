@@ -3,8 +3,7 @@
   .sidebar .brand-name, .sidebar .nav-item span, .compose-btn, .mailboxes, .sidebar-foot, .collapse-btn { display: none; }
   .mail-view { grid-template-columns: 1fr; }
   .mail-view .reader { display: none; }
-  .calendar-view { grid-template-columns: 1fr; }
-  .cal-side, .cal-side-toggle { display: none; }
+  .cal-side { display: none; }
   .cal-new { display: inline-flex; }
   .contacts-view { grid-template-columns: 1fr; }
   .contacts-view .reader { display: none; }

@@ -1,4 +1,4 @@
-//! Syncing: the recent window, history deltas and the backfill of older mail.
+//! Syncing: the recent window, history deltas and pages of older mail.
 
 use super::*;
 
@@ -96,23 +96,21 @@ impl GmailProvider {
         Ok(())
     }
 
-    /// Older mail, newest first, a page at a time across syncs (0039).
-    pub(super) async fn backfill(&self, ctx: &SyncCtx, labels: &HashSet<String>) -> Result<()> {
-        let Some(state) = ctx.cursor("gmail:backfill")? else { return Ok(()) };
+    /// One page of older mail, newest first (0039). Returns whether more
+    /// is left.
+    pub(super) async fn older_page(&self, ctx: &SyncCtx, labels: &HashSet<String>) -> Result<bool> {
+        let Some(state) = ctx.cursor("gmail:backfill")? else { return Ok(false) };
         if state == "done" {
-            return Ok(());
+            return Ok(false);
         }
         let days = ctx.settings.initial_sync_days.max(7);
         let page = (state != "start").then_some(state);
-        let (ids, next) = self.list_ids(&format!("older_than:{days}d"), page, 1000).await?;
+        let (ids, next) = self.list_ids(&format!("older_than:{days}d"), page, 500).await?;
         let known = ctx.store.remote_ids(ctx.account_id())?;
         let missing: Vec<String> = ids.into_iter().filter(|i| !known.contains_key(i)).collect();
         self.fetch_metadata(ctx, missing, labels).await?;
         ctx.set_cursor("gmail:backfill", next.as_deref().unwrap_or("done"))?;
-        if next.is_some() {
-            ctx.more_to_sync();
-        }
-        Ok(())
+        Ok(next.is_some())
     }
 
     pub(super) async fn delta(&self, ctx: &SyncCtx, start: &str, labels: &HashSet<String>) -> Result<bool> {
