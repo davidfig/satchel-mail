@@ -9,7 +9,8 @@ import type { MenuItem } from '../../lib/ui';
 import { store } from '../../state';
 import type { Address, MessageDetail, ReplyMode, Thread } from '../../types';
 import { looksDesigned, planFold, stripHtmlQuotes } from '../../lib/thread';
-import { attachments, draftBanner, htmlFrame, inviteCard, textBody, viewSource, warnings } from './message-body';
+import { attachments } from './attachments';
+import { draftBanner, htmlFrame, inviteCard, textBody, viewSource, warnings } from './message-body';
 
 /** Consecutive messages from one sender within this window share a name line. */
 const GROUP_MS = 15 * 60_000;

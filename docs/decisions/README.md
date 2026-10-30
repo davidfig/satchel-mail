@@ -58,3 +58,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0051 | [One sidebar: fixed mode rows, each view's own section below](0051-one-sidebar.md) | Accepted |
 | 0052 | [All credentials in one keychain item](0052-one-keychain-item.md) | Accepted |
 | 0053 | [Favorite senders: a local list of addresses, highlighted everywhere](0053-favorite-senders.md) | Accepted |
+| 0054 | [View attachments in the app; Open and Save beside it](0054-attachment-viewer.md) | Accepted |

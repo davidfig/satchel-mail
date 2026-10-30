@@ -121,7 +121,7 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
         }
         resp.headers_mut().insert(
             header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static("default-src 'self'; img-src 'self' data: https: http:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob: data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-ancestors 'none'"),
+            HeaderValue::from_static("default-src 'self'; img-src 'self' data: blob: https: http:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob: data:; media-src blob:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-ancestors 'none'"),
         );
     }
     resp

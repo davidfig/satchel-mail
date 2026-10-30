@@ -216,6 +216,9 @@ const ICONS: Record<string, string> = {
   moon: '<path d="M16 12.5A6.5 6.5 0 0 1 7.5 4a6.5 6.5 0 1 0 8.5 8.5z"/>',
   notes: '<path d="M4 5h12M4 10h12M4 15h7.5"/>',
   heart: '<path d="M10 16.5s-6.5-3.8-6.5-8.4A3.4 3.4 0 0 1 10 6a3.4 3.4 0 0 1 6.5 2.1c0 4.6-6.5 8.4-6.5 8.4z"/>',
+  download: '<path d="M10 3v10M5.5 8.5L10 13l4.5-4.5"/><path d="M3.5 16.5h13"/>',
+  external: '<path d="M11 3.5h5.5V9"/><path d="M16.5 3.5L9 11"/><path d="M14 11.5v4a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4"/>',
+  file: '<path d="M5 2.5h6.5l4 4v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z"/><path d="M11.5 2.5v4h4"/>',
   copy: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 7V4.5a1 1 0 0 0-1-1H4.5a1 1 0 0 0-1 1V12a1 1 0 0 0 1 1H7"/>',
 };
 

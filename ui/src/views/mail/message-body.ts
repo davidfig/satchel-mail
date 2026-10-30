@@ -1,29 +1,13 @@
-// Message bodies: text and HTML rendering, invitations, attachments, links.
+// Message bodies: text and HTML rendering, invitations, links.
 
 import { api } from '../../api';
 import { h, icon, patch } from '../../lib/dom';
-import { humanSize, timeRange } from '../../lib/format';
+import { timeRange } from '../../lib/format';
 import { confirmDialog, errorToast, modal, toast } from '../../lib/ui';
 import { transport } from '../../transport';
 import type { MessageDetail, PartStat } from '../../types';
 import { followTarget, isAttribution, linkScheme, routeLinks, trimUrl } from '../../lib/thread';
 import { editDraft, openComposer } from './composer';
-
-export function attachments(m: MessageDetail): HTMLElement | null {
-  const atts = m.attachments.filter((a) => !a.inline);
-  if (!atts.length) return null;
-  return h('div.attachments',
-    atts.map((a) =>
-      h(`button.attachment${a.risky ? '.risky' : ''}`, {
-        title: a.risky ? `${a.filename} can run code or imitate a sign-in page` : `Download ${a.filename}`,
-        on: {
-          click: async () => {
-            if (a.risky && !(await confirmDialog('Download a risky file?', `${a.filename} can run code or imitate a sign-in page when opened. Only download it if you were expecting it from this sender.`, 'Download anyway', true))) return;
-            void download(m.id, a.id);
-          },
-        },
-      }, icon(a.risky ? 'warning' : 'paperclip', 16), h('span.name', a.filename), h('span.muted.small', humanSize(a.size)))));
-}
 
 /** The core's phishing and safety warnings for one message. A different
  *  Reply-To only matters when answering, so the reply box shows that one
@@ -234,32 +218,6 @@ export function openExternal(url: string) {
   // host would hand it straight back here.
   if (transport.kind === 'tauri') void transport.host('open_url', { url }).catch(errorToast);
   else window.open(url, '_blank', 'noopener,noreferrer');
-}
-
-async function download(messageId: string, attachmentId: string) {
-  try {
-    const a = await api.getAttachment(messageId, attachmentId);
-    await saveBase64(a.filename, a.mime_type, a.data_base64);
-  } catch (e) {
-    errorToast(e);
-  }
-}
-
-export async function saveBase64(filename: string, mime: string, b64: string) {
-  if (transport.kind === 'tauri') {
-    const path = await transport.host<string | null>('save_file', { filename, data_base64: b64 });
-    if (path) toast(`Saved to ${path}`, { kind: 'success' });
-    return;
-  }
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  const link = h('a', { href: url, download: filename });
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 export async function viewSource(messageId: string) {

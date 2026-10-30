@@ -61,25 +61,65 @@ async fn choose_folder(app: tauri::AppHandle, title: String, start: Option<Strin
 #[tauri::command(rename_all = "snake_case")]
 async fn save_file(app: tauri::AppHandle, filename: String, data_base64: String) -> Result<Option<String>, String> {
     let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64).map_err(|e| e.to_string())?;
-    // Without the invisible marks that make "invoice\u{202E}fdp.exe" read as "invoiceexe.pdf".
-    let safe: String = satchel_mime::clean_filename(&filename).chars().map(|c| if "/\\:".contains(c) { '_' } else { c }).collect();
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog().file().set_file_name(&safe).save_file(move |p| {
+    app.dialog().file().set_file_name(safe_filename(&filename)).save_file(move |p| {
         let _ = tx.send(p);
     });
     let Some(path) = rx.await.map_err(|e| e.to_string())? else { return Ok(None) };
     let path = path.into_path().map_err(|e| e.to_string())?;
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
-    // Mark it as downloaded, so the OS checks it (Gatekeeper, SmartScreen)
-    // when it's opened. A file we can't mark isn't left behind unchecked,
-    // unless the disk can't hold the mark at all (FAT, some network shares).
-    if let Err(e) = mark_downloaded(&path)
+    write_downloaded(&path, &bytes)?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Open an attachment in its default app: write it to a fresh folder in the
+/// cache (marked as downloaded, like a saved one), then hand it to the OS.
+#[tauri::command(rename_all = "snake_case")]
+fn open_file(app: tauri::AppHandle, filename: String, data_base64: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64).map_err(|e| e.to_string())?;
+    let root = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("opened");
+    clear_old_opened(&root);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    // Its own folder, so the file keeps its name and two with the same name don't collide.
+    let dir = root.join(format!("{nanos:x}"));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(safe_filename(&filename));
+    write_downloaded(&path, &bytes)?;
+    app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Removes files opened more than a day ago; the app they went to has had them long enough.
+fn clear_old_opened(root: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    let day = std::time::Duration::from_secs(24 * 60 * 60);
+    for e in entries.flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > day);
+        if old {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
+/// An attachment's name, safe to write: without the invisible marks that make
+/// "invoice\u{202E}fdp.exe" read as "invoiceexe.pdf", and without path separators.
+fn safe_filename(filename: &str) -> String {
+    let safe: String = satchel_mime::clean_filename(filename).chars().map(|c| if "/\\:".contains(c) { '_' } else { c }).collect();
+    if safe.trim_matches('.').is_empty() { "attachment".into() } else { safe }
+}
+
+/// Writes the file and marks it as downloaded, so the OS checks it
+/// (Gatekeeper, SmartScreen) when it's opened. A file we can't mark isn't
+/// left behind unchecked, unless the disk can't hold the mark at all (FAT,
+/// some network shares).
+fn write_downloaded(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    std::fs::write(path, bytes).map_err(|e| e.to_string())?;
+    if let Err(e) = mark_downloaded(path)
         && !matches!(e.kind(), std::io::ErrorKind::Unsupported | std::io::ErrorKind::InvalidFilename)
     {
-        let _ = std::fs::remove_file(&path);
-        return Err(format!("couldn't mark the saved file as downloaded from the internet: {e}"));
+        let _ = std::fs::remove_file(path);
+        return Err(format!("couldn't mark the file as downloaded from the internet: {e}"));
     }
-    Ok(Some(path.display().to_string()))
+    Ok(())
 }
 
 /// macOS: the `com.apple.quarantine` attribute browsers set
@@ -247,7 +287,7 @@ fn main() {
             save_window_state_on_change(&window);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![api, open_url, save_file, choose_folder, cli_path])
+        .invoke_handler(tauri::generate_handler![api, open_url, save_file, open_file, choose_folder, cli_path])
         .run(tauri::generate_context!())
         .expect("error while running Satchel Mail");
 }

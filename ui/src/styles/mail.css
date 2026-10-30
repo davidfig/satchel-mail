@@ -94,6 +94,24 @@ button.avatar-link:hover .avatar { box-shadow: 0 0 0 2px var(--accent-soft); }
 .attachment .name { overflow: hidden; text-overflow: ellipsis; }
 .attachment.risky { border-color: var(--warn); color: var(--warn); }
 .attachment.risky .icon { color: var(--warn); }
+.viewer-actions { display: flex; align-items: center; gap: 2px; margin-right: 4px; }
+.viewer-count { margin-right: 6px; white-space: nowrap; }
+.viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.viewer-loading { margin: auto; }
+.viewer-frame { flex: 1; width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.viewer-media { flex: 1; min-height: 0; display: grid; place-items: center; }
+.viewer-media img, .viewer-media video { max-width: 100%; max-height: 100%; object-fit: contain; }
+.viewer-media audio { width: min(480px, 100%); }
+.viewer-text { flex: 1; margin: 0; overflow: auto; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.viewer-table { flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.viewer-table table { border-collapse: collapse; font-size: 12.5px; }
+.viewer-table th, .viewer-table td { padding: 4px 10px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); text-align: left; white-space: pre; vertical-align: top; user-select: text; }
+.viewer-table th { position: sticky; top: 0; background: var(--panel); font-weight: 600; }
+.viewer-table > p { padding: 0 10px; }
+.viewer-empty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; max-width: 420px; }
+.viewer-empty > .icon { color: var(--text-2); margin-bottom: 4px; }
+.viewer-empty strong { overflow-wrap: anywhere; }
+.viewer-empty .row { gap: 8px; justify-content: center; }
 .invite.muted-invite { border-left-color: var(--line-2); opacity: .8; }
 .invite.muted-invite .icon { color: var(--text-2); }
 .msg-warnings { align-items: flex-start; font-size: 13px; line-height: 1.45; }

@@ -6,7 +6,7 @@ import type { ApiError, CoreEvent } from './types';
 
 export interface Transport {
   invoke<T>(cmd: string, args?: unknown): Promise<T>;
-  /** Calls a desktop-host command (`open_url`, `save_file`, `choose_folder`, `cli_path`), not the engine. The web has none. */
+  /** Calls a desktop-host command (`open_url`, `save_file`, `open_file`, `choose_folder`, `cli_path`), not the engine. The web has none. */
   host<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
   subscribe(fn: (e: CoreEvent) => void): () => void;
   /** Links the host caught opening as popups (desktop: the message iframe's). The web has none. */
