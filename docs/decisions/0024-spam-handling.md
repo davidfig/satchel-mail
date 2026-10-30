@@ -40,7 +40,11 @@ message is read, so the UI, CLI and agents all see the same signals:
   email address. "Known" means you sent them mail, replied to them, or
   marked them Not spam. Receiving mail from an address doesn't make it known.
 - Reply-To points at a different domain than From, to an unknown address.
-- a link's text shows one domain and its href goes to another.
+- a link's text shows one domain and its href goes to another. Links
+  through a known newsletter click tracker (SendGrid, Mailchimp, …;
+  `crates/mime/src/trackers.rs`) don't count: the tracker hides the
+  destination rather than naming a wrong one, and flagging them put the
+  warning on nearly every newsletter.
 - an attachment can run code or imitate a sign-in page (HTML, executables,
   macro documents, disk images).
 - an invitation comes from an organizer the user has never written to.

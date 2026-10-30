@@ -205,7 +205,8 @@ fn percent_decode(s: &str, plus_is_space: bool) -> String {
 }
 
 /// Links whose visible text names one domain but whose target is another,
-/// as (shown host, actual host).
+/// as (shown host, actual host). Links through a known click tracker are
+/// left out: the tracker hides the destination rather than misstating it.
 pub fn deceptive_links(html: &str) -> Vec<(String, String)> {
     let lower = html.to_ascii_lowercase();
     let mut out: Vec<(String, String)> = vec![];
@@ -221,9 +222,10 @@ pub fn deceptive_links(html: &str) -> Vec<(String, String)> {
         let href = attr(&html[start..tag_end], "href").map(|h| decode_entities(&h));
         let text = decode_entities(&strip_tags(&html[tag_end + 1..close]));
         pos = close;
-        let (Some(href), Some(shown)) = (href, shown_host(&text)) else { continue };
+        let (Some(href), Some(shown)) = (href, shown_host(&unwrap_safe_link(text.trim()))) else { continue };
         let Some(actual) = url_host(&unwrap_safe_link(&href)) else { continue };
-        if base_domain(&shown) != base_domain(&actual) && !out.iter().any(|(s, a)| *s == shown && *a == actual) {
+        let tracked = crate::trackers::is_click_tracker(&actual);
+        if !tracked && base_domain(&shown) != base_domain(&actual) && !out.iter().any(|(s, a)| *s == shown && *a == actual) {
             out.push((shown, actual));
         }
     }
@@ -448,6 +450,11 @@ mod tests {
         assert!(deceptive_links(&format!(r#"<a href="{nested}">wsdot.com</a>"#)).is_empty());
         assert_eq!(deceptive_links(&format!(r#"<a href="{}">wsdot.com</a>"#, wrap("https%3A%2F%2Fevil.test%2F"))), vec![("wsdot.com".to_string(), "evil.test".to_string())]);
         assert_eq!(deceptive_links(r#"<a href="https://safelinks.protection.outlook.com.evil.test/?url=https%3A%2F%2Fwsdot.com">wsdot.com</a>"#).len(), 1);
+        // Shown text that is itself a Safe Link names where it really goes.
+        assert!(deceptive_links(&format!(r#"<a href="https://play.google.com/store">{}</a>"#, wrap("https%3A%2F%2Fplay.google.com%2Fstore").replace("&amp;", "&"))).is_empty());
+        // Newsletter click trackers hide the destination; they don't misstate it.
+        assert!(deceptive_links(r#"<a href="https://u4639.ct.sendgrid.net/ls/click?upn=x">github.com</a>"#).is_empty());
+        assert_eq!(deceptive_links(r#"<a href="https://ct.sendgrid.net.evil.test/">github.com</a>"#).len(), 1);
         assert_eq!(decode_entities("&#x1F600;&#0;&#99999999999;&unknown;&amp"), "\u{1F600}\u{FFFD}\u{FFFD}&unknown;&");
     }
 

@@ -20,6 +20,7 @@ mod slim;
 #[cfg(test)]
 mod tests;
 mod text;
+mod trackers;
 
 pub use build::*;
 pub use html::*;
