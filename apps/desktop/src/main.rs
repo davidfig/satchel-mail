@@ -41,6 +41,18 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Whether a navigation stays in the app: its own pages (and the dev server's
+/// in a dev build), IPC, and the in-memory documents frames show (message
+/// bodies, attachments).
+fn stays_in_app(url: &tauri::Url, dev_url: Option<&tauri::Url>) -> bool {
+    match url.scheme() {
+        "tauri" | "ipc" | "about" | "blob" | "data" => true,
+        // Windows serves the app and IPC from these hosts.
+        "http" | "https" if matches!(url.host_str(), Some("tauri.localhost" | "ipc.localhost")) => true,
+        _ => cfg!(debug_assertions) && dev_url.is_some_and(|d| d.origin() == url.origin()),
+    }
+}
+
 /// Ask the user to pick a folder, starting in `start` if it exists. Returns
 /// the chosen path, or nothing if they cancelled.
 #[tauri::command]
@@ -277,11 +289,24 @@ fn main() {
             // open as `target=_blank` popups; hand them to the UI, which asks
             // first for risky mail and opens them in the system browser.
             let links = app.handle().clone();
+            // Frames can try to leave the app too, like a link clicked in a
+            // PDF attachment, which the PDF viewer opens in its own frame.
+            // Nothing but the app's own pages loads here; other links go to
+            // the UI the same way.
+            let navigations = app.handle().clone();
+            let dev_url = app.config().build.dev_url.clone();
             let config = app.config().app.windows.iter().find(|w| w.label == "main").ok_or("no main window in tauri.conf.json")?;
             let window = WebviewWindowBuilder::from_config(app.handle(), config)?
                 .on_new_window(move |url, _| {
                     let _ = links.emit_to("main", "satchel://open-link", url.as_str());
                     NewWindowResponse::Deny
+                })
+                .on_navigation(move |url| {
+                    if stays_in_app(url, dev_url.as_ref()) {
+                        return true;
+                    }
+                    let _ = navigations.emit_to("main", "satchel://open-link", url.as_str());
+                    false
                 })
                 .build()?;
             save_window_state_on_change(&window);

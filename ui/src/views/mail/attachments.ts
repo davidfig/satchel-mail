@@ -1,11 +1,11 @@
 // Attachments: the chips under a message, and a viewer that shows the kinds of
 // file the webview can draw itself (images, PDFs, audio and video, text) in
-// the app, with Open (in its default app, desktop only) and Save beside it (0054).
+// the reading pane, with Open (in its default app, desktop only) and Save beside it (0054).
 
 import { api } from '../../api';
 import { h, icon, patch } from '../../lib/dom';
 import { humanSize } from '../../lib/format';
-import { confirmDialog, contextMenu, errorToast, modal, toast, type MenuItem } from '../../lib/ui';
+import { confirmDialog, contextMenu, errorToast, toast, type MenuItem } from '../../lib/ui';
 import { blobType, parseCsv, previewKind } from '../../lib/files';
 import { transport } from '../../transport';
 import type { Attachment, MessageDetail } from '../../types';
@@ -21,15 +21,15 @@ export function attachments(m: MessageDetail): HTMLElement | null {
     atts.map((a) => {
       const chip = h(`button.attachment${a.risky ? '.risky' : ''}`, {
         title: a.risky ? `${a.filename} can run code or imitate a sign-in page` : `View ${a.filename}`,
-        on: { click: () => openViewer(m, a) },
+        on: { click: (e: MouseEvent) => openViewer(m, a, e.currentTarget as Element) },
       }, icon(a.risky ? 'warning' : 'paperclip', 16), h('span.name', a.filename), h('span.muted.small', humanSize(a.size)));
-      contextMenu(chip, () => fileMenu(m, a));
+      contextMenu(chip, () => fileMenu(m, a, chip));
       return chip;
     }));
 }
 
-function fileMenu(m: MessageDetail, a: Attachment): MenuItem[] {
-  const items: MenuItem[] = [{ label: 'View', icon: 'image', run: () => openViewer(m, a) }];
+function fileMenu(m: MessageDetail, a: Attachment, chip: Element): MenuItem[] {
+  const items: MenuItem[] = [{ label: 'View', icon: 'image', run: () => openViewer(m, a, chip) }];
   if (transport.kind === 'tauri') items.push({ label: 'Open', icon: 'external', run: () => void openFile(m.id, a) });
   items.push({ label: 'Save…', icon: 'download', run: () => void saveFile(m.id, a) });
   return items;
@@ -82,8 +82,15 @@ function bytes(b64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-/** Shows `start` full-window, with the message's other attachments a ←/→ away. */
-export function openViewer(m: MessageDetail, start: Attachment) {
+/** Closes the viewer that's open, if any; only one is open at a time. */
+let closeOpen: (() => void) | null = null;
+
+/** Shows `start` in place of the conversation in the reading pane that holds
+ *  `from` (or the whole window when there's no pane, or after `f`), with the
+ *  message's other attachments a ←/→ away and Escape back to the message. */
+export function openViewer(m: MessageDetail, start: Attachment, from?: Element | null) {
+  closeOpen?.();
+  const pane = from?.closest<HTMLElement>('.reader') ?? null;
   const list = m.attachments.filter((a) => !a.inline);
   let index = Math.max(0, list.findIndex((a) => a.id === start.id));
   let url: string | null = null;
@@ -95,38 +102,69 @@ export function openViewer(m: MessageDetail, start: Attachment) {
     index = (index + step + list.length) % list.length;
     void show();
   };
-  const onKey = (e: KeyboardEvent) => {
-    if (document.querySelector('.menu') || (e.target as HTMLElement).closest?.('input, textarea')) return;
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      e.preventDefault();
-      go(e.key === 'ArrowLeft' ? -1 : 1);
-    }
-  };
   const many = list.length > 1;
-  const actions = h('div.viewer-actions',
-    many && h('span.muted.small.viewer-count'),
-    many && h('button.icon-btn', { title: 'Previous attachment (←)', on: { click: () => go(-1) } }, icon('chevronLeft')),
-    many && h('button.icon-btn', { title: 'Next attachment (→)', on: { click: () => go(1) } }, icon('chevronRight')),
-    transport.kind === 'tauri' && h('button.icon-btn', { title: 'Open in its app', on: { click: () => void openFile(m.id, current()) } }, icon('external')),
-    h('button.icon-btn', { title: 'Save…', on: { click: () => void saveFile(m.id, current()) } }, icon('download')),
-  );
+  const heading = h('h2.viewer-title');
+  const count = many ? h('span.muted.small.viewer-count') : null;
+  const expand = pane && h('button.icon-btn', { title: 'Full window (f)', on: { click: () => toggleExpand() } }, icon('expand'));
   const body = h('div.viewer');
-  const handle = modal(start.filename, body, {
-    full: true,
-    actions,
-    onClose: () => {
-      document.removeEventListener('keydown', onKey);
-      if (url) URL.revokeObjectURL(url);
-    },
-  });
-  document.addEventListener('keydown', onKey);
-  const heading = handle.root.querySelector('.modal-head h2') as HTMLElement;
+  const root = h('section.viewer-pane', { role: 'dialog', 'aria-label': 'Attachment', tabindex: '-1' },
+    h('header.viewer-head',
+      heading,
+      count,
+      many && h('button.icon-btn', { title: 'Previous attachment (←)', on: { click: () => go(-1) } }, icon('chevronLeft')),
+      many && h('button.icon-btn', { title: 'Next attachment (→)', on: { click: () => go(1) } }, icon('chevronRight')),
+      transport.kind === 'tauri' && h('button.icon-btn', { title: 'Open in its app', on: { click: () => void openFile(m.id, current()) } }, icon('external')),
+      h('button.icon-btn', { title: 'Save…', on: { click: () => void saveFile(m.id, current()) } }, icon('download')),
+      expand,
+      h('button.icon-btn', { title: pane ? 'Back to the message (Esc)' : 'Close (Esc)', on: { click: () => close() } }, icon('close'))),
+    body);
+
+  const toggleExpand = () => {
+    if (!expand) return;
+    const full = root.classList.toggle('expanded');
+    patch(expand, icon(full ? 'collapse' : 'expand'));
+    expand.dataset.tooltip = full ? 'Back to the reading pane (f)' : 'Full window (f)';
+  };
+  // The conversation is hidden while the viewer is in its pane (mail.css),
+  // not removed, so its frames don't reload; its scroll position comes back.
+  const scrolled = pane?.scrollTop ?? 0;
+  const prev = document.activeElement as HTMLElement | null;
+  const close = () => {
+    if (closeOpen !== close) return;
+    closeOpen = null;
+    document.removeEventListener('keydown', onKey, true);
+    if (url) URL.revokeObjectURL(url);
+    // Gone already if the pane moved on to another conversation.
+    const shown = root.isConnected;
+    root.remove();
+    if (pane && shown) pane.scrollTop = scrolled;
+    if (prev?.isConnected) prev.focus();
+  };
+  // Ahead of the app's shortcuts. Others (j/k, archive…) still reach the
+  // mail view; a new conversation replaces the pane, viewer and all.
+  const onKey = (e: KeyboardEvent) => {
+    if (!root.isConnected) return close();
+    if (document.querySelector('.modal-backdrop, .menu') || (e.target as HTMLElement).closest?.('input, textarea, [contenteditable="true"]')) return;
+    const keys: Record<string, () => void> = { Escape: close, ArrowLeft: () => go(-1), ArrowRight: () => go(1), f: toggleExpand };
+    const fn = !e.metaKey && !e.ctrlKey && !e.altKey ? keys[e.key] : undefined;
+    if (!fn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    fn();
+  };
+  closeOpen = close;
+  document.addEventListener('keydown', onKey, true);
+  if (pane) pane.append(root);
+  else {
+    root.classList.add('expanded');
+    document.body.append(root);
+  }
+  root.focus();
 
   async function show() {
     const a = current();
     const mine = ++seq;
     heading.textContent = a.filename;
-    const count = actions.querySelector('.viewer-count');
     if (count) count.textContent = `${index + 1} of ${list.length}`;
     if (url) URL.revokeObjectURL(url);
     url = null;
@@ -155,9 +193,24 @@ export function openViewer(m: MessageDetail, start: Attachment) {
     const failed = () => {
       if (mine === seq) patch(body, noPreview(m, a, 'Satchel can’t show this file here.'));
     };
-    if (kind === 'pdf') return patch(body, h('iframe.viewer-frame', { src: url, title: a.filename }));
+    if (kind === 'pdf') return patch(body, h('iframe.viewer-frame', { src: url, title: a.filename, on: { load: keysFromFrame } }));
     if (kind === 'image') return patch(body, h('div.viewer-media', h('img', { src: url, alt: a.filename, on: { error: failed } })));
     patch(body, h('div.viewer-media', h(kind, { src: url, controls: true, on: { error: failed } })));
+  }
+
+  /** Keys typed in the PDF go to its frame, never reaching us; WebKit's viewer
+   *  passes them to the frame's window, so Escape and `f` are caught there too
+   *  (arrows stay the PDF's). Chromium's viewer keeps them to itself. */
+  function keysFromFrame(e: Event) {
+    try {
+      (e.currentTarget as HTMLIFrameElement).contentWindow?.addEventListener('keydown', (k) => {
+        if (k.metaKey || k.ctrlKey || k.altKey) return;
+        if (k.key === 'Escape') close();
+        else if (k.key === 'f') toggleExpand();
+      });
+    } catch {
+      /* not ours to listen to */
+    }
   }
 
   void show();

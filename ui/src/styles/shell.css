@@ -54,5 +54,5 @@
 
 .titlebar-drag { position: fixed; top: 0; left: 0; right: 0; height: 30px; z-index: 30; }
 .tauri-mac:not(.fullscreen) .sidebar { padding-top: 40px; }
-.tauri-mac:not(.fullscreen) :is(.list-head, .reader-head, .cal-head, .page-head, .settings-content, .settings-nav) { padding-top: 34px; }
+.tauri-mac:not(.fullscreen) :is(.list-head, .reader-head, .viewer-head, .cal-head, .page-head, .settings-content, .settings-nav) { padding-top: 34px; }
 .fullscreen .titlebar-drag { display: none; }

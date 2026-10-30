@@ -100,8 +100,7 @@ export interface ModalHandle {
   root: HTMLElement;
 }
 
-/** `full` fills the window (a file viewer); `actions` go in the header, before Close. */
-export function modal(title: string, content: Node, opts: { wide?: boolean; full?: boolean; onClose?: () => void; footer?: Node; actions?: Node } = {}): ModalHandle {
+export function modal(title: string, content: Node, opts: { wide?: boolean; onClose?: () => void; footer?: Node } = {}): ModalHandle {
   const prev = document.activeElement as HTMLElement | null;
   const body = h('div.modal-body', content);
   const close = () => {
@@ -119,9 +118,9 @@ export function modal(title: string, content: Node, opts: { wide?: boolean; full
     }
   };
   const panel = h(
-    `div.modal${opts.wide ? '.wide' : ''}${opts.full ? '.full' : ''}`,
+    `div.modal${opts.wide ? '.wide' : ''}`,
     { role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-    h('header.modal-head', h('h2', title), opts.actions, h('button.icon-btn', { 'aria-label': 'Close', title: 'Close (Esc)', on: { click: close } }, icon('close'))),
+    h('header.modal-head', h('h2', title), h('button.icon-btn', { 'aria-label': 'Close', title: 'Close (Esc)', on: { click: close } }, icon('close'))),
     body,
     opts.footer && h('footer.modal-foot', opts.footer),
   );

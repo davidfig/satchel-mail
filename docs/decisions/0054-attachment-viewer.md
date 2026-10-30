@@ -15,9 +15,14 @@ tens of thousands of lines into Satchel for something the webview can mostly
 already do.
 
 ## Decision
-- Clicking an attachment opens a full-window viewer (`views/mail/attachments.ts`)
-  with ←/→ between the message's attachments, **Open** (desktop) and **Save**.
-  Right-clicking an attachment offers View, Open and Save.
+- Clicking an attachment shows it in the reading pane, in place of the
+  conversation (`views/mail/attachments.ts`), so the list stays in view; the
+  conversation is hidden, not removed, and Escape brings it back where it was.
+  ←/→ moves between the message's attachments, `f` toggles a full-window view
+  for long documents, and **Open** (desktop) and **Save** sit in its header.
+  Right-clicking an attachment offers View, Open and Save. A dialog over the
+  whole app was tried first; it hid the message the file belongs to, which is
+  usually what you're reading it alongside.
 - The viewer shows only what the webview draws itself: images, PDFs (the
   platform's PDF viewer: WebKit's on macOS, Chromium's in the browser), audio
   and video, CSV/TSV as a table, and text. Anything else shows its name and
@@ -32,6 +37,13 @@ already do.
   of the Web, as `save_file` does), and hands it to the OS. Folders older than
   a day are cleared on the next open. Risky files still ask first.
 - Office documents (DOCX, XLSX, ODT) are not drawn in the app for now.
+- Links in a PDF: WebKit's viewer opens them by navigating its own frame.
+  The desktop host guards every navigation in every frame (`on_navigation`):
+  only the app's own pages, IPC and in-memory documents (`about:`, `blob:`,
+  `data:`) load; anything else is cancelled and handed to the UI, which asks
+  before opening it in the browser, like a link in a message. The desktop CSP's
+  `frame-src` allows `http:`/`https:`/`mailto:` only so such navigations reach
+  that guard instead of being dropped silently.
 
 ## Consequences
 - PDFs and images, the bulk of attachments, open without leaving the app or
@@ -39,6 +51,8 @@ already do.
 - What a PDF looks like depends on the platform's viewer; the PDF iframe can't
   be sandboxed (Chromium refuses to draw PDFs in sandboxed frames), so we rely
   on the forced type.
+- On the web, Chromium's PDF viewer sends a clicked link to the whole tab,
+  leaving Satchel without asking. Not handled yet.
 - If we want Office documents in the viewer, GolemDocs' DOCX reader and layout
   are the place to start; that would need a decision about sharing its
   packages.

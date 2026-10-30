@@ -8,12 +8,13 @@ import { store } from './state';
 import { restoreLocation } from './app/location';
 import { Shell } from './app/shell';
 import { followPage } from './app/follow';
-import { followLink } from './views/mail/message-body';
+import { catchHostLinks, followLink } from './views/mail/message-body';
 import { followTarget, linkScheme } from './lib/thread';
 
 async function boot(): Promise<boolean> {
   installShortcuts();
   installTooltips();
+  catchHostLinks();
   if (transport.kind === 'tauri' && /Mac/.test(navigator.platform)) {
     // Overlay title bar: leave room for the window controls and make the strip draggable.
     document.body.classList.add('tauri-mac');

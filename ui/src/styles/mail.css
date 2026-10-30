@@ -94,9 +94,13 @@ button.avatar-link:hover .avatar { box-shadow: 0 0 0 2px var(--accent-soft); }
 .attachment .name { overflow: hidden; text-overflow: ellipsis; }
 .attachment.risky { border-color: var(--warn); color: var(--warn); }
 .attachment.risky .icon { color: var(--warn); }
-.viewer-actions { display: flex; align-items: center; gap: 2px; margin-right: 4px; }
-.viewer-count { margin-right: 6px; white-space: nowrap; }
-.viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.reader:has(> .viewer-pane) > :not(.viewer-pane) { display: none; }
+.viewer-pane { flex: 1; height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--panel-2); outline: none; }
+.viewer-pane.expanded { position: fixed; inset: 0; height: auto; z-index: 25; background: var(--panel); }
+.viewer-head { display: flex; align-items: center; gap: 2px; padding: 12px 16px 10px 24px; border-bottom: 1px solid var(--line); }
+.viewer-title { flex: 1; min-width: 0; margin: 0; font-size: 15px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-count { margin: 0 6px 0 10px; white-space: nowrap; }
+.viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px; }
 .viewer-loading { margin: auto; }
 .viewer-frame { flex: 1; width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .viewer-media { flex: 1; min-height: 0; display: grid; place-items: center; }

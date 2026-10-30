@@ -142,9 +142,8 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
     img{max-width:100%} img[width]{height:auto} table{max-width:100%} blockquote{border-left:3px solid #ccc;margin:0 0 0 .5em;padding-left:.75em;color:#555}
     a{color:#2a62d9}
   </style></head><body>${transport.kind === 'http' ? routeLinks(html, location.origin, cautious) : html}</body></html>`;
-  catchFramePopups();
   // `allow-popups` stays: on desktop a link reaches the host as a popup, which
-  // it refuses and hands to `catchFramePopups`. On the web every link points at
+  // it refuses and hands to `catchHostLinks`. On the web every link points at
   // our own `#follow` page (`routeLinks`); WebKit runs no listeners here, so the
   // click opens that page as a popup, which must escape the sandbox to run
   // scripts and ask before going on.
@@ -159,7 +158,7 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
     new ResizeObserver(fit).observe(d.body);
     // Chromium and Firefox run this; WebKit runs no listeners in a script-less
     // sandboxed frame, so there the link opens as a popup: on desktop
-    // `catchFramePopups` takes it, on the web it is our `#follow` page.
+    // `catchHostLinks` takes it, on the web it is our `#follow` page.
     const onLink = (e: MouseEvent) => {
       const a = (e.target as HTMLElement).closest('a');
       // Anchors within the message scroll as usual. Anything else is stopped
@@ -199,13 +198,11 @@ function mailtoAddress(href: string): string | null {
   }
 }
 
-let catchingPopups = false;
-/** Desktop: a link clicked in a message iframe reaches us as a popup the host
- *  caught. The click focused that iframe, which says whether to be cautious;
- *  if we can't tell, we are. */
-function catchFramePopups() {
-  if (catchingPopups) return;
-  catchingPopups = true;
+/** Desktop: a link clicked in a frame reaches us from the host, which caught
+ *  it as a popup (a message iframe) or a navigation (a PDF attachment). The
+ *  click focused that iframe, which says whether to be cautious; if we can't
+ *  tell, we are. Installed once at startup. */
+export function catchHostLinks() {
   transport.onOpenLink((url) => {
     const frame = document.activeElement;
     const cautious = !(frame instanceof HTMLIFrameElement && frame.dataset.cautious === 'false');
