@@ -86,33 +86,46 @@ pub struct FileSecretStore {
 
 impl FileSecretStore {
     pub fn new(path: PathBuf) -> Result<Self> {
-        let cache = match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-            Err(_) => HashMap::new(),
-        };
+        let cache = load(&path)?;
         Ok(Self { path, cache: Mutex::new(cache) })
     }
 
+    /// Writes a fresh 0600 temp file (never one left behind or planted),
+    /// syncs it and renames it over the store.
     fn flush(&self, map: &HashMap<String, Credential>) -> Result<()> {
         if let Some(d) = self.path.parent() {
             std::fs::create_dir_all(d)?;
         }
         let tmp = self.path.with_extension("tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(map)?)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+        match std::fs::symlink_metadata(&tmp) {
+            Ok(m) if m.file_type().is_symlink() => return Err(anyhow!("refusing to write secrets: {} is a symlink", tmp.display())),
+            Ok(_) => std::fs::remove_file(&tmp)?,
+            Err(_) => {}
         }
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+        let mut f = o.open(&tmp)?;
+        std::io::Write::write_all(&mut f, &serde_json::to_vec_pretty(map)?)?;
+        f.sync_all()?;
+        drop(f);
         std::fs::rename(tmp, &self.path)?;
         Ok(())
     }
 
-    fn reload(&self) -> HashMap<String, Credential> {
-        match std::fs::read_to_string(&self.path) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-            Err(_) => HashMap::new(),
-        }
+    fn reload(&self) -> Result<HashMap<String, Credential>> {
+        load(&self.path)
+    }
+}
+
+/// Reads the store. A missing file is empty; an unreadable one is an error,
+/// so the next write can't replace every credential with just one.
+fn load(path: &std::path::Path) -> Result<HashMap<String, Credential>> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => serde_json::from_str(&s).map_err(|e| anyhow!("secrets file {} is damaged ({e}); fix or remove it", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+        Err(e) => Err(anyhow!("can't read secrets file {}: {e}", path.display())),
     }
 }
 
@@ -121,19 +134,19 @@ impl SecretStore for FileSecretStore {
         // Another process (e.g. the CLI) may have written since we loaded.
         let mut c = self.cache.lock().unwrap();
         if !c.contains_key(key) {
-            *c = self.reload();
+            *c = self.reload()?;
         }
         Ok(c.get(key).cloned())
     }
     fn set(&self, key: &str, value: &Credential) -> Result<()> {
         let mut c = self.cache.lock().unwrap();
-        *c = self.reload();
+        *c = self.reload()?;
         c.insert(key.to_string(), value.clone());
         self.flush(&c)
     }
     fn delete(&self, key: &str) -> Result<()> {
         let mut c = self.cache.lock().unwrap();
-        *c = self.reload();
+        *c = self.reload()?;
         c.remove(key);
         self.flush(&c)
     }
@@ -155,5 +168,47 @@ impl SecretStore for MemSecretStore {
     fn delete(&self, key: &str) -> Result<()> {
         self.map.lock().unwrap().remove(key);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pw(p: &str) -> Credential {
+        Credential::Password { password: p.into() }
+    }
+
+    #[test]
+    fn file_store_round_trips_privately() {
+        let dir = std::env::temp_dir().join(format!("satchel-secrets-{}", crate::random_token(8)));
+        let path = dir.join("secrets.json");
+        let s = FileSecretStore::new(path.clone()).unwrap();
+        s.set("a", &pw("one")).unwrap();
+        // A stale temp file from a crash doesn't get in the way.
+        std::fs::write(path.with_extension("tmp"), "junk").unwrap();
+        s.set("b", &pw("two")).unwrap();
+        assert!(FileSecretStore::new(path.clone()).unwrap().get("a").unwrap().is_some());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn damaged_file_is_an_error_not_empty() {
+        let dir = std::env::temp_dir().join(format!("satchel-secrets-{}", crate::random_token(8)));
+        let path = dir.join("secrets.json");
+        let s = FileSecretStore::new(path.clone()).unwrap();
+        s.set("a", &pw("one")).unwrap();
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(s.set("b", &pw("two")).is_err());
+        assert!(s.get("c").is_err());
+        // The damaged file is left alone for the user to fix.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
+        assert!(FileSecretStore::new(path).is_err());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

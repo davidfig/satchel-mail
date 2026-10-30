@@ -45,6 +45,9 @@ pub enum Command {
     /// Mark every unread message in one mailbox, or in every mailbox with a
     /// role, as read. Returns {message_ids} (what changed, for undo).
     MarkAllRead { mailbox_id: Option<Id>, role: Option<MailboxRole> },
+    /// Permanently delete everything in a Spam or Trash folder, or in every
+    /// one with that role. Returns {deleted}.
+    EmptyMailbox { mailbox_id: Option<Id>, role: Option<MailboxRole> },
     Move { message_ids: Vec<Id>, mailbox_id: Id },
     Archive { message_ids: Vec<Id> },
     Trash { message_ids: Vec<Id> },

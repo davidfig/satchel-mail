@@ -1,13 +1,14 @@
 // Acting on conversations: archive, delete, spam, flags, moves, menus.
 
 import { api } from '../../api';
+import { h } from '../../lib/dom';
 import { shortName } from '../../lib/format';
 import { folderDialog } from '../../lib/folders';
 import { openPerson } from '../../lib/person';
 import { confirmDialog, errorToast, popupMenu, toast } from '../../lib/ui';
 import type { MenuItem } from '../../lib/ui';
 import { store } from '../../state';
-import type { Mailbox, MessageDetail, Thread, ThreadSummary } from '../../types';
+import type { Mailbox, MessageDetail, Thread, ThreadSummary, UnsubscribeEmail } from '../../types';
 import { openExternal, viewSource } from './message-body';
 import type { MailView } from './index';
 
@@ -90,16 +91,23 @@ export function inSpam(view: MailView, threads = view.targetThreads()): boolean 
   return threads.length > 0 && threads.every((t) => isJunk(t.mailbox_ids));
 }
 
+/** Actions that take conversations out of the current list, and their toasts. */
+const MOVED: Partial<Record<Action, string>> = { archive: 'Archived', trash: 'Moved to Trash', spam: 'Marked as spam.', not_spam: 'Moved to Inbox.', block: 'Deleted.' };
+
 export async function act(view: MailView, kind: Action, threads = view.targetThreads()) {
   if (!threads.length) return;
+  const moved = MOVED[kind];
+  if (kind === 'trash') {
+    const inTrash = threads.every((t) => t.mailbox_ids.every((m) => store.mailbox(m)?.role === 'trash'));
+    if (inTrash && !(await confirmDialog('Delete forever?', 'These messages will be permanently deleted.', 'Delete', true))) return;
+  }
   try {
-    const ids = await view.messageIds(threads);
+    // Starts reading the open thread's ids synchronously, before removeNow closes it.
+    const pending = view.messageIds(threads);
+    if (moved) removeNow(view, threads);
+    const ids = await pending;
     if (kind === 'archive') await api.archive(ids);
-    if (kind === 'trash') {
-      const inTrash = threads.every((t) => t.mailbox_ids.every((m) => store.mailbox(m)?.role === 'trash'));
-      if (inTrash && !(await confirmDialog('Delete forever?', 'These messages will be permanently deleted.', 'Delete', true))) return;
-      await api.trash(ids);
-    }
+    if (kind === 'trash') await api.trash(ids);
     if (kind === 'read') await api.setFlags(ids, true, null);
     if (kind === 'unread') await api.setFlags(ids, false, null);
     let note = '';
@@ -113,27 +121,30 @@ export async function act(view: MailView, kind: Action, threads = view.targetThr
         + (removed ? ` Removed ${removed === 1 ? 'its invitation' : `${removed} invitations`} from your calendar; the organizer isn’t told.` : '');
       if (r.senders.length) note = kind !== 'not_spam' ? ` Future mail from ${who} goes to Spam.${more}` : ` Mail from ${who} will stay out of Spam.${more}`;
     }
-    if (kind === 'archive' || kind === 'trash' || kind === 'spam' || kind === 'not_spam' || kind === 'block') {
-      const removed = new Set(threads.map((t) => t.thread_id));
-      // The store already reflects the change; re-read the window and keep the
-      // cursor at the same position, which now holds the next thread.
-      const pos = Math.max(0, view.cursor >= 0 ? view.cursor : view.list.indexOf(threads[0].thread_id));
-      view.selected.clear();
-      view.renderHeader();
-      await view.refresh();
-      view.cursor = Math.min(pos, view.list.total - 1);
-      view.renderRows();
-      const next = view.list.at(view.cursor);
-      if (next && store.state.selectedThread && removed.has(store.state.selectedThread)) void view.showThread(next.thread_id);
-      else if (!next) view.renderEmptyReader();
-      const done = { archive: 'Archived', trash: 'Moved to Trash', spam: 'Marked as spam.', not_spam: 'Moved to Inbox.', block: 'Deleted.' }[kind];
-      toast(done + note, note ? { ms: 6000 } : {});
-    } else {
-      void view.refresh();
-    }
+    if (moved) toast(moved + note, note ? { ms: 6000 } : {});
   } catch (e) {
     errorToast(e);
   }
+  // Re-read the window: confirms the removal, or brings rows back if it failed.
+  void view.refresh();
+}
+
+/** Take moved conversations off screen before the server answers: close the
+ *  reader if it shows one, and drop them from the list with the cursor staying
+ *  at the same position, which now holds the next thread. */
+function removeNow(view: MailView, threads: ThreadSummary[]) {
+  const removed = new Set(threads.map((t) => t.thread_id));
+  const pos = view.cursor >= 0 ? view.cursor : view.list.indexOf(threads[0].thread_id);
+  const sel = store.state.selectedThread;
+  if ((sel && removed.has(sel)) || (view.openThread && removed.has(view.openThread.thread_id))) {
+    store.set({ selectedThread: null });
+    view.renderEmptyReader();
+  }
+  view.selected.clear();
+  view.renderHeader();
+  view.list.remove(removed);
+  view.cursor = pos < 0 ? -1 : Math.min(pos, view.list.total - 1);
+  view.renderRows();
 }
 
 export async function flagThread(view: MailView, t: ThreadSummary) {
@@ -151,11 +162,12 @@ export async function flagThread(view: MailView, t: ThreadSummary) {
 export async function unsubscribe(view: MailView, m: MessageDetail, inSpam: boolean) {
   const u = m.unsubscribe!;
   const who = m.from?.name || m.from?.email || 'this sender';
-  const how = u.one_click ? `Satchel will tell ${who} to stop sending you this mail.`
-    : u.mailto ? `Satchel will send ${who} an unsubscribe email from your account.`
+  const how: string | Node = u.one_click ? `Satchel will tell ${who} to stop sending you this mail.`
+    : u.email ? unsubscribeEmailText(u.email, m)
     : `This opens ${who}'s unsubscribe page in your browser.`;
+  const spamWarning = 'Unsubscribing from real spam tells the sender your address works. Only do this for senders you recognize; otherwise leave it in Spam.';
   const ok = inSpam
-    ? await confirmDialog('Unsubscribe from mail in Spam?', `Unsubscribing from real spam tells the sender your address works. Only do this for senders you recognize; otherwise leave it in Spam. ${how}`, 'Unsubscribe', true)
+    ? await confirmDialog('Unsubscribe from mail in Spam?', typeof how === 'string' ? `${spamWarning} ${how}` : h('div', h('p', spamWarning), how), 'Unsubscribe', true)
     : await confirmDialog(`Unsubscribe from ${who}?`, how, 'Unsubscribe');
   if (!ok) return;
   try {
@@ -168,6 +180,19 @@ export async function unsubscribe(view: MailView, m: MessageDetail, inSpam: bool
   } catch (e) {
     errorToast(e);
   }
+}
+
+/** Exactly what an unsubscribe email will send, and from which account,
+ *  since the sender wrote the address, subject and text. Shown in full:
+ *  nothing is cut, so nothing is sent that you didn't see. */
+function unsubscribeEmailText(e: UnsubscribeEmail, m: MessageDetail): HTMLElement {
+  const account = store.state.accounts.find((a) => a.id === m.account_id)?.email ?? 'your account';
+  const domain = m.from?.email.split('@').pop();
+  return h('div',
+    h('p', `Satchel will send this email from ${account} to ${e.to}:`),
+    h('div.kv', h('span', 'Subject'), h('span.sent-preview-subject', e.subject || '(no subject)')),
+    h('pre.draft-text.sent-preview', e.body),
+    e.other_domain && h('p', `Note: ${e.to} isn’t at ${domain ?? 'the sender’s domain'}. Mailing list services often use their own domain, but only continue if you recognize it.`));
 }
 
 export function moveMenu(view: MailView, anchor: HTMLElement | { x: number; y: number }, threads = view.targetThreads()) {

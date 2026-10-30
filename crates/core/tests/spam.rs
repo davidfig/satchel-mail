@@ -30,7 +30,7 @@ async fn sender_rules_outrank_the_server_filter() {
     let lunch = engine.store().message_id_by_remote(&account, "r5").unwrap().unwrap();
     engine.handle(&Caller::User, Command::MarkNotSpam { message_ids: vec![lunch] }).await.unwrap();
     assert!(in_role(&engine, &account, "r5", MailboxRole::Inbox));
-    deliver(&fake, "r6", raw("m6", "Carol <carol@x.test>", "Lunch, take two", None), "Junk");
+    deliver(&fake, "r6", verified(raw("m6", "Carol <carol@x.test>", "Lunch, take two", None)), "Junk");
     engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
     wait_for(|| in_role(&engine, &account, "r6", MailboxRole::Inbox)).await;
 
@@ -46,12 +46,33 @@ async fn sender_rules_outrank_the_server_filter() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn emptying_spam_deletes_only_spam() {
+    let (engine, fake, account, _dir) = setup().await;
+    deliver(&fake, "j1", raw("j1", "Spammer <x@evil.test>", "Win", None), "Junk");
+    deliver(&fake, "j2", raw("j2", "Spammer <x@evil.test>", "Win again", None), "Junk");
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| engine.store().message_id_by_remote(&account, "j2").ok().flatten().is_some()).await;
+
+    // Agents can't, and only Spam and Trash can be emptied.
+    let a = agent(&engine, AgentPolicy::default()).await;
+    let err = engine.handle(&a, Command::EmptyMailbox { mailbox_id: None, role: Some(MailboxRole::Junk) }).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    let err = engine.handle(&Caller::User, Command::EmptyMailbox { mailbox_id: None, role: Some(MailboxRole::Inbox) }).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidInput);
+
+    let r = engine.handle(&Caller::User, Command::EmptyMailbox { mailbox_id: None, role: Some(MailboxRole::Junk) }).await.unwrap();
+    assert_eq!(r["deleted"], json!(2));
+    assert!(engine.store().message_id_by_remote(&account, "j1").unwrap().is_none());
+    assert!(in_role(&engine, &account, "r1", MailboxRole::Inbox), "the inbox is untouched");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn warns_about_impersonation_and_deceptive_links() {
     let (engine, fake, account, _dir) = setup().await;
     // The user has written to Bob, so "Bob" from another address is suspicious.
-    deliver(&fake, "s1", raw("s1", "Me <me@x.test>", "Re: Kickoff", Some("m1")).replace_to("Bob <bob@x.test>"), "INBOX");
+    deliver(&fake, "s1", raw("s1", "Me <me@x.test>", "Re: Kickoff", Some("m1")).replace_to("Bob <bob@x.test>"), "Sent");
     let mut spoof = raw("s2", "Bob <bob.office@freemail.test>", "Quick favor", None);
-    spoof = String::from_utf8(spoof).unwrap().replacen("\r\n\r\n", "\r\nAuthentication-Results: mx.x.test; spf=fail; dkim=none; dmarc=fail\r\n\r\n", 1).into_bytes();
+    spoof = String::from_utf8(spoof).unwrap().replacen("\r\n\r\n", "\r\nAuthentication-Results: mx.google.com; spf=fail; dkim=none; dmarc=fail\r\n\r\n", 1).into_bytes();
     deliver(&fake, "s2", spoof, "INBOX");
     let html = "From: Bank <alerts@bank-secure.test>\r\nTo: me@x.test\r\nSubject: Verify\r\nMessage-ID: <s3@x.test>\r\nDate: Tue, 20 Oct 2026 10:00:00 +0000\r\n\
         List-Unsubscribe: <https://bank-secure.test/u>\r\nList-Unsubscribe-Post: List-Unsubscribe=One-Click\r\nContent-Type: text/html\r\n\r\n\
@@ -116,13 +137,28 @@ async fn not_spam_rules_leave_spoofed_mail_in_junk() {
     let (engine, fake, account, _dir) = setup().await;
     engine.handle(&Caller::User, Command::SetSenderRule { email: "carol@x.test".into(), verdict: Some(SenderVerdict::NotSpam) }).await.unwrap();
     // Someone else using Carol's address: her domain's DMARC check failed.
-    let mut spoof = b"Authentication-Results: mx.x.test; spf=fail smtp.mailfrom=x.test; dmarc=fail header.from=x.test\r\n".to_vec();
+    let mut spoof = b"Authentication-Results: mx.google.com; spf=fail smtp.mailfrom=x.test; dmarc=fail header.from=x.test\r\n".to_vec();
     spoof.extend(raw("m8", "Carol <carol@x.test>", "Urgent wire transfer", None));
     deliver(&fake, "r8", spoof, "Junk");
-    deliver(&fake, "r9", raw("m9", "Carol <carol@x.test>", "Lunch?", None), "Junk");
+    // No results at all: nothing shows the mail is really from her.
+    deliver(&fake, "r10", raw("m10", "Carol <carol@x.test>", "Gift cards", None), "Junk");
+    // DKIM signed by another domain isn't aligned with her address.
+    let mut other = b"Authentication-Results: mx.google.com; spf=pass smtp.mailfrom=bulk.test; dkim=pass header.d=bulk.test\r\n".to_vec();
+    other.extend(raw("m11", "Carol <carol@x.test>", "Invoice", None));
+    deliver(&fake, "r11", other, "Junk");
+    deliver(&fake, "r9", verified(raw("m9", "Carol <carol@x.test>", "Lunch?", None)), "Junk");
     engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
     wait_for(|| in_role(&engine, &account, "r9", MailboxRole::Inbox)).await;
-    assert!(in_role(&engine, &account, "r8", MailboxRole::Junk), "spoofed mail stays in Junk");
+    for rid in ["r8", "r10", "r11"] {
+        assert!(in_role(&engine, &account, rid, MailboxRole::Junk), "{rid}: unverified mail stays in Junk");
+    }
+}
+
+/// A message as the receiving server verified it: DKIM and DMARC pass for x.test.
+fn verified(raw: Vec<u8>) -> Vec<u8> {
+    let mut out = b"Authentication-Results: mx.google.com; spf=pass smtp.mailfrom=x.test; dkim=pass header.d=x.test; dmarc=pass header.from=x.test\r\n".to_vec();
+    out.extend(raw);
+    out
 }
 
 #[tokio::test(flavor = "multi_thread")]

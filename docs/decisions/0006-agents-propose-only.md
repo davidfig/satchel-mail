@@ -1,6 +1,6 @@
 # 0006. AI agents can only read and propose
 
-- **Status:** Accepted, amended by 0023
+- **Status:** Accepted, amended by 0023 and 0044
 - **Date:** 2026-10-23
 
 ## Context
@@ -29,3 +29,6 @@ de-duplication of identical pending proposals, and an audit log.
 
 **Amended by 0023:** agents still only propose, but the user's per-agent
 policy may approve a proposal on arrival, up to sending replies.
+
+**Amended by 0044:** approving a draft can send it straight from Review
+(the user still presses Send); "Save as draft" keeps the composer route.

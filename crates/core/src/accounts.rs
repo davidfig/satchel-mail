@@ -13,13 +13,19 @@ use crate::secrets::{MemSecretStore, SecretStore, account_key};
 
 impl Engine {
     pub(crate) fn save_settings(&self, s: Settings) -> Result<()> {
+        let _moving = self.mirror_lock.lock().unwrap();
         let old = self.settings();
+        let (old_root, new_root) = (crate::ai_folder::root(&old.mirror), crate::ai_folder::root(&s.mirror));
+        if old_root != new_root {
+            crate::ai_folder::relocate(&old_root, &new_root)?;
+            self.store.audit("user", "ai_folder_moved", &json!({ "from": old_root, "to": new_root }))?;
+        }
         self.store.set_setting("settings", &s)?;
         let mirror_changed = serde_json::to_string(&old.mirror)? != serde_json::to_string(&s.mirror)?;
         *self.settings.write().unwrap() = s.clone();
         if mirror_changed {
-            if old.mirror.root != s.mirror.root || !s.mirror.enabled {
-                let _ = std::fs::remove_dir_all(crate::ai_folder::root(&old.mirror).join("mail"));
+            if !s.mirror.enabled {
+                let _ = crate::ai_folder::remove_dir_all(&new_root, &new_root.join("mail"));
             }
             self.store.reset_mirrored()?;
             self.mirror_wake.notify_one();
@@ -116,11 +122,19 @@ impl Engine {
         // Contacts that only lived in this account's address books go with it.
         self.store.prune_orphan_remote_contacts()?;
         self.emit(CoreEvent::ContactsChanged);
-        let _ = self.secrets.delete(&account_key(account_id));
-        self.store.audit("user", "account_removed", &json!({ "email": acc.email }))?;
+        if let Err(e) = self.free_unused_blobs() {
+            tracing::warn!(account = %acc.email, "deleting the account's stored mail: {e:#}");
+        }
+        let secret = self.secrets.delete(&account_key(account_id));
+        self.store.audit(
+            "user",
+            "account_removed",
+            &json!({ "email": acc.email, "credential_error": secret.as_ref().err().map(|e| format!("{e:#}")) }),
+        )?;
         self.mirror_wake.notify_one();
         self.emit(CoreEvent::AccountsChanged);
-        Ok(())
+        // The account is gone either way; say so if its password is still saved.
+        secret.map_err(|e| err(ErrorCode::Internal, format!("{} was removed, but its saved password couldn't be deleted: {e:#}", acc.email)))
     }
 
     pub(crate) async fn update_account(self: &Arc<Self>, account_id: &str, config: AccountConfig, credential: Option<Credential>) -> Result<Account> {

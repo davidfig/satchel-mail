@@ -5,4 +5,6 @@ pub(crate) mod folders;
 pub(crate) mod read;
 pub mod search;
 pub(crate) mod spam;
+pub(crate) mod trust;
+pub(crate) mod visible;
 pub(crate) mod write;

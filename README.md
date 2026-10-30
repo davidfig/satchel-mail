@@ -3,7 +3,7 @@
 A desktop email and calendar client that keeps your mail on your own disk and
 lets AI agents help — safely. Agents read your mail and calendars through MCP
 (or a plain-text folder) and **propose** replies, filing and events. Nothing is
-sent, moved or scheduled until you approve it in the Review queue.
+sent, moved or scheduled until you approve it in AI Proposals.
 
 - **Accounts:** Gmail + Google Calendar, Microsoft 365 / Outlook, any IMAP/SMTP
   server (+ CalDAV), Fastmail and other JMAP servers.
@@ -44,17 +44,20 @@ Requirements: Rust 1.90+, Node 20+, Python 3 (for fixtures).
 commands are pnpm scripts in the root `package.json`:
 
 ```bash
-pnpm dev              # web UI with hot reload on http://localhost:7780, test data
+pnpm dev              # web UI with hot reload on http://127.0.0.1:7780, test data
 pnpm app              # desktop app on your real data (OAuth client ids from .env)
 pnpm web              # web UI on http://127.0.0.1:7781 (open the link it prints), real data
 pnpm web:test         # web UI against the local test servers and .dev/test-data
 pnpm servers:reset    # restore and reseed the local test servers
 ```
 
-On macOS, run `scripts/dev-signing-cert` once. It creates a local
-code-signing certificate that `scripts/run` signs dev builds with, so the
-keychain's "Always Allow" still holds after a rebuild instead of prompting
-every time.
+On macOS, create an Apple Development certificate once (Xcode → Settings →
+Accounts → Manage Certificates → + → Apple Development; a free personal team
+works). `scripts/run` signs dev builds with it, so the keychain's "Always
+Allow" still holds after a rebuild instead of prompting every time. The
+keychain ties each item to the signer's Team ID, so the self-signed
+certificate from `scripts/dev-signing-cert` is only a fallback: with it macOS
+still asks once per item after each rebuild.
 
 The steps by hand:
 
@@ -72,7 +75,7 @@ SATCHEL_PASSWORD=test-pass-alice target/debug/satchel accounts add-imap \
   --email alice@satchel.test --name Alice --username alice \
   --imap-host 127.0.0.1 --imap-port 2993 --smtp-port 2465 \
   --caldav-url http://127.0.0.1:8480/dav/cal --insecure
-target/debug/satchel serve --ui ui/dist      # open the http://127.0.0.1:7781/?session=… link it prints
+target/debug/satchel serve --ui ui/dist      # open the http://127.0.0.1:7781/#session=… link it prints
 ```
 
 Run the desktop app in development:

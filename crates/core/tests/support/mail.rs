@@ -66,6 +66,7 @@ impl MailProvider for Fake {
         ctx.set_mailboxes(&[
             RemoteMailbox { remote_id: "INBOX".into(), name: "Inbox".into(), path: "INBOX".into(), role: MailboxRole::Inbox, is_label: false },
             RemoteMailbox { remote_id: "Archive".into(), name: "Archive".into(), path: "Archive".into(), role: MailboxRole::Archive, is_label: false },
+            RemoteMailbox { remote_id: "Sent".into(), name: "Sent".into(), path: "Sent".into(), role: MailboxRole::Sent, is_label: false },
             RemoteMailbox { remote_id: "Junk".into(), name: "Junk".into(), path: "Junk".into(), role: MailboxRole::Junk, is_label: false },
             RemoteMailbox { remote_id: "Trash".into(), name: "Trash".into(), path: "Trash".into(), role: MailboxRole::Trash, is_label: false },
         ]

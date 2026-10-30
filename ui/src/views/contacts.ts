@@ -211,7 +211,7 @@ export class ContactsView {
         const saved = await api.saveContact(c, book.value || null);
         this.editing = null;
         this.selected = saved.id ?? null;
-        toast(isNew ? 'Contact added' : 'Contact saved', { kind: 'success' });
+        toast(isNew ? 'Contact added' : 'Contact saved', { quiet: true });
         await this.load();
       } catch (e) {
         status.textContent = e instanceof Error ? e.message : String(e);
@@ -251,7 +251,7 @@ export class ContactsView {
     if (!(await confirmDialog('Delete contact?', `Delete ${contactName(c)}?${where} Satchel won’t add them back automatically.`, 'Delete', true))) return;
     try {
       await api.deleteContact(c.id!);
-      toast('Contact deleted');
+      toast('Contact deleted', { quiet: true });
       this.selected = null;
       await this.load();
     } catch (e) {
@@ -289,7 +289,7 @@ export class ContactsView {
         const merged = await api.mergeContacts([primary.id!, ...chosen]);
         m.close();
         this.selected = merged.id ?? null;
-        toast(`Merged into ${contactName(merged)}`, { kind: 'success' });
+        toast(`Merged into ${contactName(merged)}`, { quiet: true });
         await this.load();
       } catch (e) {
         errorToast(e);

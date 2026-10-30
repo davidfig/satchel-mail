@@ -23,6 +23,7 @@ mod types;
 pub use bodies::StoredBlob;
 pub use types::*;
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
@@ -35,11 +36,33 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 /// Rows (id, date, e) for each message you sent, once per lowercase recipient
-/// address (To, Cc or Bcc). Drafts are left out.
+/// address (To, Cc or Bcc). Drafts are left out, and so is mail outside a
+/// Sent folder: anyone can put your address in From.
 const SENT_TO: &str = "SELECT DISTINCT m.id, m.date, lower(json_extract(j.value,'$.email')) e
      FROM messages m JOIN accounts a ON a.id=m.account_id AND m.from_email=a.email COLLATE NOCASE,
           json_each(json_array(json(m.to_json), json(m.cc_json), json(m.bcc_json))) l, json_each(l.value) j
-     WHERE m.draft=0";
+     WHERE m.draft=0 AND EXISTS (SELECT 1 FROM message_mailboxes sm JOIN mailboxes sb ON sb.id=sm.mailbox_id
+                                 WHERE sm.message_id=m.id AND sb.role='sent')";
+
+/// Whether a failed write was down to the data being written (too big, a
+/// constraint, a value SQLite won't take) rather than the database itself
+/// (busy, locked, I/O, disk full, corrupt). Sync skips a message that fails
+/// for the first kind of reason instead of stopping on it.
+pub fn is_data_error(e: &anyhow::Error) -> bool {
+    use rusqlite::ErrorCode as C;
+    let by_code = |f: &rusqlite::ffi::Error, msg: Option<&str>| match f.code {
+        C::TooBig | C::ConstraintViolation | C::TypeMismatch | C::ParameterOutOfRange => true,
+        // Plain SQLITE_ERROR: only the limits a message can hit.
+        C::Unknown => msg.is_some_and(|m| m.contains("too many") || m.contains("too big") || m.contains("too long")),
+        _ => false,
+    };
+    e.chain().filter_map(|c| c.downcast_ref::<rusqlite::Error>()).any(|e| match e {
+        rusqlite::Error::SqliteFailure(f, msg) => by_code(f, msg.as_deref()),
+        rusqlite::Error::SqlInputError { error, msg, .. } => by_code(error, Some(msg)),
+        rusqlite::Error::ToSqlConversionFailure(_) | rusqlite::Error::FromSqlConversionFailure(..) | rusqlite::Error::IntegralValueOutOfRange(..) => true,
+        _ => false,
+    })
+}
 
 /// Remote id prefix of a folder created locally and not yet on the server.
 pub const PENDING_MAILBOX: &str = "pending:";
@@ -172,9 +195,35 @@ fn parse_origin(s: &str) -> ContactOrigin {
 
 const PALETTE: &[&str] = &["#4f7cff", "#e5484d", "#30a46c", "#f76b15", "#8e4ec6", "#12a594", "#d6409f", "#978365"];
 
+/// Reads go through one of three connections, each behind its own lock, so a
+/// slow background read never makes the user wait (0038).
 pub struct Store {
     write: Mutex<Connection>,
+    /// The user's requests (UI, CLI, MCP).
     read: Mutex<Connection>,
+    /// Background workers, inside [`background`].
+    bg_read: Mutex<Connection>,
+    /// Only `PRAGMA data_version`, polled by an async task that mustn't block.
+    watch: Mutex<Connection>,
+    /// Blob hashes of deleted messages, for the engine to delete once unused.
+    freed_blobs: Mutex<Vec<String>>,
+}
+
+thread_local! {
+    static BACKGROUND: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Run `f` with this thread's reads on the background connection. For
+/// blocking work (`spawn_blocking`) that stays on one thread.
+pub fn background<T>(f: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            BACKGROUND.with(|b| b.set(self.0));
+        }
+    }
+    let _restore = Restore(BACKGROUND.with(|b| b.replace(true)));
+    f()
 }
 
 fn open_conn(path: &Path) -> Result<Connection> {
@@ -189,13 +238,17 @@ fn open_conn(path: &Path) -> Result<Connection> {
 /// The schema version `schema.sql` creates. To change the schema, edit
 /// `schema.sql` to the new shape, bump this, and append to [`MIGRATIONS`] the
 /// SQL that takes a database from the previous version to this one.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 4;
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` database to version `i + 2`.
 const MIGRATIONS: &[&str] = &[
     // 2: attachment-free copies and per-account storage limits (0036).
     "ALTER TABLE messages ADD COLUMN partial INTEGER NOT NULL DEFAULT 0;
      ALTER TABLE messages ADD COLUMN blob_size INTEGER NOT NULL DEFAULT 0;",
+    // 3: the processed file each folder proposal's status goes to (0040).
+    "ALTER TABLE proposals ADD COLUMN processed_file TEXT;",
+    // 4: each message's authserv-id, read lazily, for trusting Authentication-Results.
+    "ALTER TABLE messages ADD COLUMN auth_serv TEXT;",
 ];
 
 /// Create or upgrade the schema, tracked in `PRAGMA user_version`.
@@ -233,8 +286,8 @@ impl Store {
         }
         let mut w = open_conn(path)?;
         migrate(&mut w)?;
-        let r = open_conn(path)?;
-        Ok(Self { write: Mutex::new(w), read: Mutex::new(r) })
+        let r = || open_conn(path).map(Mutex::new);
+        Ok(Self { write: Mutex::new(w), read: r()?, bg_read: r()?, watch: r()?, freed_blobs: Mutex::default() })
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -247,14 +300,17 @@ impl Store {
         let mut w = w;
         w.execute_batch("PRAGMA foreign_keys=ON;")?;
         migrate(&mut w)?;
-        let r = Connection::open_with_flags(
-            &name,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )?;
-        // Shared-cache connections take table locks and fail with "table is
-        // locked" instead of waiting; letting the reader skip them avoids that.
-        r.execute_batch("PRAGMA read_uncommitted=1;")?;
-        Ok(Self { write: Mutex::new(w), read: Mutex::new(r) })
+        let r = || -> Result<Mutex<Connection>> {
+            let r = Connection::open_with_flags(
+                &name,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+            )?;
+            // Shared-cache connections take table locks and fail with "table is
+            // locked" instead of waiting; letting readers skip them avoids that.
+            r.execute_batch("PRAGMA read_uncommitted=1;")?;
+            Ok(Mutex::new(r))
+        };
+        Ok(Self { write: Mutex::new(w), read: r()?, bg_read: r()?, watch: r()?, freed_blobs: Mutex::default() })
     }
 
     fn w<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
@@ -263,12 +319,14 @@ impl Store {
     }
 
     fn r<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
-        let c = self.read.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let conn = if BACKGROUND.with(Cell::get) { &self.bg_read } else { &self.read };
+        let c = conn.lock().map_err(|_| anyhow!("store poisoned"))?;
         f(&c)
     }
 
     /// Changes whenever another connection (or process) commits.
     pub fn data_version(&self) -> Result<i64> {
-        self.r(|c| Ok(c.query_row("PRAGMA data_version", [], |r| r.get(0))?))
+        let c = self.watch.lock().map_err(|_| anyhow!("store poisoned"))?;
+        Ok(c.query_row("PRAGMA data_version", [], |r| r.get(0))?)
     }
 }

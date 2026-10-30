@@ -11,12 +11,41 @@ pub(crate) fn is_attribution_line(line: &str) -> bool {
         || l.starts_with("---------- Forwarded message")
 }
 
-/// Remove quoted history ("> ..." lines and "On X wrote:" attributions) and
-/// trailing signatures, leaving what this message actually added.
+/// Where quoted history starts at line `i`, beyond what one line shows: an
+/// "On X wrote:" wrapped over two or three lines, an Outlook rule (a line of
+/// underscores) or an Outlook header block ("From: …" then "Sent: …").
+fn quote_starts_at(lines: &[&str], i: usize) -> bool {
+    let l = lines[i].trim();
+    if l.len() >= 20 && l.chars().all(|c| c == '_') {
+        return true;
+    }
+    let next = || lines[i + 1..].iter().map(|l| l.trim()).filter(|l| !l.is_empty()).take(2);
+    if l.starts_with("On ") && !l.ends_with('.') {
+        let mut joined = l.to_string();
+        for n in lines[i + 1..].iter().take(2) {
+            joined.push(' ');
+            joined.push_str(n.trim());
+            if is_attribution_line(&joined) {
+                return true;
+            }
+        }
+    }
+    let l = l.trim_start_matches('*');
+    (l.starts_with("From:") || l.starts_with("De :") || l.starts_with("Von:"))
+        && next().any(|n| {
+            let n = n.trim_start_matches('*');
+            n.starts_with("Sent:") || n.starts_with("Date:") || n.starts_with("Envoyé :") || n.starts_with("Gesendet:")
+        })
+}
+
+/// Remove quoted history ("> ..." lines, "On X wrote:" attributions and
+/// Outlook header blocks) and trailing signatures, leaving what this message
+/// actually added.
 pub fn strip_quotes(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
     let mut out: Vec<&str> = vec![];
-    for line in text.lines() {
-        if is_attribution_line(line) {
+    for (i, &line) in lines.iter().enumerate() {
+        if is_attribution_line(line) || quote_starts_at(&lines, i) {
             break;
         }
         if line.trim_start().starts_with('>') {

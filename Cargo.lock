@@ -2101,18 +2101,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "html2text"
-version = "0.17.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31e981cc9b710410461bf2e474b54da9ccb2fa3212936295bc5c02cb09f3d3f2"
-dependencies = [
- "html5ever 0.40.1",
- "tendril",
- "thiserror 2.0.21",
- "unicode-width",
-]
-
-[[package]]
 name = "html5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4395,6 +4383,7 @@ dependencies = [
  "chrono-tz",
  "directories",
  "keyring",
+ "libc",
  "rusqlite",
  "satchel-api",
  "satchel-ical",
@@ -4405,6 +4394,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4413,8 +4403,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "libc",
  "satchel-api",
  "satchel-core",
+ "satchel-mime",
  "satchel-providers",
  "serde",
  "serde_json",
@@ -4425,6 +4417,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tauri-plugin-window-state",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -4463,7 +4456,7 @@ dependencies = [
  "ammonia",
  "base64 0.22.1",
  "chrono",
- "html2text",
+ "html5ever 0.40.1",
  "mail-builder",
  "mail-parser",
  "satchel-api",
@@ -5530,6 +5523,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-window-state"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d6815cab7b212f9cfe16a9d79d8d22f9e14159e4a9460f7dec1467167a008e3"
+dependencies = [
+ "bitflags 2.13.2",
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "tauri-runtime"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6117,12 +6125,6 @@ name = "unicode-segmentation"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
-
-[[package]]
-name = "unicode-width"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "untrusted"

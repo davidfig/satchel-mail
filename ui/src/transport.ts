@@ -6,9 +6,11 @@ import type { ApiError, CoreEvent } from './types';
 
 export interface Transport {
   invoke<T>(cmd: string, args?: unknown): Promise<T>;
-  /** Calls a desktop-host command (`open_url`, `save_file`, `cli_path`), not the engine. The web has none. */
+  /** Calls a desktop-host command (`open_url`, `save_file`, `choose_folder`, `cli_path`), not the engine. The web has none. */
   host<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
   subscribe(fn: (e: CoreEvent) => void): () => void;
+  /** Links the host caught opening as popups (desktop: the message iframe's). The web has none. */
+  onOpenLink(fn: (url: string) => void): void;
   /** Sets the window title (the browser tab on the web). */
   setTitle(title: string): void;
   /** Whether we may show system notifications; `ask` prompts the user if undecided. */
@@ -60,6 +62,10 @@ class TauriTransport implements Transport {
     return () => this.listeners.delete(fn);
   }
 
+  onOpenLink(fn: (url: string) => void) {
+    void import('@tauri-apps/api/event').then(({ listen }) => listen<string>('satchel://open-link', (msg) => fn(msg.payload)));
+  }
+
   setTitle(title: string) {
     // The sidebar re-renders often; skip the IPC round trip when nothing changed.
     if (document.title === title) return;
@@ -86,17 +92,18 @@ class HttpTransport implements Transport {
   private listeners = new Set<(e: CoreEvent) => void>();
   private ws: WebSocket | null = null;
   private retry = 500;
+  private taken: Promise<string | null> | undefined;
+
+  private session(): Promise<string | null> {
+    this.taken ??= takeSession();
+    return this.taken;
+  }
 
   async invoke<T>(cmd: string, args?: unknown): Promise<T> {
     const body = args === undefined ? { id: this.seq++, cmd } : { id: this.seq++, cmd, args };
     // A 401 means this browser has no session: the user has to open the link
-    // `satchel serve` printed (the server never hands the cookie to just anyone).
-    const r = await fetch('/api/rpc', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify(body),
-    });
+    // `satchel serve` printed once.
+    const r = await rpcFetch(await this.session(), JSON.stringify(body));
     if (!r.ok) throw new RpcError({ code: r.status === 401 ? 'auth' : 'network', message: await r.text() });
     const res = (await r.json()) as { ok?: T; error?: ApiError };
     if (res.error) throw new RpcError(res.error);
@@ -107,9 +114,27 @@ class HttpTransport implements Transport {
     return Promise.reject(new Error(`${cmd} is only available in the desktop app`));
   }
 
+  onOpenLink() {
+    // Browsers open the iframe's popups themselves.
+  }
+
+  private connecting = false;
+
   private connect() {
+    if (this.connecting) return;
+    this.connecting = true;
+    void this.session().then((session) => {
+      this.connecting = false;
+      this.open(session);
+    });
+  }
+
+  private open(session: string | null) {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/api/events`);
+    // Browsers can't set headers on a WebSocket, so the token rides in the
+    // subprotocol list; the server answers with plain `satchel`.
+    const protocols = session ? ['satchel', `bearer.${session}`] : undefined;
+    const ws = new WebSocket(`${proto}://${location.host}/api/events`, protocols);
     this.ws = ws;
     ws.onopen = () => {
       this.retry = 500;
@@ -155,6 +180,62 @@ class HttpTransport implements Transport {
       n.close();
     };
   }
+}
+
+const SESSION_KEY = 'satchel_session';
+
+function rpcFetch(session: string | null, body: string): Promise<Response> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (session) headers.Authorization = `Bearer ${session}`;
+  return fetch('/api/rpc', { method: 'POST', headers, credentials: 'omit', body });
+}
+
+function storedSession(): string | null {
+  try {
+    return localStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** The session token, kept in this origin's storage. Unlike a cookie, storage
+ *  is per port, so other servers on 127.0.0.1 never see it. In dev the Vite
+ *  proxy adds the token instead.
+ *
+ *  A new token comes from the printed `#session=` link (the fragment never
+ *  reaches the server or its logs; `?session=` is still read for old links).
+ *  It replaces the stored one only once a call with it succeeds, so a bad
+ *  link can't sign you out. Either way it leaves the address bar. */
+async function takeSession(): Promise<string | null> {
+  // Opening the link in a tab already on this page changes only the fragment,
+  // which doesn't reload; reload so the new token is checked and taken.
+  window.addEventListener('hashchange', () => {
+    if (new URLSearchParams(location.hash.slice(1)).has('session')) location.reload();
+  });
+  const url = new URL(location.href);
+  const hash = new URLSearchParams(url.hash.slice(1));
+  const given = hash.get('session') || url.searchParams.get('session');
+  const stored = storedSession();
+  if (!url.searchParams.has('session') && !hash.has('session')) return stored;
+  url.searchParams.delete('session');
+  hash.delete('session');
+  const rest = hash.toString();
+  history.replaceState(null, '', url.pathname + url.search + (rest ? `#${rest}` : ''));
+  if (!given || given === stored) return stored;
+  let works = false;
+  try {
+    const r = await rpcFetch(given, JSON.stringify({ id: 0, cmd: 'list_accounts' }));
+    works = r.ok;
+  } catch {
+    /* offline: keep what we had */
+  }
+  if (!works) return stored;
+  try {
+    localStorage.setItem(SESSION_KEY, given);
+  } catch {
+    /* private mode: keep it for this page only */
+  }
+  return given;
 }
 
 export const transport: Transport = isTauri() ? new TauriTransport() : new HttpTransport();

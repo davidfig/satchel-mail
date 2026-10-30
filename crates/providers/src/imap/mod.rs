@@ -24,7 +24,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use satchel_api::*;
-use satchel_core::provider::{ApplyOutcome, CredentialHandle, Download, MailProvider, MaybeSent, RemoteMailbox, ResolvedOp, SyncCtx};
+use satchel_core::provider::{ApplyOutcome, priority, CredentialHandle, Download, MailProvider, MaybeSent, RemoteMailbox, ResolvedOp, SyncCtx};
 use satchel_core::store::{MessageRecord, MessageRef};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -62,6 +62,9 @@ struct MailboxCursor {
     uidvalidity: u32,
     uidnext: u32,
     modseq: Option<u64>,
+    /// Older mail in this mailbox hasn't all been fetched yet (0039).
+    #[serde(default)]
+    backfill: bool,
 }
 
 impl ImapProvider {
@@ -84,6 +87,9 @@ impl ImapProvider {
     /// are always bounded.
     async fn connect_with(&self, stall: Option<Duration>) -> Result<Session> {
         let c = &self.cfg;
+        if c.security == Security::None {
+            crate::net::plaintext_allowed(&c.host, "IMAP")?;
+        }
         let stream = tcp(&c.host, c.port).await?;
         let greet = Some(stall.unwrap_or(STALL));
         let client = match c.security {
@@ -119,7 +125,8 @@ impl ImapProvider {
             .await
             .map_err(|_| anyhow!("IMAP login timed out"))?
             .map_err(|(e, _)| anyhow::Error::new(ApiError::new(ErrorCode::Auth, format!("IMAP login failed: {e}"))))?;
-        let caps = session.capabilities().await?;
+        // Bounded even on the IDLE connection, whose stream never times out.
+        let caps = tokio::time::timeout(STALL, session.capabilities()).await.map_err(|_| anyhow!("IMAP CAPABILITY timed out"))??;
         let mut set = HashSet::new();
         for c in caps.iter() {
             if let async_imap::types::Capability::Atom(a) = c {
@@ -127,7 +134,8 @@ impl ImapProvider {
             }
         }
         if set.contains("ENABLE") && set.contains("CONDSTORE") {
-            let _ = session.run_command_and_check_ok("ENABLE CONDSTORE").await;
+            // A refusal is fine (we just don't get CONDSTORE); silence isn't.
+            tokio::time::timeout(STALL, session.run_command_and_check_ok("ENABLE CONDSTORE")).await.map_err(|_| anyhow!("IMAP ENABLE timed out"))?.ok();
         }
         *self.caps.lock().await = set;
         Ok(session)
@@ -149,12 +157,31 @@ impl ImapProvider {
         self.caps.lock().await.contains(c)
     }
 
-    /// The whole message with UID `uid` in the selected mailbox.
+    /// The whole message with UID `uid` in the selected mailbox, unless the
+    /// server says it's over [`MAX_MESSAGE`].
     async fn fetch_full(s: &mut Session, uid: u32) -> Result<Vec<u8>> {
+        if let Some(&size) = sizes(s, &uid.to_string()).await?.get(&uid)
+            && size > MAX_MESSAGE
+        {
+            bail!(ApiError::new(ErrorCode::InvalidInput, format!("this message is too large to open here ({} MB); open it in webmail", size >> 20)));
+        }
         let fetches: Vec<Fetch> = s.uid_fetch(uid.to_string(), "(UID BODY.PEEK[])").await?.try_collect().await?;
         let raw = fetches.into_iter().find_map(|f| f.body().map(|b| b.to_vec()));
         raw.ok_or_else(|| anyhow::Error::new(ApiError::new(ErrorCode::NotFound, "message no longer on server")))
     }
+}
+
+/// Whole messages over this come down as headers only during sync, and
+/// their content when opened. async-imap holds a whole literal in memory
+/// (up to its own 512 MiB cap), so this keeps sync's memory bounded.
+const MAX_SYNC_MESSAGE: u64 = 64 << 20;
+/// The largest message we fetch at all, when the user opens it.
+const MAX_MESSAGE: u64 = 160 << 20;
+
+/// `RFC822.SIZE` of the messages in `uids` (an IMAP UID set).
+async fn sizes(s: &mut Session, uids: &str) -> Result<HashMap<u32, u64>> {
+    let fetches: Vec<Fetch> = s.uid_fetch(uids, "(UID RFC822.SIZE)").await?.try_collect().await?;
+    Ok(fetches.iter().filter_map(|f| Some((f.uid?, f.size? as u64))).collect())
 }
 
 /// A stored message's mailbox and UID.
@@ -194,18 +221,27 @@ impl MailProvider for ImapProvider {
             // One folder the server won't open (a shared folder without
             // access, a glitch) must not stop the rest. The account shows an
             // error only when the Inbox fails or the connection itself broke.
+            // Recent mail in every folder first; older mail after, a batch
+            // per pass (0039).
             let mut inbox_err = None;
+            let mut older = vec![];
             for (mb, _) in order {
-                if let Err(e) = self.sync_mailbox(&mut s, ctx, mb).await {
-                    warn!(mailbox = %mb.path, "sync failed: {e:#}");
-                    if !matches!(tokio::time::timeout(Duration::from_secs(30), s.noop()).await, Ok(Ok(_))) {
-                        return Err(e);
-                    }
-                    if mb.role == MailboxRole::Inbox {
-                        inbox_err = Some(e);
+                priority::yield_to_user().await;
+                match self.sync_mailbox(&mut s, ctx, mb).await {
+                    Ok((uv, uids)) if !uids.is_empty() => older.push((mb, uv, uids)),
+                    Ok(_) => {}
+                    Err(e) => {
+                        warn!(mailbox = %mb.path, "sync failed: {e:#}");
+                        if !matches!(tokio::time::timeout(Duration::from_secs(30), s.noop()).await, Ok(Ok(_))) {
+                            return Err(e);
+                        }
+                        if mb.role == MailboxRole::Inbox {
+                            inbox_err = Some(e);
+                        }
                     }
                 }
             }
+            self.backfill(&mut s, ctx, older).await?;
             inbox_err.map_or(Ok(()), Err)
         }
         .await;

@@ -1,8 +1,8 @@
 import { api } from '../api';
 import { transport } from '../transport';
 import { h, icon, patch, replace } from '../lib/dom';
-import { deleteFolder, folderDialog, folderTree } from '../lib/folders';
-import { relative } from '../lib/format';
+import { deleteFolder, emptiable, emptyFolder, folderDialog, folderTree } from '../lib/folders';
+import { fullDate, relative, relativeShort, shortProgress } from '../lib/format';
 import { bind, contextMenu, errorToast, setScope, toast } from '../lib/ui';
 import type { MenuItem } from '../lib/ui';
 import { type MailSource, type View, store } from '../state';
@@ -18,7 +18,7 @@ import { COLLAPSED_KEY, LOCATION_KEY, SECTIONS_KEY, UNIFIED, readCollapsed, read
 import { palette } from './palette';
 
 /** Each account's built-in folders, in sidebar order: the ones the
- *  all-accounts section combines, then Gmail's Important and All Mail. */
+ *  combined list under Mail shows, then Gmail's Important and All Mail. */
 const BUILT_IN: { role: MailboxRole; icon: string }[] = [
   ...UNIFIED,
   { role: 'important', icon: 'label' },
@@ -31,7 +31,7 @@ export class Shell {
   private content = h('main.content');
   private app = h('div.app', this.sidebar, this.content);
   private views: Partial<Record<View, { root: HTMLElement; show?: () => void }>> = {};
-  /** Sidebar sections the user has shrunk: 'all' or an account id. */
+  /** Sidebar account sections the user has shrunk, by account id. */
   private closedSections = new Set(readJson<string[]>(SECTIONS_KEY) ?? []);
 
   constructor() {
@@ -85,7 +85,7 @@ export class Shell {
   }
 
   private syncNow(accountId: string | null) {
-    api.syncNow(accountId).then(() => toast('Syncing…'), errorToast);
+    api.syncNow(accountId).then(() => toast('Syncing…', { quiet: true }), errorToast);
   }
 
   /** Right-click menu for a mailbox in the sidebar. */
@@ -116,10 +116,12 @@ export class Shell {
           ]
         : []),
     ];
+    const empty = emptiable(source);
     return [
       { label: 'Open', icon: 'mailOpen', run: () => this.go('mail', source) },
       // Drafts show a total, not unread.
       ...(role !== 'drafts' ? [{ label: 'Mark all as read', icon: 'check', disabled: unread === 0, run: () => void markRead() }] : []),
+      ...(empty ? [{ label: `Empty ${empty.label}…`, icon: 'trash', danger: true, disabled: empty.count === 0, run: () => void emptyFolder(source) }] : []),
       '-',
       { label: mb ? 'Sync this account now' : 'Sync all accounts now', icon: 'refresh', run: () => this.syncNow(mb?.account_id ?? null) },
       { label: 'Compose', icon: 'compose', hint: 'c', run: () => openComposer(mb ? { account_id: mb.account_id } : {}) },
@@ -145,9 +147,9 @@ export class Shell {
     store.set(source ? { view, source, selectedThread: null } : { view });
   }
 
-  private navItem(view: View, label: string, ic: string, badge?: number) {
+  private navItem(view: View, label: string, ic: string, badge?: number, parent = false) {
     const active = store.state.view === view;
-    return h(`button.nav-item${active ? '.active' : ''}`, { title: label, 'aria-label': label, 'aria-current': active ? 'page' : undefined, on: { click: () => this.go(view) } },
+    return h(`button.nav-item${active ? '.active' : ''}${parent ? '.parent' : ''}`, { title: label, 'aria-label': label, 'aria-current': active ? 'page' : undefined, on: { click: () => this.go(view) } },
       icon(ic), h('span', label), badge ? h('span.badge', String(badge)) : null);
   }
 
@@ -167,9 +169,10 @@ export class Shell {
   private renderSidebar() {
     const { accounts, mailboxes, pendingProposals } = store.state;
     const unread = (role: MailboxRole) => mailboxes.filter((m) => m.role === role).reduce((n, m) => n + (role === 'drafts' ? m.total : m.unread), 0);
-    const syncing = accounts.some((a) => a.sync.state === 'syncing');
+    const syncing = accounts.filter((a) => a.sync.state === 'syncing');
     const collapsed = this.app.classList.contains('collapsed');
     const errors = accounts.filter((a) => a.sync.state === 'error' || a.sync.state === 'offline');
+    const combined = store.state.view === 'mail' && !collapsed && accounts.length > 1;
     const inboxUnread = unread('inbox');
     transport.setTitle(inboxUnread > 0 ? `(${inboxUnread}) satchel.email` : 'satchel.email');
     // Patched, not replaced: this runs on every sync tick, and swapping the
@@ -185,34 +188,45 @@ export class Shell {
         }, icon(collapsed ? 'chevronRight' : 'chevronLeft', 16))),
       h('button.primary.compose-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose', 16), h('span', 'Compose')),
       h('div.nav',
-        this.navItem('mail', 'Mail', 'mail'),
+        this.navItem('mail', 'Mail', 'mail', undefined, combined),
+        // Every account's Inbox, Flagged, … together, under Mail. With one
+        // account its own section below says it all.
+        combined && h('div.nav-sub',
+          UNIFIED.filter((u) => mailboxes.some((m) => m.role === u.role) || u.role === 'inbox').map((u) =>
+            this.sourceItem({ kind: 'role', role: u.role, label: u.label }, u.icon, unread(u.role), { depth: 1 }))),
         this.navItem('calendar', 'Calendar', 'calendar'),
         this.navItem('contacts', 'Contacts', 'user'),
-        this.navItem('review', 'Review', 'sparkle', pendingProposals),
+        this.navItem('review', 'AI Proposals', 'sparkle', pendingProposals),
         this.navItem('settings', 'Settings', 'settings')),
       store.state.view === 'mail' && !collapsed &&
         h('div.mailboxes',
-          // With one account its own section says it all.
-          accounts.length > 1 && this.sectionHeader('all', h('span', 'All accounts')),
-          accounts.length > 1 && !this.closedSections.has('all') &&
-            UNIFIED.filter((u) => mailboxes.some((m) => m.role === u.role) || u.role === 'inbox').map((u) =>
-              this.sourceItem({ kind: 'role', role: u.role, label: u.label }, u.icon, unread(u.role))),
           accounts.map((a) => this.accountSection(a, mailboxes.filter((m) => m.account_id === a.id)))),
       h('div.sidebar-foot',
         errors.length
           ? h('button.sync-status.error', { title: errors.map((a) => `${a.email}: ${a.sync.error}`).join('\n'), on: { click: () => this.go('settings') } }, icon('warning', 14), `${errors.length} account${errors.length > 1 ? 's' : ''} need attention`)
-          : h('div.sync-status', syncing ? h('span.spinner') : icon('check', 14),
-              syncing ? (accounts.find((a) => a.sync.detail)?.sync.detail ?? 'Syncing…') : accounts.length ? `Updated ${relative(accounts.map((a) => a.sync.last_success).filter(Boolean).sort().pop() ?? null)}` : 'No accounts')),
+          : syncing.length
+            // One row per syncing account, marked with its color.
+            ? syncing.map((a) => h('div.sync-status', { title: `${a.email}: ${a.sync.detail ?? 'Syncing…'}` },
+                h('span.acct-dot.busy', { style: { background: a.color } }), h('span.sync-text', a.sync.detail ?? 'Syncing…')))
+            : h('div.sync-status', icon('check', 14),
+                accounts.length ? `Updated ${relative(accounts.map((a) => a.sync.last_success).filter(Boolean).sort().pop() ?? null)}` : 'No accounts')),
     );
+    // Progress too wide for the sidebar drops its noun ("Downloading: 31,295
+    // left") before it gets cut off; the tooltip keeps the full text.
+    for (const t of this.sidebar.querySelectorAll<HTMLElement>('.sync-text')) {
+      if (t.scrollWidth > t.clientWidth) t.textContent = shortProgress(t.textContent ?? '');
+    }
   }
 
   private accountSection(a: Account, boxes: Mailbox[]) {
-    const dot = a.sync.state === 'error' || a.sync.state === 'offline' ? '.err' : a.sync.state === 'syncing' ? '.busy' : '';
+    const err = a.sync.state === 'error' || a.sync.state === 'offline';
     const open = !this.closedSections.has(a.id);
     const labels = boxes.some((m) => m.is_label);
     return h('div.account-section',
       h('div.mb-section-row',
-        this.sectionHeader(a.id, h('span.acct-dot', { style: { background: a.color } }), h('span.acct-email', a.email), h(`span.state-dot${dot}`)),
+        this.sectionHeader(a.id, h(`span.acct-dot${a.sync.state === 'syncing' ? '.busy' : ''}`, { style: { background: a.color } }), h('span.acct-email', a.email),
+          h('span.acct-synced', { title: a.sync.last_success ? `Last synced ${fullDate(a.sync.last_success)}` : 'Not synced yet' }, relativeShort(a.sync.last_success)),
+          err ? h('span.state-dot.err', { title: a.sync.state === 'offline' ? 'Offline' : 'Sync error' }) : null),
         h('button.icon-btn.mb-add', { title: labels ? 'New label' : 'New folder', on: { click: () => void this.newFolder(a.id, null) } }, icon('plus', 14))),
       open && BUILT_IN.flatMap(({ role, icon: ic }) => boxes.filter((m) => m.role === role).map((m) =>
         this.sourceItem({ kind: 'mailbox', mailbox_id: m.id, label: m.name }, ic, role === 'drafts' ? m.total : role === 'all' || role === 'sent' || role === 'trash' ? 0 : m.unread))),
@@ -244,7 +258,7 @@ export class Shell {
     bind('g d', 'Go to Drafts', () => this.go('mail', { kind: 'role', role: 'drafts', label: 'Drafts' }));
     bind('g c', 'Go to Calendar', () => this.go('calendar'));
     bind('g p', 'Go to Contacts (people)', () => this.go('contacts'));
-    bind('g r', 'Go to Review queue', () => this.go('review'));
+    bind('g r', 'Go to AI Proposals', () => this.go('review'));
     bind('g ,', 'Go to Settings', () => this.go('settings'));
     bind('mod+k', 'Command palette', () => this.palette());
     bind('mod+\\', 'Collapse or expand sidebar', () => this.toggleSidebar());

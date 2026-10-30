@@ -21,7 +21,10 @@ impl Engine {
             if a.revoked {
                 return Err(ApiError::new(ErrorCode::Auth, "agent revoked"));
             }
-            if !cmd.allowed_for_agent() {
+            // Checked twice on purpose: if `allowed_for_agent` is ever widened by
+            // mistake, `agent_may_run` still refuses anything that isn't a read
+            // or a proposal.
+            if !cmd.allowed_for_agent() || !access::agent_may_run(&cmd) {
                 return Err(ApiError::new(ErrorCode::Forbidden, "this action requires the user; agents can only read and propose"));
             }
         }
@@ -30,13 +33,19 @@ impl Engine {
 
     async fn dispatch(self: &Arc<Self>, caller: &Caller, cmd: Command) -> Result<Value> {
         match cmd {
-            Command::Info => ok(json!({
-                "version": env!("CARGO_PKG_VERSION"),
-                "mode": if self.mode == Mode::Full { "full" } else { "agent" },
-                "data_dir": self.data_dir,
-                "mirror_root": crate::ai_folder::root(&self.settings().mirror),
-                "caller": caller.actor(),
-            })),
+            Command::Info => {
+                let mut info = json!({
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "mode": if self.mode == Mode::Full { "full" } else { "agent" },
+                    "mirror_root": crate::ai_folder::root(&self.settings().mirror),
+                    "caller": caller.actor(),
+                });
+                // Agents use the AI folder; where the database lives is the user's business.
+                if matches!(caller, Caller::User) {
+                    info["data_dir"] = json!(self.data_dir);
+                }
+                ok(info)
+            }
 
             // ---------------------------------------------------------- accounts
             Command::ListAccounts => ok(self.list_accounts(caller)?),
@@ -52,6 +61,7 @@ impl Engine {
             }
             Command::RemoveAccount { account_id } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.remove_account(&account_id)?;
                 ok(json!({ "ok": true }))
             }
@@ -122,6 +132,11 @@ impl Engine {
                 self.require_user(caller)?;
                 self.require_full()?;
                 ok(json!({ "message_ids": self.mark_all_read(mailbox_id.as_deref(), role, &caller.actor())? }))
+            }
+            Command::EmptyMailbox { mailbox_id, role } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                ok(json!({ "deleted": self.empty_mailbox(mailbox_id.as_deref(), role, &caller.actor())? }))
             }
             Command::Move { message_ids, mailbox_id } => {
                 self.require_full()?;
@@ -202,6 +217,8 @@ impl Engine {
                 ok(self.list_calendars(caller)?)
             }
             Command::SetCalendarVisible { calendar_id, visible } => {
+                self.require_user(caller)?;
+                self.require_full()?;
                 self.store.set_calendar_visible(&calendar_id, visible)?;
                 self.emit(CoreEvent::CalendarChanged { account_id: String::new() });
                 ok(json!({ "ok": true }))
@@ -279,6 +296,7 @@ impl Engine {
             }
             Command::RejectProposal { proposal_id, note } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.reject_proposal(&proposal_id, note)?;
                 ok(json!({ "ok": true }))
             }
@@ -288,18 +306,24 @@ impl Engine {
                 self.require_user(caller)?;
                 ok(self.store.list_agents()?)
             }
+            // Agent management and settings change what agents may do, so they
+            // need the app's own process: a `satchel call` beside the running
+            // app (agent mode) can't widen a policy or mint a token.
             Command::CreateAgent { name, policy } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 let (agent, token) = self.create_agent(&name, &policy)?;
                 ok(json!({ "agent": agent, "token": token }))
             }
             Command::UpdateAgent { agent_id, name, policy } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.store.update_agent(&agent_id, name.as_deref(), policy.as_ref())?;
                 ok(self.store.get_agent(&agent_id)?)
             }
             Command::RevokeAgent { agent_id } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.store.revoke_agent(&agent_id)?;
                 self.store.audit("user", "agent_revoked", &json!({ "agent": agent_id }))?;
                 ok(json!({ "ok": true }))
@@ -309,6 +333,7 @@ impl Engine {
             Command::GetSettings => ok(self.settings()),
             Command::UpdateSettings { settings } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.save_settings(settings)?;
                 ok(self.settings())
             }
@@ -319,6 +344,7 @@ impl Engine {
             Command::ListOutbox => ok(self.store.list_outbox()?),
             Command::RetryOutbox { id } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.retry_op(&id)?;
                 ok(json!({ "ok": true }))
             }

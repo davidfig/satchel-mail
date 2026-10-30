@@ -19,6 +19,7 @@ pub mod vcard;
 pub use event::*;
 pub use itip::*;
 use lines::*;
+pub use lines::{fold, unfold};
 pub use recur::*;
 pub use serialize::*;
 pub use time::*;

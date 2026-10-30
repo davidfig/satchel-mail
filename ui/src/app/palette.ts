@@ -21,7 +21,7 @@ export function palette(host: PaletteHost) {
     { label: 'Open Calendar', run: () => host.go('calendar') },
     { label: 'Open Contacts', run: () => host.go('contacts') },
     { label: 'New contact', run: () => { host.go('contacts'); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.contacts-view .list-title .icon-btn')?.click()); } },
-    { label: 'Open Review queue', run: () => host.go('review') },
+    { label: 'Open AI Proposals', run: () => host.go('review') },
     { label: 'Open Settings', run: () => host.go('settings') },
     { label: 'Sync all accounts now', run: () => void api.syncNow(null) },
     { label: 'Toggle dark mode', run: () => toggleTheme() },

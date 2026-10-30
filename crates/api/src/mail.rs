@@ -198,9 +198,25 @@ pub struct MessageWarning {
 pub struct Unsubscribe {
     /// https URL to open, or to POST to when `one_click`.
     pub url: Option<String>,
+    /// Only set when it names exactly one valid address; `email` says what it sends.
     pub mailto: Option<String>,
     /// The sender supports RFC 8058 one-click unsubscribe at `url`.
     pub one_click: bool,
+    /// The email `mailto` would send, so the user sees it before confirming.
+    #[serde(default)]
+    pub email: Option<UnsubscribeEmail>,
+}
+
+/// An unsubscribe request sent by email, exactly as it would be sent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnsubscribeEmail {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+    /// `to` is on a different domain than the sender's From. List services
+    /// do this legitimately, but it is worth showing.
+    #[serde(default)]
+    pub other_domain: bool,
 }
 
 /// A standing decision about every message from one address.

@@ -14,7 +14,7 @@ pub fn expand(
     let mut out = vec![];
     let starts: Vec<DateTime<Utc>> = match &master.rrule {
         None => vec![master.start_utc()],
-        Some(rule) => expand_rrule(master, rule, from - dur, to),
+        Some(rule) => expand_rrule(master, rule, from.checked_sub_signed(dur).unwrap_or(from), to),
     };
     let override_at = |s: &DateTime<Utc>| {
         overrides
@@ -37,7 +37,7 @@ pub fn expand(
             }
             continue;
         }
-        let e = s + dur;
+        let e = s.checked_add_signed(dur).unwrap_or(s);
         if e > from && s < to || (dur.is_zero() && s >= from && s < to) {
             out.push((s, e, None));
         }
@@ -49,7 +49,8 @@ pub fn expand(
         }
         let (os, oe) = (o.start_utc(), o.end_utc());
         let rid_in_series = o.recurrence_id.as_ref().map(|r| r.to_utc());
-        if oe > from && os < to && rid_in_series.is_some_and(|r| r < from - dur || r >= to) {
+        let series_from = from.checked_sub_signed(dur).unwrap_or(from);
+        if oe > from && os < to && rid_in_series.is_some_and(|r| r < series_from || r >= to) {
             out.push((os, oe, Some(i)));
         }
     }

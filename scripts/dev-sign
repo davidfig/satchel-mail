@@ -1,16 +1,40 @@
 #!/usr/bin/env bash
-# Sign a dev binary with the "Satchel Mail Dev" certificate, then run it.
+# Sign a dev binary with a stable identity, then run it.
 # scripts/run uses this as Cargo's runner for `tauri dev`, so each rebuild keeps
 # the same code identity and the keychain's "Always Allow" still applies.
 #
-#   scripts/dev-sign BINARY [ARGS...]
+#   scripts/dev-sign BINARY [ARGS...]     sign BINARY, then run it
+#   scripts/dev-sign --sign-only BINARY   just sign it (the Tauri sidecar)
 #
-# With no certificate (see scripts/dev-signing-cert) it just runs the binary.
+# Uses your "Apple Development" certificate (create it in Xcode → Settings →
+# Accounts → Manage Certificates). Its Team ID is what makes the keychain's
+# partition list stable across rebuilds; the self-signed "Satchel Mail Dev"
+# certificate from scripts/dev-signing-cert has none, so macOS still asks once
+# per rebuild with it. Set SATCHEL_SIGN_IDENTITY to pick another identity.
+# With no certificate it just runs the binary.
 
 set -euo pipefail
 
-bin="$1"
-if [[ "$(uname)" == Darwin ]] && security find-identity -v -p codesigning | grep -q '"Satchel Mail Dev"'; then
-  codesign --force --sign "Satchel Mail Dev" --identifier "app.satchel.dev.$(basename "$bin")" "$bin"
+run=1
+if [[ "${1:-}" == "--sign-only" ]]; then
+  run=0
+  shift
 fi
-exec "$@"
+bin="$1"
+
+if [[ "$(uname)" == Darwin ]]; then
+  ids="$(security find-identity -v -p codesigning)"
+  identity="${SATCHEL_SIGN_IDENTITY:-}"
+  if [[ -z "$identity" ]]; then
+    identity="$(sed -n 's/^ *[0-9]*) \([0-9A-F]\{40\}\) "Apple Development: .*/\1/p' <<<"$ids" | head -1)"
+  fi
+  if [[ -z "$identity" ]] && grep -q '"Satchel Mail Dev"' <<<"$ids"; then
+    identity="Satchel Mail Dev"
+  fi
+  if [[ -n "$identity" ]]; then
+    codesign --force --sign "$identity" --identifier "app.satchel.dev.$(basename "$bin")" "$bin"
+  fi
+fi
+
+(( run )) && exec "$@"
+exit 0

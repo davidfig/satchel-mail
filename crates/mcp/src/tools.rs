@@ -41,7 +41,7 @@ pub(crate) fn tools() -> Vec<Tool> {
         )),
         ro(Tool::new("get_thread", "Read a whole conversation as plain text, oldest first, quoted history removed.", schema(json!({ "thread_id": { "type": "string" } }), &["thread_id"]))),
         ro(Tool::new("get_message", "Read one message (plain text body, headers, attachment list).", schema(json!({ "message_id": { "type": "string" } }), &["message_id"]))),
-        ro(Tool::new("get_attachment", "Read an attachment. Text attachments are returned as text; binary ones only if the user allowed it.", schema(json!({ "message_id": { "type": "string" }, "attachment_id": { "type": "string" } }), &["message_id", "attachment_id"]))),
+        ro(Tool::new("get_attachment", "Read an attachment, if the user allowed attachments for this agent. Text attachments are returned as text.", schema(json!({ "message_id": { "type": "string" }, "attachment_id": { "type": "string" } }), &["message_id", "attachment_id"]))),
         ro(Tool::new("list_calendars", "List calendars.", schema(json!({}), &[]))),
         ro(Tool::new("list_events", "List event occurrences in a time range (recurrences expanded). Dates are RFC 3339.", schema(json!({ "from": { "type": "string" }, "to": { "type": "string" }, "calendar_ids": ids_prop("Limit to these calendars.") }), &["from", "to"]))),
         ro(Tool::new("get_event", "Get one event (the series master for recurring events).", schema(json!({ "event_id": { "type": "string" } }), &["event_id"]))),

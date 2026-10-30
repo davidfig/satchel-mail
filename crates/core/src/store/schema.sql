@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS messages (
     partial          INTEGER NOT NULL DEFAULT 0,
     -- Bytes the stored copy takes on disk (0: unknown, use size).
     blob_size        INTEGER NOT NULL DEFAULT 0,
+    -- authserv-id of the topmost Authentication-Results header, for learning
+    -- which server to trust: NULL not read yet, '' none or unusable.
+    auth_serv        TEXT,
     -- Local version, bumped on every change (used for proposal staleness).
     version          INTEGER NOT NULL DEFAULT 1,
     indexed          INTEGER NOT NULL DEFAULT 0,
@@ -248,7 +251,9 @@ CREATE TABLE IF NOT EXISTS proposals (
     decided_at           INTEGER,
     summary              TEXT NOT NULL,
     -- {target id: version} at proposal time, for staleness checks.
-    versions_json        TEXT NOT NULL DEFAULT '{}'
+    versions_json        TEXT NOT NULL DEFAULT '{}',
+    -- Name of the file in the AI folder's proposals/processed/ written for it.
+    processed_file       TEXT
 );
 CREATE INDEX IF NOT EXISTS proposals_status ON proposals(status, created_at);
 

@@ -96,7 +96,13 @@ impl ProviderFactory for Factory {
         if !url.to_ascii_lowercase().starts_with("https://") {
             bail!("one-click unsubscribe needs an https link");
         }
-        let http = net::http_client(false)?;
+        // The link comes from the sender: keep it off this computer and the
+        // local network, including through DNS and redirects.
+        let parsed = url::Url::parse(url)?;
+        if net::is_internal_url(&parsed) {
+            bail!("one-click unsubscribe link points to a local or private address");
+        }
+        let http = net::public_http_client()?;
         let r = http
             .post(url)
             .header("Content-Type", "application/x-www-form-urlencoded")
@@ -106,7 +112,7 @@ impl ProviderFactory for Factory {
             .await?;
         let status = r.status();
         if !status.is_success() {
-            let body = r.text().await.unwrap_or_default();
+            let body = net::error_text(r).await;
             return Err(net::http_error(status, &body, "unsubscribe"));
         }
         Ok(())

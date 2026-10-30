@@ -35,3 +35,4 @@
 .toast.leaving { opacity: 0; transition: opacity .3s; }
 @keyframes rise { from { transform: translateY(8px); opacity: 0; } }
 .fatal { padding: 60px; text-align: center; }
+.link-address { font: 12.5px var(--mono); overflow-wrap: anywhere; max-height: 8em; overflow: auto; padding: 6px 8px; background: var(--panel-2); border-radius: 6px; user-select: all; }

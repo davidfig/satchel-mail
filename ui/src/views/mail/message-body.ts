@@ -6,7 +6,7 @@ import { humanSize, timeRange } from '../../lib/format';
 import { confirmDialog, errorToast, modal, toast } from '../../lib/ui';
 import { transport } from '../../transport';
 import type { MessageDetail, PartStat } from '../../types';
-import { isAttribution, trimUrl } from '../../lib/thread';
+import { followTarget, isAttribution, linkScheme, routeLinks, trimUrl } from '../../lib/thread';
 import { editDraft, openComposer } from './composer';
 
 export function attachments(m: MessageDetail): HTMLElement | null {
@@ -79,16 +79,25 @@ export function inviteCard(m: MessageDetail, inSpam: boolean): HTMLElement {
 
 /** Open a link from a message; `cautious` ones show where they really go first. */
 async function openLink(url: string, cautious: boolean) {
-  if (cautious) {
-    let host = url;
-    try {
-      host = new URL(url).host;
-    } catch {
-      /* show the raw link */
-    }
-    if (!(await confirmDialog('Open this link?', `It goes to ${host}. Mail in Spam or with warnings often hides where links lead, so check that's where you meant to go.`, 'Open link'))) return;
+  if (await confirmLink(url, cautious)) openExternal(url);
+}
+
+/** Asks before opening `url` when `cautious` or `always`, saying where it really goes.
+ *  `always` is for a link that came from outside (the `#follow` page): it also
+ *  shows the whole address. */
+export async function confirmLink(url: string, cautious: boolean, always = false): Promise<boolean> {
+  if (!cautious && !always) return true;
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+    /* show the raw link */
   }
-  openExternal(url);
+  const why = cautious
+    ? `It goes to ${host}. Mail in Spam or with warnings often hides where links lead, so check that's where you meant to go.`
+    : `It goes to ${host}. Check that's where you meant to go: any website can send you to this page with a link.`;
+  if (!always) return confirmDialog('Open this link?', why, 'Open link');
+  return confirmDialog('Open this link?', h('div', h('p', why), h('p.link-address', url)), 'Open link');
 }
 
 function linkified(line: string, cautious: boolean): HTMLElement {
@@ -146,8 +155,15 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
     html,body{margin:0;padding:0;background:transparent;color:#1d1d1f;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere}
     img{max-width:100%;height:auto} table{max-width:100%} blockquote{border-left:3px solid #ccc;margin:0 0 0 .5em;padding-left:.75em;color:#555}
     a{color:#2a62d9}
-  </style></head><body>${html}</body></html>`;
-  const frame = h('iframe.html-body', { sandbox: 'allow-same-origin allow-popups allow-popups-to-escape-sandbox', referrerpolicy: 'no-referrer', title: 'Message content' }) as HTMLIFrameElement;
+  </style></head><body>${transport.kind === 'http' ? routeLinks(html, location.origin, cautious) : html}</body></html>`;
+  catchFramePopups();
+  // `allow-popups` stays: on desktop a link reaches the host as a popup, which
+  // it refuses and hands to `catchFramePopups`. On the web every link points at
+  // our own `#follow` page (`routeLinks`); WebKit runs no listeners here, so the
+  // click opens that page as a popup, which must escape the sandbox to run
+  // scripts and ask before going on.
+  const sandbox = transport.kind === 'tauri' ? 'allow-same-origin allow-popups' : 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
+  const frame = h('iframe.html-body', { sandbox, referrerpolicy: 'no-referrer', title: 'Message content', dataset: { cautious: String(cautious) } }) as HTMLIFrameElement;
   frame.srcdoc = doc;
   frame.addEventListener('load', () => {
     const d = frame.contentDocument;
@@ -155,22 +171,66 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
     const fit = () => (frame.style.height = `${Math.min(d.documentElement.scrollHeight + 4, 20000)}px`);
     fit();
     new ResizeObserver(fit).observe(d.body);
-    d.addEventListener('click', (e) => {
+    // Chromium and Firefox run this; WebKit runs no listeners in a script-less
+    // sandboxed frame, so there the link opens as a popup: on desktop
+    // `catchFramePopups` takes it, on the web it is our `#follow` page.
+    const onLink = (e: MouseEvent) => {
       const a = (e.target as HTMLElement).closest('a');
-      if (a?.href && /^(https?|mailto):/.test(a.href)) {
-        e.preventDefault();
-        if (a.href.startsWith('mailto:')) {
-          const email = decodeURIComponent(a.href.slice(7).split('?')[0]);
-          openComposer({ to: [{ email }] });
-        } else void openLink(a.href, cautious);
-      }
+      // Anchors within the message scroll as usual. Anything else is stopped
+      // before we look at it, so a malformed link can't slip past by throwing.
+      if (!a?.href || a.href.startsWith('about:srcdoc#')) return;
+      e.preventDefault();
+      // On the web the link was routed through `#follow`; check what it carries.
+      followLink(followTarget(a.href, location.origin)?.url ?? a.href, cautious);
+    };
+    d.addEventListener('click', onLink);
+    // Middle-click opens a tab without a `click`; it gets the same check.
+    d.addEventListener('auxclick', (e) => {
+      if (e.button === 1) onLink(e);
     });
   });
   return h('div.html-wrap', frame);
 }
 
+/** Opens a link from a message body; false if it isn't one we follow. */
+export function followLink(href: string, cautious: boolean): boolean {
+  const scheme = linkScheme(href);
+  if (scheme === 'mail') {
+    const email = mailtoAddress(href);
+    if (email) openComposer({ to: [{ email }] });
+    else toast('This email link is malformed, so Satchel didn’t open it.');
+  } else if (scheme === 'web') void openLink(href, cautious);
+  else return false;
+  return true;
+}
+
+/** The address of a mailto: link, or null if it doesn't decode. */
+function mailtoAddress(href: string): string | null {
+  try {
+    return decodeURIComponent(href.slice(7).split('?')[0]).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+let catchingPopups = false;
+/** Desktop: a link clicked in a message iframe reaches us as a popup the host
+ *  caught. The click focused that iframe, which says whether to be cautious;
+ *  if we can't tell, we are. */
+function catchFramePopups() {
+  if (catchingPopups) return;
+  catchingPopups = true;
+  transport.onOpenLink((url) => {
+    const frame = document.activeElement;
+    const cautious = !(frame instanceof HTMLIFrameElement && frame.dataset.cautious === 'false');
+    followLink(url, cautious);
+  });
+}
+
 export function openExternal(url: string) {
-  if (transport.kind === 'tauri') void transport.host('open_url', { url }).catch(() => window.open(url, '_blank', 'noopener'));
+  // No window.open fallback on desktop: the webview can't show it, and the
+  // host would hand it straight back here.
+  if (transport.kind === 'tauri') void transport.host('open_url', { url }).catch(errorToast);
   else window.open(url, '_blank', 'noopener,noreferrer');
 }
 

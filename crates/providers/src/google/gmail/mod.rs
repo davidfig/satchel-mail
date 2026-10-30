@@ -222,7 +222,7 @@ impl MailProvider for GmailProvider {
     }
 
     async fn fetch_raw(&self, _ctx: &SyncCtx, msg: &MessageRef) -> Result<Vec<u8>> {
-        let v = self.get(&format!("{GMAIL}/messages/{}?format=raw", msg.remote_id), "get raw message").await?;
+        let v = self.get(&format!("{GMAIL}/messages/{}?format=raw", crate::net::enc(&msg.remote_id)), "get raw message").await?;
         b64url_decode(v["raw"].as_str().context("no raw content")?)
     }
 

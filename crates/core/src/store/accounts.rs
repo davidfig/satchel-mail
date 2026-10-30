@@ -51,10 +51,16 @@ impl Store {
         self.r(|c| Ok(c.query_row("SELECT a.*, EXISTS (SELECT 1 FROM sync_cursors k WHERE k.account_id=a.id AND k.key='contacts_scope_missing') AS contacts_reconnect FROM accounts a WHERE id = ?", [id], Self::account_row).optional()?))
     }
 
+    /// Delete an account and everything in it. Its messages' stored copies
+    /// are noted for the engine to delete ([`Self::take_freed_blobs`]).
     pub fn delete_account(&self, id: &str) -> Result<()> {
         self.w(|c| {
-            c.execute("DELETE FROM accounts WHERE id = ?", [id])?;
-            c.execute("DELETE FROM threads WHERE account_id = ?", [id])?;
+            let tx = c.transaction()?;
+            let freed = Self::blob_hashes_tx(&tx, "account_id=?", [id])?;
+            tx.execute("DELETE FROM accounts WHERE id = ?", [id])?;
+            tx.execute("DELETE FROM threads WHERE account_id = ?", [id])?;
+            tx.commit()?;
+            self.blobs_freed(freed);
             Ok(())
         })
     }

@@ -1,6 +1,6 @@
 # 0032. Local attackers: the web session and AI-folder symlinks
 
-- **Status:** Accepted
+- **Status:** Accepted; extended by 0040
 - **Date:** 2026-10-24
 
 ## Context

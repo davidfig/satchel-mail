@@ -24,3 +24,9 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; m
 .row.end { justify-content: flex-end; align-items: center; }
 .row.inline { align-items: center; gap: 8px; cursor: pointer; }
 .row > label, .row > .form-field { flex: 1; }
+/* An input with a button beside it (a path and "Choose…"). */
+.row.picker { align-items: center; }
+.row.picker > input { flex: 1; }
+
+/* Hidden by lib/overflow.ts; offered from the row's "…" menu instead. */
+.overflowed { display: none !important; }

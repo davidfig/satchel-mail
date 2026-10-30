@@ -1,5 +1,8 @@
 /* ------------------------------------------------------------ calendar */
 .calendar-view { display: grid; grid-template-columns: 228px 1fr; height: 100%; }
+.calendar-view.side-collapsed { grid-template-columns: 1fr; }
+.cal-new { display: none; }
+.side-collapsed .cal-new { display: inline-flex; }
 .cal-side { border-right: 1px solid var(--line); padding: 14px 12px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; background: var(--panel-2); }
 .cal-side > .primary { justify-content: center; height: 34px; }
 .mini-head { font-weight: 600; font-size: 13px; margin-bottom: 6px; padding-left: 4px; }
@@ -13,9 +16,17 @@
 .cal-list .mb-section { padding-left: 2px; }
 .cal-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; padding: 2px; }
 .swatch { width: 10px; height: 10px; border-radius: 3px; }
-.cal-main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.cal-main { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+/* Previous, current and next period side by side; the previous one sits off to
+   the left, so at rest only the current one shows. Swiping moves the track. */
+.cal-track { flex: 1; display: flex; min-height: 0; }
+.cal-pane { flex: 0 0 100%; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.cal-pane.prev { margin-left: -100%; }
+.cal-pane > * { flex: 1; min-height: 0; }
 .cal-head { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
-.cal-head h1 { font-size: 17px; margin-left: 6px; }
+.cal-head h1 { font-size: 17px; margin-left: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-head > :not(h1, .spacer) { flex-shrink: 0; }
+.segmented:not(:has(> :not(.overflowed))) { display: none; }
 .segmented { display: inline-flex; border: 1px solid var(--line-2); border-radius: 7px; overflow: hidden; }
 .segmented button { border: none; border-radius: 0; height: 28px; }
 .segmented button + button { border-left: 1px solid var(--line-2); }

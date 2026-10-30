@@ -1,6 +1,6 @@
 # 0029. Agents edit contacts by editing their files
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by 0042 (folder files can no longer carry an agent token) and 0045 (agents can propose merges)
 - **Date:** 2026-10-24
 
 ## Context

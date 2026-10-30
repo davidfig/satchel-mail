@@ -1,6 +1,22 @@
-//! HTML: sanitizing for display, and converting to text.
+//! HTML: sanitizing for display (converting to text is in `html_text.rs`).
 
 use super::*;
+
+/// Most HTML we hand to the sanitizer or the text converter. Longer bodies are
+/// cut (with a note) so one huge message can't stall sync or the reader.
+pub const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
+
+/// `s` cut to at most `max` bytes on a character boundary, and whether it was cut.
+pub(crate) fn cap(s: &str, max: usize) -> (&str, bool) {
+    if s.len() <= max {
+        return (s, false);
+    }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&s[..end], true)
+}
 
 pub struct Sanitized {
     pub html: String,
@@ -50,9 +66,14 @@ pub fn sanitize_html(html: &str, allow_remote: bool, inline: &[(String, String)]
             }
             return None;
         }
-        if attribute == "style" && lower.contains("url(") {
+        if attribute == "style" && css_may_load(&lower) {
             flag.store(true, Ordering::Relaxed);
             if !allow_remote {
+                // Escapes, image-set() and @import are rare in honest mail
+                // and hard to strip reliably: drop the whole declaration list.
+                if css_hard_to_strip(&lower) {
+                    return None;
+                }
                 return Some(Cow::Owned(strip_css_urls(value)));
             }
         }
@@ -61,118 +82,76 @@ pub fn sanitize_html(html: &str, allow_remote: bool, inline: &[(String, String)]
         }
         Some(Cow::Borrowed(value))
     });
+    let (html, cut) = cap(html, MAX_HTML_BYTES);
     let mut out = b.clean(html).to_string();
-    if !allow_remote && out.contains("url(") {
+    if !allow_remote {
         // <style> blocks may also pull remote resources.
-        had_remote.store(true, Ordering::Relaxed);
-        out = strip_css_urls(&out);
+        let (cleaned, found) = strip_risky_style_blocks(&out);
+        if found {
+            had_remote.store(true, Ordering::Relaxed);
+            out = cleaned;
+        }
+        if out.to_ascii_lowercase().contains("url(") {
+            had_remote.store(true, Ordering::Relaxed);
+            out = strip_css_urls(&out);
+        }
+    }
+    if cut {
+        out.push_str("<p><em>[This message was too long to show in full.]</em></p>");
     }
     Sanitized { html: out, had_remote_content: had_remote.load(Ordering::Relaxed) }
 }
 
-pub(crate) fn strip_css_urls(s: &str) -> String {
+/// CSS that may fetch something: `url()`, `image-set()`, `@import`, or
+/// backslash escapes that could spell either (`\75rl(`). Takes lowercase input.
+fn css_may_load(lower: &str) -> bool {
+    lower.contains("url(") || css_hard_to_strip(lower)
+}
+
+/// The loading CSS that `strip_css_urls` can't rewrite. Takes lowercase input.
+fn css_hard_to_strip(lower: &str) -> bool {
+    lower.contains('\\') || lower.contains("image-set(") || lower.contains("@import")
+}
+
+/// Empty every `<style>` block in sanitized output whose CSS is hard to strip
+/// (see `css_hard_to_strip`). Returns the new HTML and whether any was found.
+pub(crate) fn strip_risky_style_blocks(s: &str) -> (String, bool) {
+    let lower = s.to_ascii_lowercase();
     let mut out = String::with_capacity(s.len());
-    let mut rest = s;
-    while let Some(i) = rest.to_ascii_lowercase().find("url(") {
-        out.push_str(&rest[..i]);
-        let after = &rest[i + 4..];
-        match after.find(')') {
+    let mut found = false;
+    let mut pos = 0;
+    while let Some(open) = lower[pos..].find("<style").map(|i| pos + i) {
+        let Some(body) = lower[open..].find('>').map(|i| open + i + 1) else { break };
+        let close = lower[body..].find("</style").map(|i| body + i).unwrap_or(s.len());
+        out.push_str(&s[pos..body]);
+        if css_hard_to_strip(&lower[body..close]) {
+            found = true;
+        } else {
+            out.push_str(&s[body..close]);
+        }
+        pos = close;
+    }
+    out.push_str(&s[pos..]);
+    (out, found)
+}
+
+pub(crate) fn strip_css_urls(s: &str) -> String {
+    // ASCII lowercasing keeps byte offsets, so search `lower` and copy from `s`.
+    let lower = s.to_ascii_lowercase();
+    let mut out = String::with_capacity(s.len());
+    let mut pos = 0;
+    while let Some(i) = lower[pos..].find("url(").map(|i| pos + i) {
+        out.push_str(&s[pos..i]);
+        match s[i + 4..].find(')') {
             Some(j) => {
                 out.push_str("none");
-                rest = &after[j + 1..];
+                pos = i + 4 + j + 1;
             }
             None => {
-                rest = "";
+                pos = s.len();
             }
         }
     }
-    out.push_str(rest);
+    out.push_str(&s[pos..]);
     out
-}
-
-/// Readable text for HTML-only mail: paragraphs kept, links written inline as
-/// `text (url)`, no markdown markers and no hard wrapping (the reader reflows).
-pub fn html_to_text(html: &str) -> String {
-    let urls = Rc::new(RefCell::new(Vec::new()));
-    let text = html2text::config::with_decorator(MailTextDecorator { links: vec![], urls: urls.clone() })
-        .no_table_borders()
-        .no_link_wrapping()
-        .allow_width_overflow()
-        .string_from_read(html.as_bytes(), 10_000)
-        .unwrap_or_default();
-    let mut text = text.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
-    // A link whose text is its own address doesn't need it twice.
-    for url in urls.borrow().iter() {
-        text = text.replace(&format!("{url} ({url})"), url);
-    }
-    text.trim().to_string()
-}
-
-#[derive(Clone)]
-pub(crate) struct MailTextDecorator {
-    /// What to write at the end of each open link.
-    links: Vec<String>,
-    urls: Rc<RefCell<Vec<String>>>,
-}
-
-impl html2text::render::TextDecorator for MailTextDecorator {
-    type Annotation = ();
-
-    fn decorate_link_start(&mut self, url: &str) -> (String, ()) {
-        let target = url.strip_prefix("mailto:").unwrap_or(url);
-        let shown = url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:");
-        self.links.push(if shown { format!(" ({target})") } else { String::new() });
-        if shown {
-            self.urls.borrow_mut().push(target.to_string());
-        }
-        (String::new(), ())
-    }
-    fn decorate_link_end(&mut self) -> String {
-        self.links.pop().unwrap_or_default()
-    }
-    fn decorate_em_start(&self) -> (String, ()) {
-        (String::new(), ())
-    }
-    fn decorate_em_end(&self) -> String {
-        String::new()
-    }
-    fn decorate_strong_start(&self) -> (String, ()) {
-        (String::new(), ())
-    }
-    fn decorate_strong_end(&self) -> String {
-        String::new()
-    }
-    fn decorate_strikeout_start(&self) -> (String, ()) {
-        (String::new(), ())
-    }
-    fn decorate_strikeout_end(&self) -> String {
-        String::new()
-    }
-    fn decorate_code_start(&self) -> (String, ()) {
-        (String::new(), ())
-    }
-    fn decorate_code_end(&self) -> String {
-        String::new()
-    }
-    fn decorate_preformat_first(&self) {}
-    fn decorate_preformat_cont(&self) {}
-    // Images are left out so an image-only message still has no text.
-    fn decorate_image(&mut self, _src: &str, _title: &str) -> (String, ()) {
-        (String::new(), ())
-    }
-    fn header_prefix(&self, _level: usize) -> String {
-        String::new()
-    }
-    fn quote_prefix(&self) -> String {
-        "> ".into()
-    }
-    fn unordered_item_prefix(&self) -> String {
-        "• ".into()
-    }
-    fn ordered_item_prefix(&self, i: i64) -> String {
-        format!("{i}. ")
-    }
-    fn make_subblock_decorator(&self) -> Self {
-        Self { links: vec![], urls: self.urls.clone() }
-    }
 }

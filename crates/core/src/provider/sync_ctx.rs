@@ -12,6 +12,8 @@ pub struct SyncCtx {
     pub(crate) events: tokio::sync::broadcast::Sender<CoreEvent>,
     /// New inbox mail stored since the last `messages_changed`.
     pub(crate) arrivals: Arc<std::sync::Mutex<Vec<NewMail>>>,
+    /// Set by [`Self::more_to_sync`].
+    pub(crate) more: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl SyncCtx {
@@ -23,6 +25,17 @@ impl SyncCtx {
         let st = SyncStatus { state: SyncState::Syncing, last_success: self.account.sync.last_success, error: None, detail: Some(detail.into()) };
         let _ = self.store.set_sync_status(&self.account.id, &st);
         let _ = self.events.send(CoreEvent::SyncStatus { account_id: self.account.id.clone(), status: st });
+    }
+
+    /// Older mail is still to come. Providers sync recent mail first and
+    /// older mail in batches; this has the account loop run the next pass
+    /// right away instead of waiting for changes (0039).
+    pub fn more_to_sync(&self) {
+        self.more.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn has_more(&self) -> bool {
+        self.more.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn cursor(&self, key: &str) -> Result<Option<String>> {
@@ -138,13 +151,24 @@ impl SyncCtx {
         }
     }
 
-    /// Store a message from metadata only (body fetched later).
+    /// Store a message from metadata only (body fetched later). Returns its
+    /// local id, or "" if this message can't be stored (see
+    /// [`crate::store::is_data_error`]): it is logged and skipped, so one
+    /// bad message can't stop the rest of the mailbox syncing.
     pub fn put_record(&self, rec: MessageRecord, mailboxes: &[(String, Option<u32>)]) -> Result<String> {
         let local: Vec<(String, Option<u32>)> = mailboxes
             .iter()
             .filter_map(|(r, uid)| self.mailbox_local_id(r).ok().flatten().map(|id| (id, *uid)))
             .collect();
-        let (id, inserted) = self.store.upsert_message(&self.account.id, &rec, &local)?;
+        let (id, inserted) = match self.store.upsert_message(&self.account.id, &rec, &local) {
+            Ok(r) => r,
+            Err(e) if crate::store::is_data_error(&e) => {
+                tracing::warn!(account = %self.account.email, remote_id = %rec.remote_id, "skipping a message that can't be stored: {e:#}");
+                self.store.blobs_freed(rec.blob_hash);
+                return Ok(String::new());
+            }
+            Err(e) => return Err(e),
+        };
         if inserted && self.is_arrival(&rec, &local) {
             let thread_id = self.store.message_row(&id)?.map(|m| m.summary.thread_id).unwrap_or_default();
             self.arrivals.lock().unwrap().push(NewMail {

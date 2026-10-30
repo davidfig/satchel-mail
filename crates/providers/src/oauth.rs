@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine as _;
 use satchel_api::*;
-use satchel_core::provider::{CredentialHandle, OAuthDone};
+use satchel_core::provider::{CredentialHandle, OAuthDone, priority};
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
@@ -187,19 +187,32 @@ pub fn start(app: OAuthApp, done: OAuthDone) -> Result<String> {
 
 async fn finish(app: OAuthApp, listener: std::net::TcpListener, redirect: String, verifier: String, state: String) -> Result<(AccountConfig, Credential)> {
     let listener = tokio::net::TcpListener::from_std(listener)?;
+    // Each connection reads its request line in its own task, so one that
+    // connects and says nothing can't hold up the browser's real callback.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, tokio::net::TcpStream)>(8);
     let (code, mut sock) = loop {
-        let (mut sock, _) = listener.accept().await?;
-        let mut buf = vec![0u8; 8192];
-        let n = sock.read(&mut buf).await?;
-        let req = String::from_utf8_lossy(&buf[..n]).to_string();
-        let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+        let (path, mut sock) = tokio::select! {
+            accepted = listener.accept() => {
+                let (mut sock, _) = accepted?;
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    if let Some(path) = request_path(&mut sock, REQUEST_TIMEOUT).await {
+                        let _ = tx.send((path, sock)).await;
+                    }
+                });
+                continue;
+            }
+            Some(req) = rx.recv() => req,
+        };
         let Some(q) = path.strip_prefix("/callback?") else {
             let _ = sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
             continue;
         };
+        // Anything on this computer can reach the port: a callback that isn't
+        // for this sign-in is turned away, and we keep waiting for the real one.
         if query_param(q, "state").as_deref() != Some(state.as_str()) {
             respond(&mut sock, "Sign-in failed", "The response didn't match this sign-in attempt. Please try again from Satchel Mail.").await;
-            bail!("OAuth state mismatch");
+            continue;
         }
         if let Some(err) = query_param(q, "error") {
             let desc = query_param(q, "error_description").unwrap_or_default();
@@ -222,7 +235,7 @@ async fn finish(app: OAuthApp, listener: std::net::TcpListener, redirect: String
     }
     let resp = http.post(&app.token_url).form(&form).send().await?;
     let status = resp.status();
-    let body = resp.text().await?;
+    let body = crate::net::text_capped(resp, crate::net::API_LIMIT).await?;
     if !status.is_success() {
         respond(&mut sock, "Sign-in failed", "The provider rejected the sign-in. Please try again.").await;
         return Err(crate::net::http_error(status, &body, "token exchange"));
@@ -239,6 +252,34 @@ async fn finish(app: OAuthApp, listener: std::net::TcpListener, redirect: String
     Ok((config, cred))
 }
 
+/// How long a connection to the sign-in listener has to send its request line.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The path of an HTTP request, once its whole request line has arrived
+/// (within `limit`, and 8 KiB). `None` for a slow, silent or malformed one.
+async fn request_path<S: tokio::io::AsyncRead + Unpin>(sock: &mut S, limit: Duration) -> Option<String> {
+    let mut buf = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    let line = tokio::time::timeout(limit, async {
+        loop {
+            if let Some(end) = buf.iter().position(|&b| b == b'\n') {
+                return Some(String::from_utf8_lossy(&buf[..end]).into_owned());
+            }
+            if buf.len() >= 8192 {
+                return None;
+            }
+            let n = sock.read(&mut chunk).await.ok()?;
+            if n == 0 {
+                return None;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        }
+    })
+    .await
+    .ok()??;
+    line.split_whitespace().nth(1).map(String::from)
+}
+
 async fn respond(sock: &mut tokio::net::TcpStream, title: &str, msg: &str) {
     let html = format!(
         "<!doctype html><meta charset=utf-8><title>{title}</title><body style=\"font:16px -apple-system,sans-serif;display:grid;place-items:center;height:90vh;color:#333\"><div style=text-align:center><h1 style=font-weight:600>{title}</h1><p>{msg}</p></div>"
@@ -251,11 +292,13 @@ async fn respond(sock: &mut tokio::net::TcpStream, title: &str, msg: &str) {
 async fn identity(http: &reqwest::Client, kind: ProviderKind, token: &str) -> Result<(String, String)> {
     match kind {
         ProviderKind::Gmail => {
-            let v: serde_json::Value = http.get("https://openidconnect.googleapis.com/v1/userinfo").bearer_auth(token).send().await?.error_for_status()?.json().await?;
+            let r = http.get("https://openidconnect.googleapis.com/v1/userinfo").bearer_auth(token).send().await?.error_for_status()?;
+            let v: serde_json::Value = serde_json::from_str(&crate::net::text_capped(r, crate::net::API_LIMIT).await?)?;
             Ok((v["email"].as_str().context("no email in profile")?.to_string(), v["name"].as_str().unwrap_or_default().to_string()))
         }
         ProviderKind::Graph => {
-            let v: serde_json::Value = http.get("https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName").bearer_auth(token).send().await?.error_for_status()?.json().await?;
+            let r = http.get("https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName").bearer_auth(token).send().await?.error_for_status()?;
+            let v: serde_json::Value = serde_json::from_str(&crate::net::text_capped(r, crate::net::API_LIMIT).await?)?;
             let email = v["mail"].as_str().or(v["userPrincipalName"].as_str()).context("no email in profile")?;
             Ok((email.to_string(), v["displayName"].as_str().unwrap_or_default().to_string()))
         }
@@ -314,7 +357,7 @@ impl TokenSource {
         }
         let resp = self.http.post(&app.token_url).form(&form).send().await?;
         let status = resp.status();
-        let body = resp.text().await?;
+        let body = crate::net::text_capped(resp, crate::net::API_LIMIT).await?;
         if !status.is_success() {
             let mut e = crate::net::http_error(status, &body, "token refresh");
             if status.as_u16() == 400 && body.contains("invalid_grant") {
@@ -333,8 +376,13 @@ impl TokenSource {
     }
 }
 
+/// The longest one rate-limit backoff may hold up a request the user is waiting on.
+const USER_MAX_BACKOFF: Duration = Duration::from_secs(4);
+
 /// An authenticated JSON HTTP client that retries once on 401 after a refresh
-/// and backs off on 429/503 and Google's quota 403s.
+/// and backs off on 429/503 and Google's quota 403s. Background requests wait
+/// while the user is waiting on the account; the user's own requests back off
+/// briefly instead of sitting out a long Retry-After (0037).
 pub struct ApiClient {
     pub http: reqwest::Client,
     pub tokens: TokenSource,
@@ -345,8 +393,12 @@ impl ApiClient {
         let mut token = self.tokens.token().await?;
         let mut refreshed = false;
         let mut backoff = Duration::from_millis(500);
+        let max_wait = if priority::is_user() { USER_MAX_BACKOFF } else { Duration::from_secs(60) };
         for _ in 0..6 {
-            let resp = build(&self.http, &token).send().await.with_context(|| format!("{what}: request failed"))?;
+            priority::yield_to_user().await;
+            let req = build(&self.http, &token).build().with_context(|| format!("{what}: bad request"))?;
+            let sends_mail = sends_mail(&req);
+            let resp = self.http.execute(req).await.with_context(|| format!("{what}: request failed"))?;
             let st = resp.status();
             if st.as_u16() == 401 && !refreshed {
                 token = self.tokens.refresh_now().await?;
@@ -362,14 +414,17 @@ impl ApiClient {
             if st.is_success() {
                 return Ok(resp);
             }
-            if st.as_u16() != 429 && st.as_u16() != 503 {
-                let body = resp.text().await.unwrap_or_default();
+            // A 503 may come after the server took the message: sending it
+            // again could deliver it twice, so the op queue decides (0030).
+            // A 429 or quota refusal means it wasn't processed.
+            if st.as_u16() != 429 && (st.as_u16() != 503 || sends_mail) {
+                let body = crate::net::error_text(resp).await;
                 // Google sends per-minute quota errors as 403.
                 if !(st.as_u16() == 403 && crate::net::is_quota_body(&body)) {
                     return Err(crate::net::http_error(st, &body, what));
                 }
             }
-            tokio::time::sleep(retry_after.unwrap_or(backoff).min(Duration::from_secs(60))).await;
+            tokio::time::sleep(retry_after.unwrap_or(backoff).min(max_wait)).await;
             backoff *= 2;
         }
         Err(anyhow::Error::new(ApiError::new(ErrorCode::RateLimited, format!("{what}: rate limited"))))
@@ -377,7 +432,8 @@ impl ApiClient {
 
     pub async fn json(&self, build: impl Fn(&reqwest::Client, &str) -> reqwest::RequestBuilder, what: &str) -> Result<serde_json::Value> {
         let r = self.send(build, what).await?;
-        let text = r.text().await?;
+        // Gmail sends whole raw messages inside JSON.
+        let text = crate::net::text_capped(r, crate::net::DOWNLOAD_LIMIT).await?;
         if text.trim().is_empty() {
             return Ok(serde_json::Value::Null);
         }
@@ -385,8 +441,52 @@ impl ApiClient {
     }
 }
 
+/// Whether a request sends mail (Gmail `messages/send`, `drafts/send`; Graph
+/// `sendMail`, `messages/{id}/send`, `reply`, `forward`): repeating one
+/// after an unclear failure could send the message twice.
+fn sends_mail(req: &reqwest::Request) -> bool {
+    req.method() == reqwest::Method::POST
+        && req.url().path_segments().and_then(|mut s| s.next_back()).is_some_and(|last| ["send", "sendMail", "reply", "replyAll", "forward"].contains(&last))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn credentials_debug_hides_secrets() {
+        use satchel_api::Credential;
+        let p = format!("{:?}", Credential::Password { password: "hunter2".into() });
+        let o = format!("{:?}", Credential::OAuth { access_token: "ya29.tok".into(), refresh_token: Some("1//ref".into()), expires_at: Some(5) });
+        assert!(!p.contains("hunter2") && !o.contains("ya29") && !o.contains("1//ref"), "{p} {o}");
+        assert!(o.contains("expires_at: Some(5)"));
+    }
+
+    #[tokio::test]
+    async fn listener_reads_the_whole_request_line() {
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+        let (mut client, mut server) = tokio::io::duplex(64);
+        let reader = tokio::spawn(async move { super::request_path(&mut server, Duration::from_secs(5)).await });
+        client.write_all(b"GET /callback?co").await.unwrap();
+        tokio::task::yield_now().await;
+        client.write_all(b"de=1&state=x HTTP/1.1\r\nHost: a\r\n\r\n").await.unwrap();
+        assert_eq!(reader.await.unwrap().as_deref(), Some("/callback?code=1&state=x"));
+        // A connection that says nothing gives up instead of waiting forever.
+        let (_quiet, mut server) = tokio::io::duplex(64);
+        assert_eq!(super::request_path(&mut server, Duration::from_millis(50)).await, None);
+    }
+
+    #[test]
+    fn send_endpoints_are_not_replayed() {
+        let http = reqwest::Client::new();
+        let is = |m: reqwest::Method, u: &str| super::sends_mail(&http.request(m, u).build().unwrap());
+        assert!(is(reqwest::Method::POST, "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"));
+        assert!(is(reqwest::Method::POST, "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media"));
+        assert!(is(reqwest::Method::POST, "https://graph.microsoft.com/v1.0/me/sendMail"));
+        assert!(is(reqwest::Method::POST, "https://graph.microsoft.com/v1.0/me/messages/AAk%3D/send"));
+        assert!(!is(reqwest::Method::POST, "https://gmail.googleapis.com/gmail/v1/users/me/messages/abc/modify"));
+        assert!(!is(reqwest::Method::GET, "https://graph.microsoft.com/v1.0/me/messages/send"));
+    }
+
     #[test]
     fn sha256_known() {
         let h = super::sha256(b"abc");

@@ -149,12 +149,15 @@ impl Store {
     /// Raw evidence of correspondence: (address, display name, date ms, named by
     /// themselves). Recipients of mail the user sent, plus senders the user
     /// answered or wrote to in the same thread. Spam-folder mail doesn't count.
+    /// Sent mail is mail in a Sent folder: anyone can put your address in From.
     pub fn correspondence_evidence(&self) -> Result<Vec<Evidence>> {
         self.r(|c| {
             let mut s = c.prepare(
                 "WITH own AS (SELECT lower(email) AS e FROM accounts),
                  sent AS (SELECT m.thread_id, m.to_json, m.cc_json, m.bcc_json, m.date FROM messages m
-                          WHERE m.draft=0 AND lower(m.from_email) IN (SELECT e FROM own))
+                          WHERE m.draft=0 AND lower(m.from_email) IN (SELECT e FROM own)
+                            AND EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id
+                                        WHERE mm.message_id=m.id AND mb.role='sent'))
                  SELECT lower(json_extract(j.value, '$.email')), json_extract(j.value, '$.name'), s.date, 0 FROM sent s, json_each(s.to_json) j
                  UNION ALL
                  SELECT lower(json_extract(j.value, '$.email')), json_extract(j.value, '$.name'), s.date, 0 FROM sent s, json_each(s.cc_json) j
@@ -192,6 +195,23 @@ impl Store {
             ))?;
             let rows = s
                 .query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get::<_, u32>(1)?, ms_to_dt(r.get(2)?)))))?
+                .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// [`Self::address_stats`] counting only messages dated `after` or later.
+    pub fn address_stats_since(&self, after: DateTime<Utc>) -> Result<HashMap<String, (u32, DateTime<Utc>)>> {
+        self.r(|c| {
+            let mut s = c.prepare(&format!(
+                "SELECT e, SUM(n), MAX(d) FROM (
+                   SELECT lower(from_email) e, COUNT(*) n, MAX(date) d FROM messages WHERE draft=0 AND from_email IS NOT NULL AND date>=?1 GROUP BY 1
+                   UNION ALL
+                   SELECT e, COUNT(DISTINCT id), MAX(date) FROM ({SENT_TO}) WHERE date>=?1 GROUP BY e
+                 ) GROUP BY e"
+            ))?;
+            let rows = s
+                .query_map([after.timestamp_millis()], |r| Ok((r.get::<_, String>(0)?, (r.get::<_, u32>(1)?, ms_to_dt(r.get(2)?)))))?
                 .collect::<rusqlite::Result<HashMap<_, _>>>()?;
             Ok(rows)
         })

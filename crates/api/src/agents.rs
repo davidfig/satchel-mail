@@ -17,8 +17,11 @@ pub enum ProposalAction {
     UpdateEvent { event: Event },
     CancelEvent { event_id: Id },
     RespondToInvite { event_id: Id, response: PartStat },
-    /// Create a contact (no id) or change one. Never deletes or merges.
+    /// Create a contact (no id) or change one. Never deletes.
     SaveContact { contact: Contact },
+    /// Merge duplicate people into the first contact (0045). Applied as
+    /// `Command::MergeContacts` only when the user approves.
+    MergeContacts { contact_ids: Vec<Id> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +134,13 @@ pub struct MirrorSettings {
     /// Turn files in `proposals/inbox/` into proposals without an agent token.
     #[serde(default = "yes")]
     pub accept_proposals: bool,
+    /// Write `calendar/` (agenda and .ics files). Also what folder agents may
+    /// see and propose for calendars.
+    #[serde(default = "yes")]
+    pub include_calendar: bool,
+    /// Write `contacts/` (person files) and read edits to them back.
+    #[serde(default = "yes")]
+    pub include_contacts: bool,
 }
 
 impl Default for MirrorSettings {
@@ -143,6 +153,8 @@ impl Default for MirrorSettings {
             include_eml: false,
             include_attachments: false,
             accept_proposals: true,
+            include_calendar: true,
+            include_contacts: true,
         }
     }
 }

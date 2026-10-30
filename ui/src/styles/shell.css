@@ -18,15 +18,21 @@
 .nav-item, .mb-item { width: 100%; border: none; background: none; height: 30px; padding: 0 10px; gap: 10px; color: var(--text); border-radius: 6px; justify-content: flex-start; }
 .nav-item:hover, .mb-item:hover { background: var(--hover); }
 .nav-item.active, .mb-item.active { background: var(--active); color: var(--accent); font-weight: 550; }
+/* Mail with its combined list open: the selected item below carries the highlight. */
+.nav-item.active.parent { background: none; }
+.nav-item.active.parent:hover { background: var(--hover); }
+.nav-sub { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
 .badge { margin-left: auto; background: var(--accent); color: var(--accent-text); border-radius: 10px; font-size: 11px; font-weight: 650; padding: 0 7px; line-height: 18px; }
 .mailboxes { overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 1px; margin-top: 6px; }
-.mb-section { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); padding: 12px 10px 4px; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.mb-section { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); padding: 4px 10px; margin-top: 8px; display: flex; align-items: center; gap: 6px; overflow: hidden; }
 .mb-toggle { width: 100%; border: none; background: none; cursor: pointer; justify-content: flex-start; height: auto; border-radius: 6px; padding-left: 4px; }
 .mb-toggle:hover { color: var(--text-2); }
-.mb-section-row { display: flex; align-items: center; }
+.mb-section-row { display: flex; align-items: center; position: relative; }
 .mb-section-row .mb-toggle { flex: 1; min-width: 0; }
-.mb-add { width: 22px; height: 22px; margin: 8px 4px 0 0; color: var(--text-3); opacity: 0; }
+/* Over the end of the row, so the sync time can sit flush right until hover. */
+.mb-add { position: absolute; right: 4px; bottom: 0; width: 22px; height: 22px; color: var(--text-3); opacity: 0; }
 .mb-section-row:hover .mb-add, .mb-add:focus-visible { opacity: 1; }
+.mb-section-row:hover :is(.acct-synced, .state-dot), .mb-section-row:has(.mb-add:focus-visible) :is(.acct-synced, .state-dot) { visibility: hidden; }
 .mb-toggle > .icon { flex-shrink: 0; }
 .mb-section .acct-email { overflow: hidden; text-overflow: ellipsis; text-transform: none; letter-spacing: 0; font-weight: 600; }
 .mb-item { font-size: 13px; color: var(--text-2); }
@@ -36,13 +42,14 @@
 .mb-count { font-size: 12px; color: var(--text-2); font-weight: 600; }
 .dot, .acct-dot, .swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
 .acct-dot.big { width: 12px; height: 12px; }
-.state-dot { width: 6px; height: 6px; border-radius: 50%; margin-left: auto; flex: none; }
+.acct-synced { margin-left: auto; flex: none; font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.state-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .state-dot.err { background: var(--danger); }
-.state-dot.busy { background: var(--accent); animation: pulse 1s infinite alternate; }
+.acct-dot.busy { animation: pulse 1s infinite alternate; }
 .sidebar-foot { border-top: 1px solid var(--line); padding: 8px 6px 0; }
 .sync-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); border: none; background: none; height: auto; padding: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sync-status.error { color: var(--danger); }
-.spinner { width: 11px; height: 11px; border: 2px solid var(--line-2); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+.sync-text { overflow: hidden; text-overflow: ellipsis; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { from { opacity: .3; } }
 .content { min-width: 0; min-height: 0; overflow: hidden; background: var(--panel); }

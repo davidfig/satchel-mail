@@ -25,6 +25,20 @@ use crate::oauth::{ApiClient, OAuthApp, TokenSource};
 
 const ME: &str = "https://graph.microsoft.com/v1.0/me";
 
+/// Whether a URL from Graph (a nextLink or deltaLink) or a cursor saved from
+/// one points at Graph itself, so it may get the bearer token.
+pub(crate) fn is_graph(url: &str) -> bool {
+    url.starts_with("https://graph.microsoft.com/")
+}
+
+/// A next or delta link from a Graph response, refused unless it's on Graph.
+pub(crate) fn graph_link(url: &str) -> Result<String> {
+    if !is_graph(url) {
+        anyhow::bail!("Microsoft Graph sent a link to another host: {}", url.chars().take(100).collect::<String>());
+    }
+    Ok(url.to_string())
+}
+
 
 pub fn api_client(creds: CredentialHandle) -> Result<ApiClient> {
     Ok(ApiClient { http: crate::net::http_client(false)?, tokens: TokenSource::new(OAuthApp::microsoft(), creds)? })
@@ -41,4 +55,15 @@ pub(crate) fn addr(v: &Value) -> Option<Address> {
 
 pub(crate) fn addrs(v: &Value) -> Vec<Address> {
     v.as_array().map(|a| a.iter().filter_map(addr).collect()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_graph_links_get_the_token() {
+        assert!(super::graph_link("https://graph.microsoft.com/v1.0/me/messages/delta?$skiptoken=x").is_ok());
+        for bad in ["https://graph.microsoft.com.evil.test/v1.0/", "http://graph.microsoft.com/v1.0/", "https://evil.test/https://graph.microsoft.com/", "https://graph.microsoft.com@evil.test/"] {
+            assert!(super::graph_link(bad).is_err(), "{bad}");
+        }
+    }
 }

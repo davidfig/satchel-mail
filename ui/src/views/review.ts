@@ -1,14 +1,15 @@
-// Review queue: everything AI agents propose waits here for the user.
+// AI Proposals: everything AI agents propose waits here for the user.
 
 import { api } from '../api';
 import { h, icon, replace } from '../lib/dom';
 import { displayName, formatAddress, fullDate, parseAddresses, relative, timeRange } from '../lib/format';
-import { errorToast, modal, toast } from '../lib/ui';
+import { copyBlock, errorToast, modal, toast } from '../lib/ui';
 import { store } from '../state';
 import type { CalEvent, Contact, Draft, Proposal, ProposalAction } from '../types';
-import { openComposer } from './mail/composer';
+import { openComposer, sendWithUndo } from './mail/composer';
 
-const LOW_RISK = new Set(['archive', 'mark_read', 'flag', 'labels']);
+// Not 'labels': adding Trash or Junk as a label moves mail there (0040 second pass, #3).
+const LOW_RISK = new Set(['archive', 'mark_read', 'flag']);
 
 export class ReviewView {
   root = h('div.review-view');
@@ -61,19 +62,32 @@ export class ReviewView {
     replace(
       this.root,
       h('header.page-head',
-        h('h1', 'Review'),
+        h('h1', 'AI Proposals'),
         h('p.muted', 'AI agents can only propose. Nothing is sent, moved, scheduled or added to your contacts until you approve it here.'),
         h('div.tabs', { role: 'tablist' },
-          h(`button.tab${this.tab === 'pending' ? '.active' : ''}`, { role: 'tab', on: { click: () => { this.tab = 'pending'; void this.render(); } } }, `Waiting (${pending.length})`),
-          h(`button.tab${this.tab === 'history' ? '.active' : ''}`, { role: 'tab', on: { click: () => { this.tab = 'history'; void this.render(); } } }, 'History'),
+          h(`button.tab${this.tab === 'pending' ? '.active' : ''}`, { role: 'tab', title: 'Proposals waiting for your decision', on: { click: () => { this.tab = 'pending'; void this.render(); } } }, `Waiting (${pending.length})`),
+          h(`button.tab${this.tab === 'history' ? '.active' : ''}`, { role: 'tab', title: 'Proposals you approved or rejected', on: { click: () => { this.tab = 'history'; void this.render(); } } }, 'History'),
           h('span.spacer'),
           this.tab === 'pending' && lowRisk.length > 1 &&
-            h('button', { title: 'Approve every waiting proposal marked low risk', on: { click: () => void this.approveAll(lowRisk) } }, icon('check', 16), `Approve ${lowRisk.length} low-risk`))),
+            h('button', { title: 'Archive, mark read or flag as proposed, for every waiting proposal without warnings', on: { click: busy(() => this.approveAll(lowRisk)) } }, icon('check', 16), `Approve ${lowRisk.length} low-risk`))),
       shown.length
         ? h('div.proposal-list', cards)
         : h('div.empty-state', icon('sparkle', 36), h('p', this.tab === 'pending' ? 'Nothing waiting for review.' : 'No decisions yet.'),
-            this.tab === 'pending' && h('p.muted.small', 'Connect an AI agent in Settings → AI agents to start receiving proposals.')),
+            this.tab === 'pending' && !items.length && await this.getStarted()),
     );
+  }
+
+  /** Until the first proposal arrives: a prompt to paste into any AI tool. */
+  private async getStarted(): Promise<HTMLElement> {
+    const mi = store.state.settings?.mirror;
+    const root = (await api.info().catch(() => null))?.mirror_root ?? '~/Satchel';
+    if (mi && (!mi.enabled || !mi.accept_proposals)) {
+      return h('p.muted.small', 'To let AI tools propose changes, turn on the AI folder and proposal files in Settings → AI folder. Tools that use MCP can connect in Settings → AI agents.');
+    }
+    return h('div.get-started',
+      h('p.small', 'To get started, paste this into an AI tool that can read and write files on this computer (Claude Code, Codex, Cursor and similar). It needs no setup.'),
+      copyBlock(agentPrompt(root)),
+      h('p.muted.small', 'Tools that use MCP can connect in Settings → AI agents instead.'));
   }
 
   private async approveAll(list: Proposal[]) {
@@ -86,7 +100,8 @@ export class ReviewView {
         errorToast(e);
       }
     }
-    toast(`Approved ${ok} proposal${ok === 1 ? '' : 's'}`, { kind: 'success' });
+    toast(`Approved ${ok} of ${list.length} proposal${list.length === 1 ? '' : 's'}`, { quiet: ok === list.length });
+    void store.refreshProposals();
     void this.render();
   }
 
@@ -95,7 +110,9 @@ export class ReviewView {
     const preview = await this.preview(p.action).catch((e) => h('p.error', `Could not load preview: ${e instanceof Error ? e.message : e}`));
     let editedDraft: Draft | null = null;
     if (p.action.type === 'draft' && pending) {
-      editedDraft = this.edits.get(p.id) ?? structuredClone(p.action.draft);
+      // Review shows only the text, so only the text is saved: an agent's
+      // body_html never reaches Drafts unseen.
+      editedDraft = this.edits.get(p.id) ?? { ...structuredClone(p.action.draft), body_html: null };
       this.edits.set(p.id, editedDraft);
     }
     const body = p.action.type === 'draft' && pending ? this.draftEditor(editedDraft!) : preview;
@@ -114,7 +131,12 @@ export class ReviewView {
       p.review_note && h('p.muted.small', `Note: ${p.review_note}`),
       pending &&
         h('footer.proposal-actions',
-          h('button.primary', { on: { click: () => void this.approve(p, editedDraft) } }, icon('check', 16), p.action.type === 'draft' ? 'Approve & open draft' : 'Approve'),
+          p.action.type === 'draft'
+            ? [
+                h('button.primary', { title: 'Send this message as shown, after a short undo window', on: { click: busy(() => this.approve(p, editedDraft, 'send')) } }, icon('send', 16), 'Send'),
+                h('button', { title: approveHint(p.action), on: { click: busy(() => this.approve(p, editedDraft, 'open')) } }, icon('draft', 16), 'Save as draft'),
+              ]
+            : h('button.primary', { title: approveHint(p.action), on: { click: busy(() => this.approve(p, editedDraft)) } }, icon('check', 16), 'Approve'),
           h('button', { title: 'Decline this proposal; nothing changes', on: { click: () => void this.reject(p) } }, 'Reject'),
           p.source_thread_ids.length > 0 && h('button.link', { title: 'Open the conversation this proposal is about', on: { click: () => this.openSource(p.source_thread_ids[0]) } }, 'View conversation')),
     );
@@ -135,8 +157,9 @@ export class ReviewView {
       d.cc.length > 0 && h('div.kv', h('span', 'Cc'), h('span', d.cc.map(formatAddress).join(', '))),
       d.bcc.length > 0 && h('div.kv', h('span', 'Bcc'), h('span', d.bcc.map(formatAddress).join(', '))),
       h('label.kv', h('span', 'Subject'), subject),
+      d.attachments.length > 0 && h('div.kv', h('span', 'Attached'), h('span', d.attachments.map((a) => a.filename).join(', '))),
       body,
-      h('p.muted.small', 'Approving saves this as a draft and opens it. You still press Send yourself.'));
+      h('p.muted.small', 'Send sends exactly what you see here. Save as draft puts it in Drafts and opens it instead.'));
   }
 
   private async preview(a: ProposalAction): Promise<HTMLElement> {
@@ -178,10 +201,23 @@ export class ReviewView {
           ? h('div.event-diff', h('div.before', h('span.muted.small', 'Now'), contactPreview(before)), h('div.after', h('span.muted.small', 'Proposed'), contactPreview(a.contact)))
           : contactPreview(a.contact);
       }
+      case 'merge_contacts': {
+        const people = await Promise.all(a.contact_ids.map((id) => api.getContact(id).catch(() => null)));
+        return h('div',
+          people.map((c, i) => h('div',
+            h('span.muted.small', i === 0 ? 'Keep' : 'Merge into it'),
+            c ? contactPreview(c) : h('p.muted', 'Contact no longer exists.'))));
+      }
     }
   }
 
-  private async approve(p: Proposal, edited: Draft | null) {
+  /** For a draft, `then` says whether to send the saved draft or open it in the composer. */
+  private async approve(p: Proposal, edited: Draft | null, then: 'send' | 'open' = 'open') {
+    // Check before approving: a send that fails later would leave the proposal approved but unsent.
+    if (then === 'send' && edited && !edited.to.length && !edited.cc.length && !edited.bcc.length) {
+      toast('Add at least one recipient to send', { kind: 'error' });
+      return;
+    }
     try {
       const changed = edited && JSON.stringify(edited) !== JSON.stringify((p.action as { draft?: Draft }).draft);
       const r = await api.approveProposal(p.id, changed ? { type: 'draft', draft: edited! } : null);
@@ -189,9 +225,13 @@ export class ReviewView {
       if (r.draft_id) {
         const drafts = await api.listDrafts();
         const d = drafts.find((x) => x.id === r.draft_id);
-        if (d) openComposer(d, { title: `Draft from ${p.agent_name}` });
+        const opts = { title: `Draft from ${p.agent_name}` };
+        // Undo, or a failed send, leaves it in Drafts and opens it to fix.
+        if (!d) toast('Approved, but the draft could not be found in Drafts', { kind: 'error' });
+        else if (then === 'send') sendWithUndo(d, () => openComposer(d, opts));
+        else openComposer(d, opts);
       } else {
-        toast('Approved', { kind: 'success' });
+        toast('Approved', { quiet: true });
       }
       void store.refreshProposals();
       void this.render();
@@ -205,8 +245,9 @@ export class ReviewView {
     const note = h('textarea', { rows: 3, placeholder: 'Optional: tell the agent why (it can read this)' });
     const m = modal('Reject proposal', h('div', h('p', p.summary), note), {
       footer: h('div.row.end',
-        h('button', { on: { click: () => m.close() } }, 'Cancel'),
+        h('button', { title: 'Keep the proposal waiting', on: { click: () => m.close() } }, 'Cancel'),
         h('button.primary.danger', {
+          title: 'Reject it; nothing changes, and the agent sees your note',
           on: {
             click: async () => {
               m.close();
@@ -225,6 +266,51 @@ export class ReviewView {
 
   private openSource(threadId: string) {
     store.set({ view: 'mail', selectedThread: threadId });
+  }
+}
+
+/** Instructions for an AI tool with file access; the folder's README has the details. */
+function agentPrompt(root: string): string {
+  const sep = root.includes('\\') ? '\\' : '/';
+  const at = (p: string) => `${root}${sep}${p.replaceAll('/', sep)}`;
+  return `You can help me with my email, calendar and contacts through Satchel Mail. It keeps an up-to-date, plain-text copy of them in this folder:
+
+${root}
+
+Start by reading ${at('README.md')}: it explains the layout and how to propose changes. Read and search the files directly. Editing the mail or calendar files changes nothing; they are a copy.
+
+To act (reply, draft a message, archive, move, label, add or change an event, save a contact), write a proposal file to ${at('proposals/inbox/')} as the README describes, with a short "why:" and "agent: <your name>" in its header. I review every proposal in Satchel before anything happens. Check ${at('proposals/processed/')} to see what became of yours.
+
+Never try to send mail or change my accounts any other way.`;
+}
+
+/** A click handler that disables the button's group until `run` finishes, so a double click acts once. */
+function busy(run: () => Promise<void>): (e: Event) => void {
+  return (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    const group = [...(btn.parentElement?.querySelectorAll('button') ?? [btn])];
+    group.forEach((b) => (b.disabled = true));
+    void run().finally(() => group.forEach((b) => (b.disabled = false)));
+  };
+}
+
+/** What pressing Approve will do, for its tooltip. */
+function approveHint(a: ProposalAction): string {
+  const n = 'message_ids' in a ? a.message_ids.length : 0;
+  const msgs = `${n} message${n === 1 ? '' : 's'}`;
+  switch (a.type) {
+    case 'draft': return 'Save this to Drafts and open it, without sending';
+    case 'archive': return `Archive ${msgs}`;
+    case 'move': return `Move ${msgs} to ${store.mailbox(a.mailbox_id)?.path ?? 'the folder shown'}`;
+    case 'labels': return `Change labels on ${msgs}`;
+    case 'mark_read': return `Mark ${msgs} as ${a.seen ? 'read' : 'unread'}`;
+    case 'flag': return `${a.flagged ? 'Flag' : 'Unflag'} ${msgs}`;
+    case 'create_event': return 'Add this event to your calendar';
+    case 'update_event': return 'Change the event as shown';
+    case 'cancel_event': return 'Cancel this event';
+    case 'respond_to_invite': return `Reply "${a.response.replace('_', ' ')}" to this invitation`;
+    case 'save_contact': return 'Save this contact';
+    case 'merge_contacts': return `Merge these ${a.contact_ids.length} contacts into the first`;
   }
 }
 

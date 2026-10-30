@@ -8,7 +8,7 @@ impl GmailProvider {
         let total = ids.len();
         let mut done = 0;
         let mut stream = futures::stream::iter(ids.into_iter().map(|id| {
-            let url = format!("{GMAIL}/messages/{id}?format=metadata{q}");
+            let url = format!("{GMAIL}/messages/{}?format=metadata{q}", crate::net::enc(&id));
             async move { (id, self.get(&url, "get message").await) }
         }))
         .buffer_unordered(CONCURRENCY);
@@ -35,7 +35,7 @@ impl GmailProvider {
         let total = ids.len();
         let mut done = 0;
         let mut stream = futures::stream::iter(ids.into_iter().map(|id| {
-            let url = format!("{GMAIL}/messages/{id}?format=minimal");
+            let url = format!("{GMAIL}/messages/{}?format=minimal", crate::net::enc(&id));
             async move { (id, self.get(&url, "get message").await) }
         }))
         .buffer_unordered(CONCURRENCY);
@@ -96,7 +96,7 @@ impl GmailProvider {
         Ok(())
     }
 
-    /// Older mail, a page at a time across syncs.
+    /// Older mail, newest first, a page at a time across syncs (0039).
     pub(super) async fn backfill(&self, ctx: &SyncCtx, labels: &HashSet<String>) -> Result<()> {
         let Some(state) = ctx.cursor("gmail:backfill")? else { return Ok(()) };
         if state == "done" {
@@ -109,6 +109,9 @@ impl GmailProvider {
         let missing: Vec<String> = ids.into_iter().filter(|i| !known.contains_key(i)).collect();
         self.fetch_metadata(ctx, missing, labels).await?;
         ctx.set_cursor("gmail:backfill", next.as_deref().unwrap_or("done"))?;
+        if next.is_some() {
+            ctx.more_to_sync();
+        }
         Ok(())
     }
 

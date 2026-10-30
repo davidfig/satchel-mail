@@ -118,9 +118,11 @@ impl Store {
         })
     }
 
+    /// Retry a failed or waiting op now. One being sent, or done, is left
+    /// alone: resetting it could send a message twice.
     pub fn op_reset(&self, id: &str) -> Result<()> {
         self.w(|c| {
-            c.execute("UPDATE ops SET status='pending', attempts=0, next_attempt=0 WHERE id=?", [id])?;
+            c.execute("UPDATE ops SET status='pending', attempts=0, next_attempt=0 WHERE id=? AND status IN ('failed','pending')", [id])?;
             Ok(())
         })
     }

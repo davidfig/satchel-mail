@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// Headers of older mail fetched per sync pass, across all mailboxes.
+const BACKFILL_PER_PASS: usize = 5000;
+
 impl ImapProvider {
     pub(super) async fn list_mailboxes(&self, s: &mut Session) -> Result<Vec<(RemoteMailbox, bool)>> {
         let names: Vec<async_imap::types::Name> = s.list(Some(""), Some("*")).await?.try_collect().await?;
@@ -23,7 +26,10 @@ impl ImapProvider {
         Ok(out)
     }
 
-    pub(super) async fn sync_mailbox(&self, s: &mut Session, ctx: &SyncCtx, mb: &RemoteMailbox) -> Result<()> {
+    /// Bring one mailbox up to date, except for older mail it doesn't have
+    /// yet: returns the UIDVALIDITY and those UIDs, newest first, for
+    /// [`Self::backfill`].
+    pub(super) async fn sync_mailbox(&self, s: &mut Session, ctx: &SyncCtx, mb: &RemoteMailbox) -> Result<(u32, Vec<u32>)> {
         let condstore = self.has_cap("CONDSTORE").await;
         let sel = if condstore { s.select_condstore(&mb.remote_id).await? } else { s.select(&mb.remote_id).await? };
         let uv = sel.uid_validity.unwrap_or(0);
@@ -32,9 +38,9 @@ impl ImapProvider {
         let local_mb = ctx.mailbox_local_id(&mb.remote_id)?.context("mailbox not stored")?;
         let full = cursor.as_ref().is_none_or(|c| c.uidvalidity != uv);
         let unchanged = !full
-            && cursor.as_ref().is_some_and(|c| sel.highest_modseq.is_some() && c.modseq == sel.highest_modseq && Some(c.uidnext) == sel.uid_next);
+            && cursor.as_ref().is_some_and(|c| !c.backfill && sel.highest_modseq.is_some() && c.modseq == sel.highest_modseq && Some(c.uidnext) == sel.uid_next);
         if unchanged {
-            return Ok(());
+            return Ok((uv, vec![]));
         }
 
         // Local view of this mailbox.
@@ -87,20 +93,18 @@ impl ImapProvider {
         }
         let mut new_uids: Vec<u32> = all_uids.iter().filter(|u| !local.contains_key(u)).copied().collect();
         new_uids.sort_unstable_by(|a, b| b.cmp(a));
+        let mut older = vec![];
         if !new_uids.is_empty() {
             let window = Utc::now() - chrono::Duration::days(ctx.settings.initial_sync_days as i64);
             let recent: HashSet<u32> = s.uid_search(format!("SINCE {}", imap_date(window))).await?.into_iter().collect();
-            let (full_body, headers_only): (Vec<u32>, Vec<u32>) = new_uids.iter().partition(|u| recent.contains(u));
-            let total = new_uids.len();
+            let full_body: Vec<u32>;
+            (full_body, older) = new_uids.iter().partition(|u| recent.contains(u));
+            let total = full_body.len();
             let mut done = 0;
             for chunk in full_body.chunks(25) {
+                priority::yield_to_user().await;
                 ctx.progress(format!("{}: downloading {}/{}", mb.name, done, total));
                 self.fetch_into(s, ctx, mb, uv, chunk, true).await?;
-                done += chunk.len();
-            }
-            for chunk in headers_only.chunks(250) {
-                ctx.progress(format!("{}: indexing {}/{}", mb.name, done, total));
-                self.fetch_into(s, ctx, mb, uv, chunk, false).await?;
                 done += chunk.len();
             }
         }
@@ -111,8 +115,46 @@ impl ImapProvider {
                 ctx.store.remove_from_mailbox(&id, &local_mb)?;
             }
         }
-        let c = MailboxCursor { uidvalidity: uv, uidnext: sel.uid_next.unwrap_or(0), modseq: sel.highest_modseq };
+        let c = MailboxCursor { uidvalidity: uv, uidnext: sel.uid_next.unwrap_or(0), modseq: sel.highest_modseq, backfill: !older.is_empty() };
         ctx.set_cursor(&key, &serde_json::to_string(&c)?)?;
+        Ok((uv, older))
+    }
+
+    /// Headers of older mail, newest first, taking a chunk from each mailbox
+    /// in turn so they all move back in time together. Stops after
+    /// [`BACKFILL_PER_PASS`] and asks for another pass; each mailbox's cursor
+    /// keeps `backfill` set until it has everything.
+    pub(super) async fn backfill(&self, s: &mut Session, ctx: &SyncCtx, mut older: Vec<(&RemoteMailbox, u32, Vec<u32>)>) -> Result<()> {
+        const CHUNK: usize = 250;
+        let total: usize = older.iter().map(|(_, _, u)| u.len()).sum();
+        let mut done = 0;
+        while done < BACKFILL_PER_PASS && older.iter().any(|(_, _, u)| !u.is_empty()) {
+            for (mb, uv, uids) in older.iter_mut().filter(|(_, _, u)| !u.is_empty()) {
+                priority::yield_to_user().await;
+                ctx.progress(format!("Older mail {done}/{total}"));
+                let chunk: Vec<u32> = uids.drain(..CHUNK.min(uids.len())).collect();
+                let r = async {
+                    let sel = s.select(&mb.remote_id).await?;
+                    if sel.uid_validity.unwrap_or(0) != *uv {
+                        bail!("UIDVALIDITY changed");
+                    }
+                    self.fetch_into(s, ctx, mb, *uv, &chunk, false).await
+                }
+                .await;
+                if let Err(e) = r {
+                    // Leave this mailbox for the next pass.
+                    warn!(mailbox = %mb.path, "older mail: {e:#}");
+                    uids.clear();
+                    if !matches!(tokio::time::timeout(std::time::Duration::from_secs(30), s.noop()).await, Ok(Ok(_))) {
+                        return Err(e);
+                    }
+                }
+                done += chunk.len();
+            }
+        }
+        if older.iter().any(|(_, _, u)| !u.is_empty()) {
+            ctx.more_to_sync();
+        }
         Ok(())
     }
 
@@ -149,7 +191,24 @@ impl ImapProvider {
     }
 
     /// Fetch and store whole messages (`body`) or just their headers.
+    /// Messages over [`MAX_SYNC_MESSAGE`] get headers only either way.
     async fn fetch_whole(&self, s: &mut Session, ctx: &SyncCtx, mb: &RemoteMailbox, uv: u32, uids: &[u32], body: bool) -> Result<()> {
+        if !body {
+            return self.fetch_batch(s, ctx, mb, uv, uids, false).await;
+        }
+        let sizes = sizes(s, &uid_set(uids)).await?;
+        let (small, big): (Vec<u32>, Vec<u32>) = uids.iter().copied().partition(|u| sizes.get(u).is_none_or(|&n| n <= MAX_SYNC_MESSAGE));
+        if !big.is_empty() {
+            debug!("{}: {} message(s) over {} MB synced as headers only", mb.remote_id, big.len(), MAX_SYNC_MESSAGE >> 20);
+            self.fetch_batch(s, ctx, mb, uv, &big, false).await?;
+        }
+        if small.is_empty() {
+            return Ok(());
+        }
+        self.fetch_batch(s, ctx, mb, uv, &small, true).await
+    }
+
+    async fn fetch_batch(&self, s: &mut Session, ctx: &SyncCtx, mb: &RemoteMailbox, uv: u32, uids: &[u32], body: bool) -> Result<()> {
         let q = if body { "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[])" } else { "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER])" };
         let mut stream = s.uid_fetch(uid_set(uids), q).await?;
         while let Some(f) = stream.try_next().await? {

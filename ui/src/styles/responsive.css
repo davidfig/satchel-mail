@@ -4,7 +4,8 @@
   .mail-view { grid-template-columns: 1fr; }
   .mail-view .reader { display: none; }
   .calendar-view { grid-template-columns: 1fr; }
-  .cal-side { display: none; }
+  .cal-side, .cal-side-toggle { display: none; }
+  .cal-new { display: inline-flex; }
   .contacts-view { grid-template-columns: 1fr; }
   .contacts-view .reader { display: none; }
 }

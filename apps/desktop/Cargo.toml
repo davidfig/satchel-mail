@@ -16,6 +16,7 @@ tauri-build = { version = "2.7.4", features = [] }
 satchel-api.workspace = true
 satchel-core.workspace = true
 satchel-providers.workspace = true
+satchel-mime.workspace = true
 anyhow.workspace = true
 base64.workspace = true
 serde.workspace = true
@@ -28,7 +29,12 @@ tauri-plugin-opener = "2.7.2"
 tauri-plugin-dialog = "2.8.3"
 tauri-plugin-notification = "2.7.0"
 tauri-plugin-single-instance = "2.5.4"
+tauri-plugin-window-state = "2.5.0"
 tauri-plugin-updater = { version = "2.14.0", optional = true }
+
+# setxattr, to set the quarantine attribute on saved attachments.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2.191"
 
 [features]
 # Passed by `tauri build`; enables production asset embedding.

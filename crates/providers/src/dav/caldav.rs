@@ -184,7 +184,7 @@ impl CalendarProvider for CalDavProvider {
                     return Err(anyhow::Error::new(ApiError::new(ErrorCode::Conflict, "the event changed on the server; refresh and try again")));
                 }
                 if !st.is_success() {
-                    return Err(crate::net::http_error(st, &resp.text().await.unwrap_or_default(), "CalDAV PUT"));
+                    return Err(crate::net::http_error(st, &crate::net::error_text(resp).await, "CalDAV PUT"));
                 }
                 out.event_etag = resp.headers().get("etag").and_then(|v| v.to_str().ok()).map(String::from);
                 out.event_remote_id = Some(href);
@@ -202,7 +202,7 @@ impl CalendarProvider for CalDavProvider {
                 let resp = self.dav.auth(rb)?.send().await?;
                 let st = resp.status();
                 if !(st.is_success() || st.as_u16() == 404) {
-                    return Err(crate::net::http_error(st, &resp.text().await.unwrap_or_default(), "CalDAV DELETE"));
+                    return Err(crate::net::http_error(st, &crate::net::error_text(resp).await, "CalDAV DELETE"));
                 }
             }
         }

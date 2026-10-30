@@ -10,6 +10,6 @@ satchel-api.workspace = true
 ammonia = "4.2.4"
 base64.workspace = true
 chrono.workspace = true
-html2text = "0.17.4"
+html5ever = "0.40.1"
 mail-builder = "1.0.0"
 mail-parser = "0.11.9"

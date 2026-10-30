@@ -2,6 +2,15 @@
 
 use super::*;
 
+/// The most References ids kept for a message (the last ones: the parent and
+/// its nearest ancestors). A hostile header can name tens of thousands.
+pub const MAX_REFERENCES: usize = 100;
+
+/// The References ids kept for a message.
+fn kept_refs(rec: &MessageRecord) -> &[String] {
+    &rec.references[rec.references.len().saturating_sub(MAX_REFERENCES)..]
+}
+
 impl Store {
     pub fn message_id_by_remote(&self, account_id: &str, remote_id: &str) -> Result<Option<String>> {
         self.r(|c| {
@@ -15,13 +24,16 @@ impl Store {
     pub fn upsert_message(&self, account_id: &str, rec: &MessageRecord, mailboxes: &[(String, Option<u32>)]) -> Result<(String, bool)> {
         let (id, inserted, threads) = self.w(|c| {
             let tx = c.transaction()?;
-            let existing: Option<(String, String)> = tx
-                .query_row("SELECT id, thread_id FROM messages WHERE account_id=? AND remote_id=?", [account_id, &rec.remote_id], |r| {
-                    Ok((r.get(0)?, r.get(1)?))
+            let existing: Option<(String, String, Option<String>)> = tx
+                .query_row("SELECT id, thread_id, blob_hash FROM messages WHERE account_id=? AND remote_id=?", [account_id, &rec.remote_id], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
                 })
                 .optional()?;
             let mut affected_threads: Vec<String> = vec![];
-            let (id, inserted) = if let Some((id, thread_id)) = existing {
+            let (id, inserted) = if let Some((id, thread_id, old_blob)) = existing {
+                if rec.blob_hash.is_some() && old_blob != rec.blob_hash {
+                    self.blobs_freed(old_blob);
+                }
                 tx.execute(
                     "UPDATE messages SET seen=?, flagged=?, answered=?, draft=?, remote_thread_id=COALESCE(?, remote_thread_id),
                        blob_hash=COALESCE(?, blob_hash), snippet=CASE WHEN ?='' THEN snippet ELSE ? END,
@@ -40,6 +52,7 @@ impl Store {
                 (id, false)
             } else {
                 let id = new_id();
+                let refs = kept_refs(rec);
                 let (thread_id, merge) = Self::assign_thread(&tx, account_id, rec)?;
                 tx.execute(
                     "INSERT INTO messages (id, account_id, remote_id, remote_thread_id, thread_id, message_id_hdr, in_reply_to, subject,
@@ -49,13 +62,13 @@ impl Store {
                     params![
                         id, account_id, rec.remote_id, rec.remote_thread_id, thread_id, rec.message_id_hdr, rec.in_reply_to, rec.subject,
                         rec.from.as_ref().and_then(|a| a.name.clone()), rec.from.as_ref().map(|a| a.email.clone()),
-                        to_json(&rec.to), to_json(&rec.cc), to_json(&rec.bcc), to_json(&rec.reply_to), to_json(&rec.references),
+                        to_json(&rec.to), to_json(&rec.cc), to_json(&rec.bcc), to_json(&rec.reply_to), to_json(&refs),
                         rec.date.timestamp_millis(), rec.snippet, rec.flags.seen, rec.flags.flagged, rec.flags.answered, rec.flags.draft,
                         rec.attachments.iter().any(|a| !a.inline), to_json(&rec.attachments), rec.blob_hash, rec.size as i64,
                         rec.partial, rec.blob_size as i64
                     ],
                 )?;
-                let mut refs: Vec<&String> = rec.references.iter().collect();
+                let mut refs: Vec<&String> = refs.iter().collect();
                 if let Some(irt) = &rec.in_reply_to {
                     refs.push(irt);
                 }
@@ -80,6 +93,11 @@ impl Store {
     }
 
     /// Pick a thread for a new message. Returns (thread id, other threads to merge into it).
+    ///
+    /// A message naming messages already stored joins the thread of the most
+    /// recent one, and never merges threads: anyone can name any Message-ID.
+    /// Only threads that all reply to this message (they arrived before it)
+    /// are merged, as they belong together whatever this message says.
     fn assign_thread(tx: &rusqlite::Transaction, account_id: &str, rec: &MessageRecord) -> Result<(String, Vec<String>)> {
         if let Some(rt) = &rec.remote_thread_id {
             let t: Option<String> = tx
@@ -87,45 +105,38 @@ impl Store {
                 .optional()?;
             return Ok((t.unwrap_or_else(new_id), vec![]));
         }
-        let mut found: Vec<String> = vec![];
-        let mut ids: Vec<String> = rec.references.clone();
-        if let Some(irt) = &rec.in_reply_to {
-            ids.push(irt.clone());
-        }
-        if let Some(mid) = &rec.message_id_hdr {
-            ids.push(mid.clone());
-        }
+        let mut ids: Vec<&String> = kept_refs(rec).iter().collect();
+        ids.extend(rec.in_reply_to.iter());
+        ids.extend(rec.message_id_hdr.iter());
         if !ids.is_empty() {
-            let placeholders = vec!["?"; ids.len()].join(",");
-            let mut s = tx.prepare(&format!(
-                "SELECT DISTINCT thread_id FROM messages WHERE account_id=? AND message_id_hdr IN ({placeholders})"
-            ))?;
-            let mut p: Vec<String> = vec![account_id.to_string()];
-            p.extend(ids.iter().cloned());
-            for t in s.query_map(params_from_iter(p.iter()), |r| r.get::<_, String>(0))? {
-                found.push(t?);
+            let named: Option<String> = tx
+                .query_row(
+                    "SELECT thread_id FROM messages WHERE account_id=? AND message_id_hdr IN (SELECT value FROM json_each(?))
+                     ORDER BY date DESC LIMIT 1",
+                    params![account_id, to_json(&ids)],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(t) = named {
+                return Ok((t, vec![]));
             }
         }
+        let mut found: Vec<String> = vec![];
         if let Some(mid) = &rec.message_id_hdr {
             // Replies that arrived before their parent.
             let mut s = tx.prepare(
-                "SELECT DISTINCT m.thread_id FROM message_refs r JOIN messages m ON m.id=r.message_id WHERE r.account_id=? AND r.ref=?",
+                "SELECT m.thread_id FROM message_refs r JOIN messages m ON m.id=r.message_id WHERE r.account_id=? AND r.ref=?
+                 GROUP BY m.thread_id ORDER BY MAX(m.date) DESC",
             )?;
             for t in s.query_map([account_id, mid], |r| r.get::<_, String>(0))? {
-                let t = t?;
-                if !found.contains(&t) {
-                    found.push(t);
-                }
+                found.push(t?);
             }
         }
-        found.dedup();
-        match found.len() {
-            0 => Ok((new_id(), vec![])),
-            _ => {
-                let first = found.remove(0);
-                Ok((first, found))
-            }
+        if found.is_empty() {
+            return Ok((new_id(), vec![]));
         }
+        let first = found.remove(0);
+        Ok((first, found))
     }
 
     fn set_memberships_tx(tx: &rusqlite::Transaction, message_id: &str, mailboxes: &[(String, Option<u32>)]) -> Result<()> {
@@ -152,6 +163,7 @@ impl Store {
                 )
                 .optional()?;
             if let Some(d) = dup {
+                self.blobs_freed(Self::blob_hashes_tx(&tx, "id=?", [&d])?);
                 tx.execute("DELETE FROM messages WHERE id=?", [d])?;
             }
             tx.execute("UPDATE messages SET remote_id=?, version=version+1, mirrored=0 WHERE id=?", params![new_remote_id, message_id])?;
@@ -204,7 +216,11 @@ impl Store {
     pub fn delete_message(&self, message_id: &str) -> Result<()> {
         let thread = self.thread_of(message_id)?;
         self.w(|c| {
-            c.execute("DELETE FROM messages WHERE id=?", [message_id])?;
+            let tx = c.transaction()?;
+            let freed = Self::blob_hashes_tx(&tx, "id=?", [message_id])?;
+            tx.execute("DELETE FROM messages WHERE id=?", [message_id])?;
+            tx.commit()?;
+            self.blobs_freed(freed);
             Ok(())
         })?;
         if let Some(t) = thread {
@@ -217,11 +233,15 @@ impl Store {
     pub fn remove_from_mailbox(&self, message_id: &str, mailbox_id: &str) -> Result<()> {
         let thread = self.thread_of(message_id)?;
         self.w(|c| {
-            c.execute("DELETE FROM message_mailboxes WHERE message_id=? AND mailbox_id=?", [message_id, mailbox_id])?;
-            c.execute(
+            let tx = c.transaction()?;
+            tx.execute("DELETE FROM message_mailboxes WHERE message_id=? AND mailbox_id=?", [message_id, mailbox_id])?;
+            let freed = Self::blob_hashes_tx(&tx, "id=? AND NOT EXISTS (SELECT 1 FROM message_mailboxes WHERE message_id=?)", [message_id, message_id])?;
+            tx.execute(
                 "DELETE FROM messages WHERE id=? AND NOT EXISTS (SELECT 1 FROM message_mailboxes WHERE message_id=?)",
                 [message_id, message_id],
             )?;
+            tx.commit()?;
+            self.blobs_freed(freed);
             Ok(())
         })?;
         if let Some(t) = thread {

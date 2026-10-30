@@ -9,12 +9,11 @@ pub(crate) fn from_markdown(store: &Store, text: &str) -> Result<DroppedProposal
     let threads: Vec<String> = fm.list("thread").into_iter().chain(fm.list("threads")).collect();
     let messages = || -> Result<Vec<String>> {
         let mut ids: Vec<String> = fm.list("message").into_iter().chain(fm.list("messages")).collect();
+        for id in &ids {
+            message(store, id)?;
+        }
         for t in &threads {
-            let found = store.thread_message_ids(t)?;
-            if found.is_empty() {
-                bail!("unknown thread {t}");
-            }
-            ids.extend(found);
+            ids.extend(thread_messages(store, t)?);
         }
         if ids.is_empty() {
             bail!("give `threads:` or `messages:`");
@@ -83,11 +82,15 @@ pub(crate) fn from_markdown(store: &Store, text: &str) -> Result<DroppedProposal
         }
         "update_event" => {
             let id = fm.str("event").ok_or_else(|| anyhow!("missing `event:` (an event_id from AGENDA.md)"))?;
-            let mut e = crate::calendar::get_event(store, id)?.ok_or_else(|| anyhow!("unknown event {id}"))?;
+            let mut e = event(store, id)?;
             apply_event_fields(&mut e, &fm, body)?;
             ProposalAction::UpdateEvent { event: e }
         }
-        "cancel_event" => ProposalAction::CancelEvent { event_id: fm.str("event").ok_or_else(|| anyhow!("missing `event:`"))?.to_string() },
+        "cancel_event" => {
+            let id = fm.str("event").ok_or_else(|| anyhow!("missing `event:`"))?;
+            event(store, id)?;
+            ProposalAction::CancelEvent { event_id: id.to_string() }
+        }
         "respond_to_invite" | "respond" => {
             let response = match fm.str("response").unwrap_or_default().to_lowercase().as_str() {
                 "accept" | "accepted" | "yes" => PartStat::Accepted,
@@ -95,11 +98,24 @@ pub(crate) fn from_markdown(store: &Store, text: &str) -> Result<DroppedProposal
                 "tentative" | "maybe" => PartStat::Tentative,
                 other => bail!("response: expected accept, decline or tentative, got {other:?}"),
             };
-            ProposalAction::RespondToInvite { event_id: fm.str("event").ok_or_else(|| anyhow!("missing `event:`"))?.to_string(), response }
+            let id = fm.str("event").ok_or_else(|| anyhow!("missing `event:`"))?;
+            event(store, id)?;
+            ProposalAction::RespondToInvite { event_id: id.to_string(), response }
         }
         "save_contact" | "contact" | "add_contact" | "update_contact" => ProposalAction::SaveContact { contact: contact(store, &fm, body)? },
+        "merge_contacts" | "merge_contact" | "merge" => {
+            // The first is kept; the others are merged into it.
+            let ids = fm.list("contacts");
+            for id in &ids {
+                contact_by_id(store, id)?.ok_or_else(|| anyhow!("unknown contact {id} (use a contact_id from contacts/CONTACTS.md)"))?;
+            }
+            if ids.len() < 2 {
+                bail!("give at least two `contacts:` (contact_ids from contacts/CONTACTS.md); the first is kept");
+            }
+            ProposalAction::MergeContacts { contact_ids: ids }
+        }
         other => bail!(
-            "unknown action {other:?}; use reply, draft, archive, move, labels, mark_read, mark_unread, flag, unflag, create_event, update_event, cancel_event, respond_to_invite or save_contact"
+            "unknown action {other:?}; use reply, draft, archive, move, labels, mark_read, mark_unread, flag, unflag, create_event, update_event, cancel_event, respond_to_invite, save_contact or merge_contacts"
         ),
     };
     let why = fm.str("why").or(fm.str("rationale")).unwrap_or_default().to_string();
@@ -117,7 +133,7 @@ pub(crate) fn from_markdown(store: &Store, text: &str) -> Result<DroppedProposal
 pub(crate) fn contact(store: &Store, fm: &FrontMatter, body: String) -> Result<Contact> {
     let mut c = match fm.str("contact") {
         Some(id) => {
-            let s = store.get_contact(id)?.filter(|c| !c.deleted).ok_or_else(|| anyhow!("unknown contact {id} (use a contact_id from contacts/CONTACTS.md)"))?;
+            let s = contact_by_id(store, id)?.ok_or_else(|| anyhow!("unknown contact {id} (use a contact_id from contacts/CONTACTS.md)"))?;
             Contact { id: Some(s.id), fields: s.fields, ..Default::default() }
         }
         None => Contact::default(),

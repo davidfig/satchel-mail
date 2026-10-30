@@ -66,18 +66,18 @@ impl JmapProvider {
         }
         let resp = self.auth(self.http.get(&self.session_url))?.send().await.context("JMAP session request failed")?;
         let st = resp.status();
-        let body = resp.text().await?;
+        let body = crate::net::text_capped(resp, crate::net::API_LIMIT).await?;
         if !st.is_success() {
             return Err(crate::net::http_error(st, &body, "JMAP session"));
         }
         let v: Value = serde_json::from_str(&body)?;
         let account_id = v["primaryAccounts"]["urn:ietf:params:jmap:mail"].as_str().context("server has no JMAP mail account")?.to_string();
-        let r = |k: &str| v[k].as_str().map(|u| rebase(u, &self.session_url));
+        let r = |k: &str, kind: Use| v[k].as_str().map(|u| endpoint(&rebase(u, &self.session_url), &self.session_url, kind)).transpose();
         let s = Session {
-            api_url: r("apiUrl").context("no apiUrl")?,
-            download_url: r("downloadUrl").context("no downloadUrl")?,
-            upload_url: r("uploadUrl").context("no uploadUrl")?,
-            event_source_url: r("eventSourceUrl"),
+            api_url: r("apiUrl", Use::Api)?.context("no apiUrl")?,
+            download_url: r("downloadUrl", Use::Download)?.context("no downloadUrl")?,
+            upload_url: r("uploadUrl", Use::Api)?.context("no uploadUrl")?,
+            event_source_url: r("eventSourceUrl", Use::Api)?,
             account_id,
             max_get: v["capabilities"]["urn:ietf:params:jmap:core"]["maxObjectsInGet"].as_u64().unwrap_or(256).min(500) as usize,
         };
@@ -87,11 +87,12 @@ impl JmapProvider {
 
     /// Run method calls; returns responses by call id. Errors on any method error.
     async fn call(&self, calls: Vec<Value>) -> Result<HashMap<String, Value>> {
+        satchel_core::provider::priority::yield_to_user().await;
         let s = self.session().await?;
         let body = json!({ "using": CAPS, "methodCalls": calls });
         let resp = self.auth(self.http.post(&s.api_url).json(&body))?.send().await.context("JMAP request failed")?;
         let st = resp.status();
-        let text = resp.text().await?;
+        let text = crate::net::text_capped(resp, crate::net::DATA_LIMIT).await?;
         if !st.is_success() {
             if st.as_u16() == 401 {
                 *self.session.lock().await = None;
@@ -159,18 +160,20 @@ impl JmapProvider {
 
     /// Download a blob's contents.
     async fn download(&self, s: &Session, blob: &str, ty: &str) -> Result<Vec<u8>> {
+        // The URL is a URI template (RFC 8620 §2): values are percent-encoded.
+        let enc = crate::net::enc;
         let url = s
             .download_url
-            .replace("{accountId}", &s.account_id)
-            .replace("{blobId}", blob)
+            .replace("{accountId}", &enc(&s.account_id))
+            .replace("{blobId}", &enc(blob))
             .replace("{name}", if ty == "message/rfc822" { "message.eml" } else { "part" })
-            .replace("{type}", ty);
+            .replace("{type}", &enc(ty));
         let resp = self.auth(self.http.get(&url))?.send().await?;
         let st = resp.status();
         if !st.is_success() {
-            return Err(crate::net::http_error(st, &resp.text().await.unwrap_or_default(), "JMAP download"));
+            return Err(crate::net::http_error(st, &crate::net::error_text(resp).await, "JMAP download"));
         }
-        Ok(resp.bytes().await?.to_vec())
+        crate::net::body_capped(resp, crate::net::DOWNLOAD_LIMIT).await
     }
 
     async fn get_emails(&self, ctx: &SyncCtx, acc: &str, ids: &[String]) -> Result<()> {
@@ -205,15 +208,19 @@ impl MailProvider for JmapProvider {
         ctx.set_mailboxes(&mbs)?;
         match ctx.cursor("jmap:email_state")? {
             Some(st) if !st.is_empty() => match self.delta_sync(ctx, &acc, &st).await {
-                Ok(()) => Ok(()),
+                Ok(()) => {}
                 Err(e) if e.chain().any(|c| c.to_string().contains("cannotCalculateChanges")) => {
                     debug!("JMAP state too old; full resync");
-                    self.full_sync(ctx, &acc).await
+                    self.full_sync(ctx, &acc).await?;
                 }
-                Err(e) => Err(e),
+                Err(e) => return Err(e),
             },
-            _ => self.full_sync(ctx, &acc).await,
+            _ => self.full_sync(ctx, &acc).await?,
         }
+        if let Err(e) = self.backfill(ctx, &acc).await {
+            warn!("JMAP older mail: {e:#}");
+        }
+        Ok(())
     }
 
     async fn fetch_raw(&self, _ctx: &SyncCtx, msg: &MessageRef) -> Result<Vec<u8>> {

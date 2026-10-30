@@ -48,3 +48,29 @@ fn durations() {
     assert_eq!(parse_duration("P1D"), Some(Duration::days(1)));
     assert_eq!(parse_duration("P2W"), Some(Duration::weeks(2)));
 }
+
+#[test]
+fn hostile_durations_do_not_panic() {
+    for d in ["P99999999999999W", "P99999999D", "PT9999999999999H", "PT99999999999999999999S", "P3654D"] {
+        assert_eq!(parse_duration(d), None, "{d}");
+    }
+    assert_eq!(parse_duration("P520W"), Some(Duration::weeks(520)));
+    assert_eq!(parse_duration("-PT15M"), Some(-Duration::minutes(15)));
+    for d in ["P99999999999999W", "P99999999D", "PT9999999999999H"] {
+        let ics = format!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x\r\nDTSTART:20260105T090000Z\r\nDURATION:{d}\r\nRRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        );
+        let c = parse(&ics);
+        let e = &c.events[0];
+        assert_eq!(e.end_utc(), e.start_utc());
+        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+        assert_eq!(expand(e, &[], from, to).len(), 3);
+    }
+    // An all-day event on the last representable date doesn't overflow either.
+    let max = parse("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:y\r\nDTSTART;VALUE=DATE:+2621431231\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+    if let Some(e) = max.events.first() {
+        let _ = e.end_utc();
+        let _ = expand(e, &[], DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC);
+    }
+}

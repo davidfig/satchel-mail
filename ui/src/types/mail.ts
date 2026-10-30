@@ -56,8 +56,20 @@ export interface MessageWarning {
 
 export interface Unsubscribe {
   url: string | null;
+  /** Only set when it names exactly one valid address. */
   mailto: string | null;
   one_click: boolean;
+  /** What `mailto` sends, to show before confirming. */
+  email?: UnsubscribeEmail | null;
+}
+
+/** An unsubscribe email exactly as it would be sent. */
+export interface UnsubscribeEmail {
+  to: string;
+  subject: string;
+  body: string;
+  /** `to` is on another domain than the sender's From. */
+  other_domain: boolean;
 }
 
 export type SenderVerdict = 'spam' | 'not_spam';

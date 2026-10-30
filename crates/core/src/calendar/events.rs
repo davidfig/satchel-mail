@@ -130,7 +130,7 @@ impl Engine {
     pub(crate) fn get_event(&self, caller: &Caller, event_id: &str) -> Result<Event> {
         let e = crate::calendar::get_event(&self.store, event_id)?.ok_or_else(|| not_found("event"))?;
         let cal = self.store.get_calendar(&e.calendar_id)?.ok_or_else(|| not_found("calendar"))?;
-        self.check_account(caller, &cal.cal.account_id)?;
+        self.check_account(caller, &cal.cal.account_id, "event")?;
         Ok(e)
     }
 
@@ -145,6 +145,11 @@ impl Engine {
         day_end_hour: Option<u32>,
         timezone: Option<&str>,
     ) -> Result<Vec<FreeSlot>> {
+        // The same bound as `list_events`: expanding years of recurrences
+        // and walking every day of them is slow.
+        if to - from > Duration::days(400) {
+            return Err(invalid("range too large (max 400 days)"));
+        }
         let tz: chrono_tz::Tz = timezone.unwrap_or("UTC").parse().map_err(|_| invalid("unknown timezone"))?;
         let ids = self.visible_calendar_ids(caller, None)?;
         let busy = crate::calendar::occurrences(&self.store, from, to, Some(&ids))?;

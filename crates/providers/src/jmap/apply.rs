@@ -5,10 +5,10 @@ use super::*;
 impl JmapProvider {
     pub(super) async fn upload(&self, raw: &[u8]) -> Result<String> {
         let s = self.session().await?;
-        let url = s.upload_url.replace("{accountId}", &s.account_id);
+        let url = s.upload_url.replace("{accountId}", &crate::net::enc(&s.account_id));
         let resp = self.auth(self.http.post(&url).header("Content-Type", "message/rfc822").body(raw.to_vec()))?.send().await?;
         let st = resp.status();
-        let t = resp.text().await?;
+        let t = crate::net::text_capped(resp, crate::net::API_LIMIT).await?;
         if !st.is_success() {
             return Err(crate::net::http_error(st, &t, "JMAP upload"));
         }

@@ -2,7 +2,7 @@
 
 import { api } from '../../api';
 import { h, icon, replace } from '../../lib/dom';
-import { fullDate, shortName } from '../../lib/format';
+import { domainOf, fullDate, shortName } from '../../lib/format';
 import { avatarLink, openPerson, personLink } from '../../lib/person';
 import { contextMenu, errorToast, popupMenu } from '../../lib/ui';
 import type { MenuItem } from '../../lib/ui';
@@ -144,7 +144,7 @@ export class Conversation {
     const more = h('button.icon-btn.convo-more', { 'aria-label': 'Message actions', on: { click: (e: MouseEvent) => this.menu(e.currentTarget as HTMLElement, m, swap) } }, icon('more', 16));
     contextMenu(row, () => this.menuItems(m, swap));
     const time = h('time', { datetime: m.date }, clock(m.date));
-    if (showName) row.append(h('div.convo-meta', mine ? time : [personLink(m.from), time]));
+    if (showName) row.append(h('div.convo-meta', mine ? time : [personLink(m.from), m.from && h('span.domain', { title: m.from.email }, domainOf(m.from)), time]));
     row.append(h('div.convo-line',
       !mine && (showName ? avatarLink(m.from) : h('span.avatar-gap')),
       body,

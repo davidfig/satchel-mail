@@ -138,6 +138,9 @@ pub fn get_event(store: &Store, id: &str) -> anyhow::Result<Option<Event>> {
     Ok(Some(e))
 }
 
+/// The most slots `free_slots` returns.
+pub const MAX_FREE_SLOTS: usize = 500;
+
 pub fn free_slots(
     busy: &[Occurrence],
     from: DateTime<Utc>,
@@ -174,7 +177,11 @@ pub fn free_slots(
                 cur = cur.max(from);
                 let end = end.min(to);
                 for (bs, be) in &intervals {
-                    if *be <= cur || *bs >= end {
+                    // Sorted by start: nothing after this one overlaps the day.
+                    if *bs >= end {
+                        break;
+                    }
+                    if *be <= cur {
                         continue;
                     }
                     if *bs > cur && *bs - cur >= duration {
@@ -186,6 +193,10 @@ pub fn free_slots(
                     out.push(FreeSlot { start: cur, end });
                 }
             }
+        }
+        if out.len() >= MAX_FREE_SLOTS {
+            out.truncate(MAX_FREE_SLOTS);
+            break;
         }
         day = day.succ_opt().unwrap();
     }

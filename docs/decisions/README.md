@@ -40,3 +40,12 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0034 | [Sender rules act on the server only for mail they're sure about](0034-sender-rules-act-only-on-authentic-mail.md) | Accepted |
 | 0035 | [Code layout: folders by domain, files under ~400 lines](0035-code-layout.md) | Accepted |
 | 0036 | [Download all mail without attachments, within a storage limit](0036-message-content-and-storage-limit.md) | Accepted |
+| 0037 | [The user's requests go before background sync](0037-user-requests-before-sync.md) | Accepted |
+| 0038 | [Background reads use their own connection](0038-separate-read-connections.md) | Accepted |
+| 0039 | [Newer mail first; older mail syncs over time](0039-newer-mail-first.md) | Accepted |
+| 0040 | [Hardening after the October security review](0040-security-review-hardening.md) | Accepted |
+| 0041 | [Changing the AI folder's location moves it](0041-moving-the-ai-folder.md) | Accepted |
+| 0042 | [Hardening after the second security pass](0042-second-security-pass.md) | Accepted |
+| 0043 | [Convert HTML mail to text ourselves](0043-html-to-text-in-tree.md) | Accepted |
+| 0044 | [Approved drafts can be sent straight from Review](0044-send-from-review.md) | Accepted |
+| 0045 | [Agents can propose merging contacts](0045-agents-propose-contact-merges.md) | Accepted |

@@ -18,7 +18,8 @@ impl Prop {
     }
 }
 
-pub(crate) fn unfold(s: &str) -> Vec<String> {
+/// Content lines with folding undone (RFC 5545 3.1); empty lines dropped.
+pub fn unfold(s: &str) -> Vec<String> {
     let mut out: Vec<String> = vec![];
     for raw in s.split('\n') {
         let line = raw.strip_suffix('\r').unwrap_or(raw);
@@ -103,7 +104,8 @@ pub(crate) fn escape(s: &str) -> String {
 }
 
 
-pub(crate) fn fold(line: &str) -> String {
+/// One content line folded at 74 octets, ending in CRLF.
+pub fn fold(line: &str) -> String {
     // Fold at 74 octets on char boundaries.
     let mut out = String::new();
     let mut count = 0;

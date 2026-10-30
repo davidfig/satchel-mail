@@ -64,6 +64,7 @@ export const api = {
   updateMailbox: (mailbox_id: Id, name: string, parent_id: Id | null) => call<Mailbox>('update_mailbox', { mailbox_id, name, parent_id }),
   deleteMailbox: (mailbox_id: Id) => call<{ moved_to_trash: number }>('delete_mailbox', { mailbox_id }),
   markAllRead: (mailbox_id: Id | null, role: MailboxRole | null) => call<{ message_ids: Id[] }>('mark_all_read', { mailbox_id, role }),
+  emptyMailbox: (mailbox_id: Id | null, role: MailboxRole | null) => call<{ deleted: number }>('empty_mailbox', { mailbox_id, role }),
   move: (message_ids: Id[], mailbox_id: Id) => call('move', { message_ids, mailbox_id }),
   archive: (message_ids: Id[]) => call('archive', { message_ids }),
   trash: (message_ids: Id[]) => call('trash', { message_ids }),

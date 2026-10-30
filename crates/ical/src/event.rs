@@ -54,13 +54,15 @@ impl ParsedEvent {
         if let Some(e) = &self.end {
             return e.to_utc();
         }
+        // Hostile values must not panic: fall back to a zero-length event.
+        let start = self.start_utc();
         if let Some(d) = self.duration {
-            return self.start_utc() + d;
+            return start.checked_add_signed(d).unwrap_or(start);
         }
         if self.start.is_date() {
-            self.start_utc() + Duration::days(1)
+            start.checked_add_signed(Duration::days(1)).unwrap_or(start)
         } else {
-            self.start_utc()
+            start
         }
     }
     pub fn duration(&self) -> Duration {

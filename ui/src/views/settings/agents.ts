@@ -3,7 +3,7 @@
 import { api } from '../../api';
 import { h, icon, replace } from '../../lib/dom';
 import { relative } from '../../lib/format';
-import { confirmDialog, errorToast, modal, toast } from '../../lib/ui';
+import { confirmDialog, copyBlock, errorToast, modal } from '../../lib/ui';
 import { store } from '../../state';
 import { transport } from '../../transport';
 import type { Agent, AgentPolicy } from '../../types';
@@ -21,7 +21,7 @@ export async function agents(view: SettingsView, el: HTMLElement) {
   const active = agents.filter((a) => !a.revoked && !a.builtin);
   replace(el,
     h('h1', 'AI agents'),
-    h('p.muted', 'Most AI tools work through the AI folder and need no setup here. Connect an agent for tools that use MCP, or to give one tool its own access limits. Every proposal waits in Review until you approve it. Agents can never send, delete or change settings.'),
+    h('p.muted', 'Most AI tools work through the AI folder and need no setup here. Connect an agent for tools that use MCP, or to give one tool its own access limits. Every proposal waits in AI Proposals until you approve it. Agents can never send, delete or change settings.'),
     h('div.card-list', active.map((a) =>
       h('div.account-card',
         icon('sparkle'),
@@ -88,15 +88,14 @@ export async function showToken(token: string, dataDir?: string) {
   const env = dataDir && transport.kind !== 'tauri' ? ` --env SATCHEL_DATA_DIR="${dataDir}"` : '';
   const claude = `claude mcp add satchel --env SATCHEL_AGENT_TOKEN=${token}${env} -- ${quoted} mcp`;
   const json = JSON.stringify({ mcpServers: { satchel: { command: cli, args: ['mcp'], env: { SATCHEL_AGENT_TOKEN: token, ...(env && dataDir ? { SATCHEL_DATA_DIR: dataDir } : {}) } } } }, null, 2);
-  const copy = (s: string) => () => void navigator.clipboard.writeText(s).then(() => toast('Copied'));
   modal('Agent token created', h('div.form',
     h('p', 'Copy this token now — it won’t be shown again.'),
-    h('div.copy-row', h('code.token', token), h('button', { title: 'Copy to clipboard', on: { click: copy(token) } }, 'Copy')),
+    copyBlock(token, 'code.token'),
     h('h3', 'Claude Code'),
-    h('div.copy-row', h('pre.snippet', claude), h('button', { title: 'Copy to clipboard', on: { click: copy(claude) } }, 'Copy')),
+    copyBlock(claude),
     h('h3', 'Claude Desktop / other MCP clients'),
-    h('div.copy-row', h('pre.snippet', json), h('button', { title: 'Copy to clipboard', on: { click: copy(json) } }, 'Copy')),
-    h('p.small.muted', 'Tools without MCP can use the AI folder instead; to give a proposal file this agent’s identity and limits, include the token as agent_token (see README.md there).')), { wide: true });
+    copyBlock(json),
+    h('p.small.muted', 'Tools without MCP can use the AI folder instead, with the folder’s own limits. Never put this token in a folder file: other tools can read the folder, so Satchel refuses files that contain one.')), { wide: true });
 }
 
 function policyLabel(p: AgentPolicy) {

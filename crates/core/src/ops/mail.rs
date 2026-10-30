@@ -92,6 +92,9 @@ impl Engine {
                 // off, so the op is never replayed. The rest is tidying up.
                 self.store.op_done(&op.id)?;
                 info!(account = %ctx.account.email, "message sent");
+                if let Err(e) = self.store.audit(&op.actor, "sent", &json!({ "account": ctx.account.email, "subject": p.get("subject"), "recipients": p.get("rcpts") })) {
+                    warn!("message sent, but recording it in the audit log failed: {e:#}");
+                }
                 let tidy = async {
                     if let Some(d) = draft_id {
                         self.store.delete_draft(&d)?;
@@ -100,7 +103,6 @@ impl Engine {
                     if let Some(sd) = server_draft.filter(|r| !r.id.is_empty()) {
                         self.store.delete_message(&sd.id)?;
                     }
-                    self.store.audit(&op.actor, "sent", &json!({ "account": ctx.account.email, "subject": p.get("subject") }))?;
                     if let Some(orig) = p.get("reply_to_message").and_then(Value::as_str)
                         && let Some(r) = self.store.message_ref(orig)?
                     {
@@ -173,6 +175,10 @@ impl Engine {
         if let Some(fwd) = &d.forward_of
             && let Some(m) = self.store.message_row(fwd)?
                 && let Some(raw) = m.blob_hash.as_ref().and_then(|h| self.blobs.get(h).ok().flatten()) {
+                    // Only the account's own mail goes out from it.
+                    if m.summary.account_id != d.account_id {
+                        return Err(crate::error::invalid("can't forward a message from another account"));
+                    }
                     if m.partial && m.attachments.iter().any(|a| !a.inline) {
                         return Err(crate::error::err(ErrorCode::Network, "the forwarded message's attachments aren't downloaded yet; open them, then send again"));
                     }

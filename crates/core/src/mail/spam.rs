@@ -39,6 +39,13 @@ impl Correspondents {
     }
 }
 
+/// Whether a parsed message doesn't fail the receiving server's SPF/DKIM/DMARC
+/// checks. Weaker than `sender_verified`: no results at all also pass, and
+/// any server's header counts, since a failure never grants trust.
+pub(crate) fn not_forged(p: &satchel_mime::Parsed) -> bool {
+    p.auth_results.as_deref().and_then(satchel_mime::auth_failure).is_none()
+}
+
 fn norm_name(n: &str) -> String {
     n.trim_matches(|c: char| c == '"' || c == '\'' || c.is_whitespace()).split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
@@ -76,7 +83,7 @@ impl Engine {
         let mut invites_removed = 0;
         for (account, refs) in self.group_by_account(ids)? {
             let ids: Vec<String> = refs.into_iter().map(|r| r.id).collect();
-            invites_removed += self.remove_spam_invites(&account, &ids, false)?;
+            invites_removed += self.remove_spam_invites(&account, &ids)?;
         }
         self.store.audit(actor, "marked_spam", &json!({ "senders": senders, "messages": ids.len(), "invites_removed": invites_removed }))?;
         Ok(json!({ "senders": senders, "also_moved": moved, "invites_removed": invites_removed }))
@@ -136,10 +143,11 @@ impl Engine {
         let (spam, ham): (Vec<_>, Vec<_>) = misplaced.into_iter().partition(|(_, v)| *v == SenderVerdict::Spam);
         let spam: Vec<String> = spam.into_iter().map(|(id, _)| id).collect();
         // A "not spam" rule trusts an address, and anyone can put any address
-        // in From. Only mail that doesn't fail sender authentication comes out
+        // in From. Only mail whose From domain the server verified comes out
         // of Junk, so a spoofed "bank" stays there. Without a body to check
         // yet, it waits for the next sync.
-        let ham: Vec<String> = ham.into_iter().map(|(id, _)| id).filter(|id| self.authentic(id)).collect();
+        let trusted = if ham.is_empty() { Default::default() } else { self.auth_servers(account_id) };
+        let ham: Vec<String> = ham.into_iter().map(|(id, _)| id).filter(|id| self.authentic(id, &trusted)).collect();
         if !spam.is_empty()
             && let Some(junk) = self.store.mailbox_by_role(account_id, MailboxRole::Junk)?
         {
@@ -153,12 +161,12 @@ impl Engine {
         Ok(spam.len() + ham.len())
     }
 
-    /// Whether a downloaded message passes (or doesn't fail) the receiving
-    /// server's SPF/DKIM/DMARC checks.
-    fn authentic(&self, id: &str) -> bool {
+    /// Whether a trusted server verified a downloaded message's From
+    /// domain (see `sender_verified_by`).
+    fn authentic(&self, id: &str, trusted: &satchel_mime::AuthServers) -> bool {
         let Ok(Some(m)) = self.store.message_row(id) else { return false };
         let Some(raw) = m.blob_hash.as_ref().and_then(|h| self.blobs.get(h).ok().flatten()) else { return false };
-        satchel_mime::parse(&raw).is_some_and(|p| p.auth_results.as_deref().and_then(satchel_mime::auth_failure).is_none())
+        satchel_mime::parse(&raw).is_some_and(|p| crate::mail::trust::sender_verified_by(&p, trusted))
     }
 
     /// Take events that spam invitations put on the calendar back off it,
@@ -166,26 +174,41 @@ impl Engine {
     /// address. Only events the user never answered and doesn't organize are
     /// removed. Returns events removed.
     ///
-    /// With `own_invites_only`, an event is removed only if the sender also
-    /// organizes it. Shared senders (calendar notification services, mailing
-    /// lists) relay invitations from people the user does want to hear from.
-    pub(crate) fn remove_spam_invites(&self, account_id: &str, message_ids: &[String], own_invites_only: bool) -> Result<usize> {
+    /// An event is removed only if the message's sender organizes it, both in
+    /// the invitation and on the calendar, and the message doesn't fail
+    /// sender checks. Matching on UID alone would let
+    /// anyone who learns a real meeting's UID get it deleted by sending a
+    /// spoofed invitation and having it marked as spam; and shared senders
+    /// (calendar notification services, mailing lists) relay invitations
+    /// from people the user does want to hear from.
+    pub(crate) fn remove_spam_invites(&self, account_id: &str, message_ids: &[String]) -> Result<usize> {
         let Some(acc) = self.store.get_account(account_id)? else { return Ok(0) };
         let mut removed = 0;
         for id in message_ids {
             let Some(m) = self.store.message_row(id)? else { continue };
-            let sender = m.summary.from.as_ref().map(|a| a.email.to_lowercase()).unwrap_or_default();
+            let sender = m.summary.from.as_ref().map(|a| a.email.trim().to_lowercase()).unwrap_or_default();
             let Some(raw) = m.blob_hash.as_ref().and_then(|h| self.blobs.get(h).ok().flatten()) else { continue };
             let Some(p) = satchel_mime::parse(&raw) else { continue };
-            let uids: HashSet<String> = p.calendar_parts.iter().flat_map(|ics| satchel_ical::parse(ics).events.into_iter().map(|e| e.uid)).collect();
-            for uid in uids {
+            // A message failing sender checks may not be from its organizer.
+            if !not_forged(&p) {
+                continue;
+            }
+            // (UID, organizer) of each invited event the sender organizes.
+            let invited: HashSet<(String, String)> = p
+                .calendar_parts
+                .iter()
+                .flat_map(|ics| satchel_ical::parse(ics).events)
+                .filter_map(|e| Some((e.uid, e.organizer?.email.trim().to_lowercase())))
+                .filter(|(_, org)| !sender.is_empty() && *org == sender)
+                .collect();
+            for (uid, _) in invited {
                 for stored in self.store.events_by_uid(account_id, &uid)? {
                     let Some(ev) = crate::calendar::get_event(&self.store, &stored.id)? else { continue };
                     let organizer_is_me = ev.organizer.as_ref().is_some_and(|o| o.email.eq_ignore_ascii_case(&acc.email));
                     let answered = !matches!(ev.my_status, None | Some(PartStat::NeedsAction));
                     let Some(cal) = self.store.get_calendar(&stored.calendar_id)? else { continue };
-                    let sender_organizes = ev.organizer.as_ref().is_some_and(|o| o.email.eq_ignore_ascii_case(&sender));
-                    if organizer_is_me || answered || cal.cal.read_only || (own_invites_only && !sender_organizes) {
+                    let sender_organizes = ev.organizer.as_ref().is_some_and(|o| o.email.trim().eq_ignore_ascii_case(&sender));
+                    if organizer_is_me || answered || cal.cal.read_only || !sender_organizes {
                         continue;
                     }
                     if !self.store.delete_event(&stored.id)? {
@@ -215,7 +238,7 @@ impl Engine {
     pub(crate) fn remove_blocked_invites(&self, account_id: &str) -> Result<usize> {
         let since = Utc::now() - chrono::Duration::days(60);
         let ids = self.store.spam_rule_messages_with_attachments(account_id, since)?;
-        self.remove_spam_invites(account_id, &ids, true)
+        self.remove_spam_invites(account_id, &ids)
     }
 
     // -- warnings -----------------------------------------------------------------
@@ -283,7 +306,8 @@ impl Engine {
             }
         }
         for a in p.attachments.iter().filter(|a| a.risky) {
-            warn(&mut out, WarningKind::RiskyAttachment, format!("{} can run code or imitate a sign-in page. Don't open it unless you expected it.", a.filename));
+            let what = if satchel_mime::is_archive(&a.filename) { "is an archive that can hide programs" } else { "can run code or imitate a sign-in page" };
+            warn(&mut out, WarningKind::RiskyAttachment, format!("{} {what}. Don't open it unless you expected it.", a.filename));
         }
         if let Some(inv) = invite
             && let Some(org) = &inv.organizer
@@ -309,13 +333,16 @@ impl Engine {
             self.store.audit("user", "unsubscribed", &json!({ "sender": sender, "via": "one_click" }))?;
             return Ok(json!({ "via": "one_click" }));
         }
-        if let Some((to, subject, body)) = u.mailto.as_deref().and_then(satchel_mime::parse_mailto) {
+        // Sends exactly what the confirmation showed (`Unsubscribe::email`):
+        // one validated address, one-line subject and body.
+        if let Some(e) = u.email {
             let acc = self.store.get_account(&m.summary.account_id)?.ok_or_else(|| not_found("account"))?;
+            let to = e.to.clone();
             let o = satchel_mime::Outgoing {
                 from: Address { name: Some(acc.display_name.clone()).filter(|s| !s.is_empty()), email: acc.email.clone() },
                 to: vec![Address::new(to.clone())],
-                subject: if subject.is_empty() { "unsubscribe".into() } else { subject },
-                text: if body.is_empty() { "unsubscribe".into() } else { body },
+                subject: e.subject,
+                text: e.body,
                 message_id: satchel_mime::new_message_id(&satchel_mime::email_domain(&acc.email)),
                 date: Utc::now(),
                 ..Default::default()

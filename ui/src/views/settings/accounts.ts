@@ -42,7 +42,7 @@ export function accounts(el: HTMLElement) {
           a.sync.error && h('div.small.error', a.sync.error),
           a.contacts_need_reconnect && h('div.small.muted', 'Contacts don’t sync yet: this sign-in predates contacts access. ',
             h('button.link', { title: 'Sign in again to allow Satchel to sync your contacts', on: { click: () => void reconnect(a) } }, 'Reconnect to sync contacts'))),
-        h('button', { title: 'Check this account for new mail now', on: { click: () => void api.syncNow(a.id).then(() => toast('Syncing…')) } }, 'Sync now'),
+        h('button', { title: 'Check this account for new mail now', on: { click: () => void api.syncNow(a.id).then(() => toast('Syncing…', { quiet: true })) } }, 'Sync now'),
         h('button.danger', {
           title: 'Remove this account from Satchel; nothing is deleted on the server',
           on: {
@@ -109,7 +109,7 @@ export function addAccount(p: Preset) {
     try {
       await api.addAccount(config(), cred());
       m.close();
-      toast('Account added. Syncing…', { kind: 'success' });
+      toast('Account added. Syncing…', { quiet: true });
       await store.refreshAccounts();
     } catch (e) {
       status.className = 'small error';
@@ -148,7 +148,7 @@ export async function oauth(p: Preset) {
       if (changed.has('accounts') && s.accounts.length > before) {
         off();
         m.close();
-        toast('Account added. Syncing…', { kind: 'success' });
+        toast('Account added. Syncing…', { quiet: true });
       }
     });
   } catch (e) {

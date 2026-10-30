@@ -3,6 +3,7 @@
 
 import { api } from '../../api';
 import { debounce, h, icon, replace } from '../../lib/dom';
+import { emptiable, emptyFolder } from '../../lib/folders';
 import { formatAddress } from '../../lib/format';
 import { bind, contextMenu, errorToast, toast } from '../../lib/ui';
 import type { MenuItem } from '../../lib/ui';
@@ -38,6 +39,12 @@ export class MailView {
    *  from the list (unflagged in Flagged, read under `is:unread`). */
   openSummary: ThreadSummary | null = null;
   replyBox: ReplyBox | null = null;
+  /** The conversation the reader shows or is loading. */
+  readerThread: string | null = null;
+  /** Bumped by every reader change, so a slower earlier load backs off. */
+  readerSeq = 0;
+  /** Settles when the reader has shown `readerThread`. */
+  readerLoad: Promise<void> = Promise.resolve();
   generation = 0;
 
   constructor() {
@@ -68,8 +75,9 @@ export class MailView {
     });
     store.subscribe((_, changed) => {
       if (changed.has('source')) void this.reload();
-      // A folder renamed here or elsewhere keeps its title current.
-      else if (changed.has('mailboxes') && store.state.source.kind === 'mailbox') this.renderHeader();
+      // A folder renamed here or elsewhere keeps its title current, and
+      // Empty Spam/Trash knows when there's nothing left.
+      else if (changed.has('mailboxes') && (store.state.source.kind === 'mailbox' || emptiable(store.state.source))) this.renderHeader();
     });
     const refresh = debounce(() => void this.refresh(), 300);
     store.onEvent((e) => {
@@ -83,7 +91,7 @@ export class MailView {
 
   show() {
     const sel = store.state.selectedThread;
-    if (sel && this.openThread?.thread_id !== sel) void this.showThread(sel, false);
+    if (sel) void this.showThread(sel, false);
     this.scroller.focus({ preventScroll: true });
   }
 
@@ -109,7 +117,8 @@ export class MailView {
         s.kind === 'person' && h('button.icon-btn', { title: `Back to ${s.back?.label ?? 'Inbox'}`, 'aria-label': 'Back', on: { click: () => store.set({ source: s.back ?? { kind: 'role', role: 'inbox', label: 'Inbox' } }) } }, icon('chevronLeft')),
         h('h1', (s.kind === 'person' && this.person?.summary?.name) || (s.kind === 'mailbox' && store.mailbox(s.mailbox_id)?.path) || s.label),
         h('span.spacer'),
-        h('button.icon-btn', { title: 'Refresh (sync now)', 'aria-label': 'Sync now', on: { click: () => void api.syncNow(null).then(() => toast('Syncing…')) } }, icon('refresh')),
+        this.emptyButton(s),
+        h('button.icon-btn', { title: 'Refresh (sync now)', 'aria-label': 'Sync now', on: { click: () => void api.syncNow(null).then(() => toast('Syncing…', { quiet: true })) } }, icon('refresh')),
         h('button.icon-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose'))),
       s.kind === 'person' ? this.personCard(s) : this.searchInput,
       n > 0 &&
@@ -128,6 +137,12 @@ export class MailView {
     );
   }
 
+  /** "Empty Spam" / "Empty Trash" while one of those is open. */
+  private emptyButton(s: MailSource) {
+    const e = emptiable(s);
+    return e && h('button.icon-btn', { title: `Empty ${e.label}: permanently delete everything in it`, 'aria-label': `Empty ${e.label}`, disabled: e.count === 0, on: { click: () => void emptyFolder(s) } }, icon('trash'));
+  }
+
   /** The summary for the person being shown, fetched once per set of addresses. */
   person: { key: string; summary: PersonSummary | null } | null = null;
   eventsOpen = false;
@@ -142,7 +157,7 @@ export class MailView {
     const sel = store.state.selectedThread;
     // A new folder or search: the old conversation mustn't stay on screen,
     // or its buttons would act on whatever the cursor lands on.
-    if (!sel && this.openThread) this.renderEmptyReader();
+    if (!sel && this.readerThread) this.renderEmptyReader();
     if (sel) {
       this.cursor = this.list.indexOf(sel);
       this.renderRows();
@@ -173,7 +188,7 @@ export class MailView {
     if (this.openThread) {
       const still = this.list.find(this.openThread.thread_id);
       if (still) this.openSummary = still;
-      if (still && still.message_count !== this.openThread.messages.length) void this.showThread(still.thread_id, false);
+      if (still && still.message_count !== this.openThread.messages.length) void this.showThread(still.thread_id, false, true);
     }
   }
 
@@ -215,6 +230,7 @@ export class MailView {
     bind('e', 'Archive', () => void this.act('archive'), s);
     bind('#', 'Delete', () => void this.act('trash'), s);
     bind('Backspace', 'Delete', () => void this.act('trash'), s);
+    bind('Delete', 'Delete', () => void this.act('trash'), s);
     bind('u', 'Mark unread', () => void this.act('unread'), s);
     bind('shift+i', 'Mark read', () => void this.act('read'), s);
     bind('!', 'Mark as spam / Not spam', () => void this.act(this.inSpam() ? 'not_spam' : 'spam'), s);
@@ -245,8 +261,7 @@ export class MailView {
   moveMenu(anchor: HTMLElement | { x: number; y: number }, threads?: ThreadSummary[]) { actions.moveMenu(this, anchor, threads); }
   moreMenu(anchor: HTMLElement, thread: Thread) { actions.moreMenu(this, anchor, thread); }
   renderEmptyReader() { reader.renderEmptyReader(this); }
-  showThread(threadId: string, markRead?: boolean) { return reader.showThread(this, threadId, markRead); }
-  renderThread(thread: Thread) { reader.renderThread(this, thread); }
+  showThread(threadId: string, markRead?: boolean, reload?: boolean) { return reader.showThread(this, threadId, markRead, reload); }
   reply(mode: 'reply' | 'reply_all' | 'forward', messageId?: string) { return reader.reply(this, mode, messageId); }
 }
 

@@ -33,6 +33,33 @@ fn html_to_text_links_and_wrapping() {
 }
 
 #[test]
+fn html_to_text_blocks_lists_and_quotes() {
+    // A whitespace-only list once crashed the old converter and stopped sync.
+    assert_eq!(html_to_text("<p>Rate us</p><ul> </ul><ul><li>one</li></ul>"), "Rate us\n\n• one");
+    assert_eq!(
+        html_to_text("<div><div>Hi <b>Bob</b>,</div><div><br></div><div>Line&nbsp;one<br>two</div></div><ol start=3><li>a<ul><li>b</li></ul></li><li>c</li></ol>"),
+        "Hi Bob,\n\nLine one\ntwo\n\n3. a\n  • b\n4. c"
+    );
+    assert_eq!(html_to_text("Thanks<blockquote><p>old</p><p>older</p></blockquote>Bye"), "Thanks\n\n> old\n>\n> older\n\nBye");
+    assert_eq!(html_to_text("<pre>  a  b\n\nc</pre>"), "a  b\n\nc");
+}
+
+#[test]
+fn html_to_text_tables_skipped_content_and_entities() {
+    // Layout tables read top to bottom; cells in a row are spaced apart.
+    assert_eq!(
+        html_to_text(r#"<table><tr><td>Trouble viewing? <a href="https://t.test/view?id=12345">View online</a></td></tr><tr><td>Total</td><td>$10</td></tr></table><p>Next</p>"#),
+        "Trouble viewing? View online (https://t.test/view?id=12345)\nTotal $10\n\nNext"
+    );
+    assert_eq!(
+        html_to_text("<html><head><title>T</title><style>p{color:red}</style></head><body><script>if (a<b) document.write('</div>x')</script><p>a &amp; b &lt;c&gt;</p></body></html>"),
+        "a & b <c>"
+    );
+    // Preview padding is invisible; an image-only link adds nothing.
+    assert_eq!(html_to_text("Sale\u{200C}&zwnj;&#847;&nbsp;now <a href=\"https://x.test/\"><img src=\"a.png\"></a> <a href=\"https://x.test/\">x.test</a>"), "Sale now x.test");
+}
+
+#[test]
 fn sanitize_blocks_scripts_and_remote() {
     let s = sanitize_html(
         r#"<p onclick="x()">hi</p><script>alert(1)</script><img src="https://t.example/p.gif"><img src="cid:abc"><div style="background:url(https://x/y.png)">z</div>"#,
@@ -151,4 +178,152 @@ fn rebuild_matches_stripped_copy() {
     let again = parse(&rebuild(&root).unwrap().raw).unwrap();
     assert_eq!(again.text, full.text);
     assert!(rebuild(&Part { headers: b"Content-Type: multipart/mixed\r\n".to_vec(), body: Body::Multipart(vec![]) }).is_none());
+}
+
+// -- unsubscribe by email ---------------------------------------------------------
+
+fn u_email(header: &str) -> satchel_api::UnsubscribeEmail {
+    parse_unsubscribe(header, None).unwrap().email.unwrap()
+}
+
+#[test]
+fn mailto_is_one_plain_address() {
+    // Extra recipients smuggled through percent-encoding or separators.
+    for bad in [
+        "mailto:u@x.test%3E,%20%3Cboss@corp.test",
+        "mailto:u@x.test,boss@corp.test",
+        "mailto:u@x.test;boss@corp.test",
+        "mailto:%22a%20b%22@x.test",
+        "mailto:u%40x@x.test",
+        "mailto:u@x.test%0D%0ABcc:boss@corp.test",
+        "mailto:u@x.test%20",
+        "mailto:u\\@x.test",
+        "mailto:(c)u@x.test",
+        "mailto:u@[127.0.0.1]",
+        "mailto:@x.test",
+        "mailto:u@",
+        "mailto:u@x..test",
+        "mailto:u%E2%80%AE@x.test",
+    ] {
+        assert_eq!(parse_mailto(bad), None, "{bad}");
+    }
+    // What's shown is what's sent, defaults included.
+    let e = u_email("<mailto:unsub@x.test>");
+    assert_eq!((e.subject.as_str(), e.body.as_str()), ("unsubscribe", "unsubscribe"));
+    assert_eq!(u_email("<mailto:a+list@x.test?subject=a+b>").to, "a+list@x.test");
+    // An invalid mailto isn't offered at all.
+    assert!(parse_unsubscribe("<mailto:a@x.test%3E,%3Cb@y.test>", None).is_none());
+    let u = parse_unsubscribe("<mailto:a@x.test%2Cb@y.test>, <mailto:ok@x.test>", None).unwrap();
+    assert_eq!(u.mailto.as_deref(), Some("mailto:ok@x.test"));
+    // Line breaks can't reach the headers; length is capped.
+    let long = "a".repeat(5000);
+    let (_, s, b) = parse_mailto(&format!("mailto:u@x.test?subject=Stop%0D%0ABcc:%20boss@corp.test&body={long}")).unwrap();
+    assert_eq!(s, "Stop Bcc: boss@corp.test");
+    assert_eq!(b.len(), crate::safety::MAILTO_BODY_MAX);
+}
+
+#[test]
+fn mailto_domain_check() {
+    let raw = b"From: News <news@shop.example.com>\r\nList-Unsubscribe: <mailto:u@lists.other.test>\r\nSubject: x\r\n\r\nhi\r\n";
+    assert!(parse(raw).unwrap().unsubscribe.unwrap().email.unwrap().other_domain);
+    let raw = b"From: News <news@shop.example.com>\r\nList-Unsubscribe: <mailto:u@bounce.example.com>\r\nSubject: x\r\n\r\nhi\r\n";
+    assert!(!parse(raw).unwrap().unsubscribe.unwrap().email.unwrap().other_domain);
+}
+
+#[test]
+fn many_links_convert_in_linear_time() {
+    let one = |n: usize| -> String {
+        (0..n).map(|i| format!(r#"<a href="https://x.test/{i}">https://x.test/{i}</a> <a href="https://y.test/{i}">y</a> "#)).collect()
+    };
+    let t = html_to_text(&one(3));
+    assert!(t.starts_with("https://x.test/0 y (https://y.test/0) https://x.test/1"), "{t}");
+    let start = std::time::Instant::now();
+    let t = html_to_text(&one(20_000));
+    assert!(t.contains("https://x.test/19999 y (https://y.test/19999)"));
+    assert!(!t.contains("https://x.test/5 (https://x.test/5)"));
+    assert!(start.elapsed() < std::time::Duration::from_secs(5), "took {:?}", start.elapsed());
+
+    let css = format!("<style>{}</style>", "a{background:URL(https://t.test/x)} ".repeat(20_000));
+    let start = std::time::Instant::now();
+    let s = sanitize_html(&css, false, &[]);
+    assert!(s.had_remote_content && !s.html.contains("t.test"));
+    assert!(start.elapsed() < std::time::Duration::from_secs(5), "took {:?}", start.elapsed());
+}
+
+#[test]
+fn huge_html_is_cut_with_a_note() {
+    let big = format!("<p>{}</p>", "word ".repeat(MAX_HTML_BYTES / 4));
+    let t = html_to_text(&big);
+    assert!(t.len() <= MAX_HTML_BYTES + 100 && t.ends_with("[This message was too long to show in full.]"));
+    let s = sanitize_html(&big, false, &[]);
+    assert!(s.html.len() <= MAX_HTML_BYTES + 200 && s.html.contains("too long to show in full"));
+    assert!(!sanitize_html("<p>short</p>", false, &[]).html.contains("too long"));
+}
+
+#[test]
+fn css_that_loads_without_url_counts_as_remote() {
+    for css in [
+        "@import 'https://t.test/a.css';",
+        "@IMPORT \"https://t.test/a.css\";",
+        "div{background-image:image-set('https://t.test/a.png' 1x)}",
+        r"div{background:\75rl(https://t.test/a.png)}",
+        r"div{background:u\72l(https://t.test/a.png)}",
+    ] {
+        let s = sanitize_html(&format!("<style>{css}</style><p>hi</p>"), false, &[]);
+        assert!(s.had_remote_content && !s.html.contains("t.test"), "{css}: {}", s.html);
+        let s = sanitize_html(&format!(r#"<div style="{}">hi</div>"#, css.replace('"', "'")), false, &[]);
+        assert!(s.had_remote_content && !s.html.contains("t.test"), "{css}: {}", s.html);
+    }
+    // Ordinary CSS is kept.
+    let s = sanitize_html("<style>p{color:red}</style><p style=\"font-weight:bold\">hi</p>", false, &[]);
+    assert!(!s.had_remote_content && s.html.contains("color:red") && s.html.contains("font-weight:bold"));
+    // Allowed remote content keeps its CSS.
+    let s = sanitize_html("<style>@import 'https://t.test/a.css';</style>", true, &[]);
+    assert!(s.html.contains("t.test"));
+}
+
+#[test]
+fn hostile_ids_and_types_are_dropped() {
+    let raw = b"From: a@x.test\r\nMessage-ID: <ok@x>\r\nIn-Reply-To: <bad\rid@x> <good@x>\r\nReferences: <a@x> <b\rc@x> <d@x>\r\n\r\nhi\r\n";
+    let p = parse(raw).unwrap();
+    assert!(p.in_reply_to.as_deref().is_none_or(is_valid_message_id), "{:?}", p.in_reply_to);
+    assert!(p.references.iter().all(|r| is_valid_message_id(r)), "{:?}", p.references);
+    assert!(p.references.contains(&"a@x".to_string()) && p.references.contains(&"d@x".to_string()));
+    assert!(!is_valid_message_id("a\r@x") && !is_valid_message_id("a b@x") && !is_valid_message_id("a>@x") && !is_valid_message_id(""));
+
+    let o = Outgoing {
+        from: Address::new("alice@x.test"),
+        to: vec![Address::new("bob@x.test")],
+        subject: "Re".into(),
+        text: "hi".into(),
+        message_id: "bad\r\nX-Evil: 1".into(),
+        in_reply_to: Some("x\rBcc: c@evil.test".into()),
+        references: vec!["ok@x".into(), "bad>\r\nX-Evil: 2".into()],
+        attachments: vec![
+            ("a.txt".into(), "text/plain\r\nX-Evil: 3".into(), b"a".to_vec()),
+            ("b.ics".into(), "text/calendar; method=REPLY; charset=utf-8".into(), b"b".to_vec()),
+            ("c.bin".into(), "text/plain; name=\"x\r\n\"".into(), b"c".to_vec()),
+        ],
+        date: chrono::Utc::now(),
+        ..Default::default()
+    };
+    let out = String::from_utf8(build(&o)).unwrap();
+    assert!(!out.contains("X-Evil") && !out.contains("Bcc:"), "{out}");
+    assert!(out.contains("<ok@x>") && out.contains("text/calendar; method=REPLY; charset=utf-8"), "{out}");
+    assert_eq!(out.matches("application/octet-stream").count(), 2, "{out}");
+}
+
+#[test]
+fn quotes_are_stripped_however_clients_mark_them() {
+    let gmail = "Thanks, see you then.\n\nOn Sat, Oct 17, 2026 at 12:23 AM Paul Christensen <\npaul@x.test> wrote:\n\n> earlier\n";
+    assert_eq!(strip_quotes(gmail), "Thanks, see you then.");
+    let gmail2 = "Sounds good.\nOn Fri, Sep 25, 2026 at 6:10 PM Paul <paul@x.test>\nwrote:\n> earlier\n";
+    assert_eq!(strip_quotes(gmail2), "Sounds good.");
+    let outlook = "Works for me.\n\n________________________________\nFrom: Bob <bob@x.test>\nSent: Monday\nTo: Alice\n\nOld text\n";
+    assert_eq!(strip_quotes(outlook), "Works for me.");
+    let outlook2 = "Yes.\n\nFrom: Bob <bob@x.test>\nSent: Monday, October 5, 2026 3:00 PM\nSubject: Re: x\n\nOld text\n";
+    assert_eq!(strip_quotes(outlook2), "Yes.");
+    // Ordinary sentences that look a little like these stay.
+    let kept = "On Monday we meet.\nFrom: the team\nSee you.";
+    assert_eq!(strip_quotes(kept), kept);
 }

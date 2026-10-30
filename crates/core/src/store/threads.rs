@@ -45,12 +45,20 @@ impl Store {
                 c.execute("DELETE FROM threads WHERE id=?", [thread_id])?;
                 return Ok(());
             }
-            // Count duplicate copies (same Message-ID in several folders) once.
-            let mut seen_mids = HashSet::new();
-            let unique: Vec<&M> = rows
-                .iter()
-                .filter(|m| m.mid.as_ref().map(|x| seen_mids.insert(x.clone())).unwrap_or(true))
-                .collect();
+            // Count copies of one message (the same Message-ID in several folders) once.
+            let mut seen: HashMap<&str, Vec<&M>> = HashMap::new();
+            let mut unique: Vec<&M> = vec![];
+            for m in &rows {
+                if let Some(mid) = m.mid.as_deref() {
+                    let kept = seen.entry(mid).or_default();
+                    let from = m.from.as_ref().map(|a| a.email.as_str());
+                    if kept.iter().any(|k| super::message_reads::is_copy(k.from.as_ref().map(|a| a.email.as_str()), &k.snippet, from, &m.snippet)) {
+                        continue;
+                    }
+                    kept.push(m);
+                }
+                unique.push(m);
+            }
             let last = rows.last().unwrap();
             let first = &rows[0];
             let mut participants: Vec<Address> = vec![];
@@ -190,10 +198,13 @@ impl Store {
             msg_conds.push("NOT EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND mb.role IN ('trash','junk'))".into());
         }
         if let Some(a) = &f.account_ids {
+            // On the thread, not the message: inside the EXISTS, SQLite picks
+            // the account index over messages_thread and scans the account's
+            // whole mailbox once per thread (seconds on a real account).
             let ph = vec!["?"; a.len()].join(",");
-            msg_conds.push(format!("m.account_id IN ({ph})"));
+            pre_where.push(format!("t.account_id IN ({ph})"));
             for x in a {
-                p.push(V::Text(x.clone()));
+                pre_p.push(V::Text(x.clone()));
             }
         }
         if !f.from.is_empty() {

@@ -1,25 +1,34 @@
-// Calendar: day / week / month / agenda views, event editor, RSVP.
+// Calendar: day / week / month / agenda views, event details, RSVP. The
+// editor and right-click menus live in calendar-editor.ts and calendar-menus.ts.
 
 import { api } from '../api';
 import { h, icon, replace } from '../lib/dom';
-import { parseAddresses, timeRange } from '../lib/format';
-import { bind, confirmDialog, errorToast, modal, toast } from '../lib/ui';
+import { timeRange } from '../lib/format';
+import { bind, confirmDialog, contextMenu, errorToast, modal, toast } from '../lib/ui';
 import { store } from '../state';
 import type { CalEvent, Calendar, Occurrence, PartStat } from '../types';
+import { editEvent } from './calendar-editor';
+import { overflowMenu } from '../lib/overflow';
+import { swipePager } from '../lib/swipe';
+import { calendarMenu, eventMenu, slotMenu } from './calendar-menus';
+import type { CalendarActions } from './calendar-menus';
 
 type Mode = 'day' | 'week' | 'month' | 'agenda';
 const HOUR_PX = 48;
-const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const SIDE_KEY = 'satchel.calendarSideCollapsed';
+
+function readSideCollapsed() {
+  try {
+    return localStorage.getItem(SIDE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const startOfWeek = (d: Date) => addDays(startOfDay(d), -((d.getDay() + 6) % 7));
 const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
-
-function toLocalInput(d: Date) {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
 
 export class CalendarView {
   root = h('div.calendar-view');
@@ -27,6 +36,18 @@ export class CalendarView {
   private anchor = startOfDay(new Date());
   private calendars: Calendar[] = [];
   private occurrences: Occurrence[] = [];
+  private sideCollapsed = readSideCollapsed();
+  /** The previous, current and next periods side by side; slides when swiping. */
+  private body?: HTMLElement;
+  private act: CalendarActions = {
+    details: (o) => this.details(o),
+    editEvent: (o) => void api.getEvent(o.event.id!).then((full) => this.edit(full), errorToast),
+    respond: (o, r) => void this.respond(o.event, r),
+    deleteEvent: (o) => void this.deleteEvent(o.event),
+    newEvent: (at, allDay) => this.edit(null, at, allDay),
+    openDay: (d) => { this.anchor = startOfDay(d); this.setMode('day'); },
+    setVisible: (visible) => void this.setVisible(visible),
+  };
 
   constructor() {
     store.onEvent((e) => {
@@ -43,6 +64,18 @@ export class CalendarView {
     bind('m', 'Month view', () => this.setMode('month'), s);
     bind('a', 'Agenda view', () => this.setMode('agenda'), s);
     bind('n', 'New event', () => this.edit(null), s);
+    bind('[', 'Collapse or expand calendar list', () => this.toggleSide(), s);
+    swipePager(this.root, () => this.body, (dir) => this.step(dir));
+  }
+
+  private toggleSide() {
+    this.sideCollapsed = !this.sideCollapsed;
+    try {
+      localStorage.setItem(SIDE_KEY, this.sideCollapsed ? '1' : '0');
+    } catch {
+      /* remembering is a convenience */
+    }
+    this.render();
   }
 
   show() {
@@ -54,15 +87,18 @@ export class CalendarView {
     void this.load();
   }
 
-  private step(dir: number) {
+  /** The anchor `dir` periods away from the current one. */
+  private shifted(dir: number): Date {
     const a = this.anchor;
-    this.anchor =
-      this.mode === 'day' ? addDays(a, dir) : this.mode === 'week' ? addDays(a, 7 * dir) : this.mode === 'month' ? new Date(a.getFullYear(), a.getMonth() + dir, 1) : addDays(a, 14 * dir);
-    void this.load();
+    return this.mode === 'day' ? addDays(a, dir) : this.mode === 'week' ? addDays(a, 7 * dir) : this.mode === 'month' ? new Date(a.getFullYear(), a.getMonth() + dir, 1) : addDays(a, 14 * dir);
   }
 
-  private range(): [Date, Date] {
-    const a = this.anchor;
+  private step(dir: number) {
+    this.anchor = this.shifted(dir);
+    return this.load();
+  }
+
+  private range(a = this.anchor): [Date, Date] {
     switch (this.mode) {
       case 'day':
         return [a, addDays(a, 1)];
@@ -79,7 +115,9 @@ export class CalendarView {
   }
 
   private async load() {
-    const [from, to] = this.range();
+    // The neighbouring periods too, so they show while swiping.
+    const [from] = this.range(this.shifted(-1));
+    const [, to] = this.range(this.shifted(1));
     try {
       const [cals, occ] = await Promise.all([api.listCalendars(), api.listEvents(from.toISOString(), to.toISOString())]);
       this.calendars = cals;
@@ -100,33 +138,60 @@ export class CalendarView {
 
   private render() {
     const modes: Mode[] = ['day', 'week', 'month', 'agenda'];
-    const body = this.mode === 'month' ? this.month() : this.mode === 'agenda' ? this.agenda() : this.timeGrid(this.mode === 'day' ? 1 : 7);
+    const view = (a: Date) => (this.mode === 'month' ? this.month(a) : this.mode === 'agenda' ? this.agenda(a) : this.timeGrid(this.mode === 'day' ? 1 : 7, a));
+    const pane = (dir: number) => {
+      const el = h(`div.cal-pane${dir < 0 ? '.prev' : dir > 0 ? '.next' : '.cur'}`, view(this.shifted(dir)));
+      // Neighbours are only there to be seen mid-swipe.
+      if (dir) el.inert = true;
+      return el;
+    };
+    const body = h('div.cal-track', pane(-1), pane(0), pane(1));
+    // Keep the time grid's scroll position when moving between periods.
+    const scrolled = this.root.querySelector('.cal-pane.cur .time-scroll')?.scrollTop;
+    this.body = body;
+    this.root.classList.toggle('side-collapsed', this.sideCollapsed);
+    const name = (m: Mode) => m[0].toUpperCase() + m.slice(1);
+    const tabs = modes.map((m) => ({
+      el: h(`button${this.mode === m ? '.active' : ''}`, { role: 'tab', title: `${name(m)} view (${m[0]})`, on: { click: () => this.setMode(m) } }, name(m)),
+      item: () => ({ label: `${name(m)} view`, hint: m[0], icon: this.mode === m ? 'check' : undefined, run: () => this.setMode(m) }),
+      pinned: this.mode === m,
+    }));
+    const title = h('h1', this.title());
+    const head = h('header.cal-head',
+      h('button.icon-btn.cal-side-toggle', {
+        title: `${this.sideCollapsed ? 'Show' : 'Hide'} calendar list ([)`,
+        'aria-label': this.sideCollapsed ? 'Show calendar list' : 'Hide calendar list',
+        'aria-expanded': String(!this.sideCollapsed),
+        on: { click: () => this.toggleSide() },
+      }, icon('panel')),
+      h('button.icon-btn.cal-new', { title: 'New event (n)', 'aria-label': 'New event', on: { click: () => this.edit(null) } }, icon('plus')),
+      h('button', { title: 'Go to today (t)', on: { click: () => { this.anchor = startOfDay(new Date()); void this.load(); } } }, 'Today'),
+      h('button.icon-btn', { title: 'Previous (k)', on: { click: () => this.step(-1) } }, icon('chevronLeft')),
+      h('button.icon-btn', { title: 'Next (j)', on: { click: () => this.step(1) } }, icon('chevronRight')),
+      title,
+      h('span.spacer'),
+      h('div.segmented', { role: 'tablist' }, tabs.map((t) => t.el)));
+    head.append(overflowMenu(head, tabs, [title]));
     replace(
       this.root,
-      h('aside.cal-side',
-        h('button.primary', { title: 'Create an event', on: { click: () => this.edit(null) } }, icon('plus', 16), 'New event'),
+      !this.sideCollapsed && h('aside.cal-side',
+        h('button.primary', { title: 'Create an event (n)', on: { click: () => this.edit(null) } }, icon('plus', 16), 'New event'),
         this.miniMonth(),
         h('div.cal-list',
           h('div.mb-section', 'Calendars'),
           this.calendars.length === 0 && h('p.muted.small', 'No calendars yet. Calendars sync from accounts that support them.'),
           this.calendars.map((c) =>
-            h('label.cal-toggle',
+            this.withMenu(h('label.cal-toggle',
               h('input', { type: 'checkbox', checked: c.visible, on: { change: async (e: Event) => { await api.setCalendarVisible(c.id, (e.target as HTMLInputElement).checked); void this.load(); } } }),
               h('span.swatch', { style: { background: c.color } }),
               h('span', c.name),
-              c.read_only && h('span.muted.small', ' (read-only)'))))),
-      h('section.cal-main',
-        h('header.cal-head',
-          h('button', { title: 'Go to today (t)', on: { click: () => { this.anchor = startOfDay(new Date()); void this.load(); } } }, 'Today'),
-          h('button.icon-btn', { title: 'Previous (k)', on: { click: () => this.step(-1) } }, icon('chevronLeft')),
-          h('button.icon-btn', { title: 'Next (j)', on: { click: () => this.step(1) } }, icon('chevronRight')),
-          h('h1', this.title()),
-          h('span.spacer'),
-          h('div.segmented', { role: 'tablist' }, modes.map((m) => h(`button${this.mode === m ? '.active' : ''}`, { role: 'tab', title: `${m[0].toUpperCase() + m.slice(1)} view (${m[0]})`, on: { click: () => this.setMode(m) } }, m[0].toUpperCase() + m.slice(1))))),
-        body),
+              c.read_only && h('span.muted.small', ' (read-only)')), () => calendarMenu(this.act, c, this.calendars))))),
+      h('section.cal-main', head, body),
     );
-    const grid = this.root.querySelector('.time-scroll');
-    if (grid && !grid.scrollTop) grid.scrollTop = HOUR_PX * 7.5;
+    const grids = [...body.querySelectorAll<HTMLElement>('.time-scroll')];
+    for (const g of grids) g.scrollTop = scrolled || HOUR_PX * 7.5;
+    const cur = body.querySelector<HTMLElement>('.cal-pane.cur .time-scroll');
+    cur?.addEventListener('scroll', () => grids.forEach((g) => g !== cur && (g.scrollTop = cur.scrollTop)), { passive: true });
   }
 
   private miniMonth(): HTMLElement {
@@ -152,14 +217,20 @@ export class CalendarView {
   private chip(o: Occurrence, compact = false): HTMLElement {
     const declined = o.event.my_status === 'declined';
     const needs = o.event.my_status === 'needs_action';
-    return h(`button.event-chip${declined ? '.declined' : ''}${needs ? '.needs' : ''}${o.event.status === 'tentative' ? '.tentative' : ''}`,
+    return this.withMenu(h(`button.event-chip${declined ? '.declined' : ''}${needs ? '.needs' : ''}${o.event.status === 'tentative' ? '.tentative' : ''}`,
       { style: { '--ev': o.color } as unknown as Partial<CSSStyleDeclaration>, title: `${o.event.title}\n${timeRange(o.start, o.end, o.event.all_day)}`, on: { click: (e: MouseEvent) => { e.stopPropagation(); this.details(o); } } },
       !compact && !o.event.all_day && h('span.ev-time', new Date(o.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })),
-      h('span.ev-title', o.event.title));
+      h('span.ev-title', o.event.title)), o);
   }
 
-  private timeGrid(days: number): HTMLElement {
-    const [from] = this.range();
+  /** Attach a right-click menu built by `build`, or the event menu for `o`. */
+  private withMenu<T extends HTMLElement>(el: T, build: Occurrence | ((e: MouseEvent) => ReturnType<typeof eventMenu>)): T {
+    contextMenu(el, typeof build === 'function' ? build : () => eventMenu(this.act, build, this.calendars.find((c) => c.id === build.event.calendar_id)));
+    return el;
+  }
+
+  private timeGrid(days: number, a: Date): HTMLElement {
+    const [from] = this.range(a);
     const dates = Array.from({ length: days }, (_, i) => addDays(from, i));
     const today = new Date();
     const allDay = (d: Date) => this.eventsOn(d).filter((o) => o.event.all_day || new Date(o.end).getTime() - new Date(o.start).getTime() >= 86_400_000);
@@ -193,14 +264,14 @@ export class CalendarView {
       }
       flush();
       const dayStart = startOfDay(d).getTime();
+      // The half hour under the pointer.
+      const slotAt = (e: MouseEvent) => {
+        const y = e.clientY - column.getBoundingClientRect().top;
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(y / HOUR_PX), y % HOUR_PX >= HOUR_PX / 2 ? 30 : 0);
+      };
       const column = h(`div.day-col${sameDay(d, today) ? '.today' : ''}`, {
         on: {
-          dblclick: (e: MouseEvent) => {
-            const y = e.offsetY;
-            const hour = Math.floor(y / HOUR_PX);
-            const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, y % HOUR_PX >= HOUR_PX / 2 ? 30 : 0);
-            this.edit(null, start);
-          },
+          dblclick: (e: MouseEvent) => this.edit(null, slotAt(e)),
         },
       },
         Array.from({ length: 24 }, (_, hr) => h('div.hour-line', { style: { top: `${hr * HOUR_PX}px` } })),
@@ -216,49 +287,49 @@ export class CalendarView {
           return el;
         }),
         sameDay(d, today) && h('div.now-line', { style: { top: `${((today.getHours() * 60 + today.getMinutes()) / 60) * HOUR_PX}px` } }));
-      return column;
+      return this.withMenu(column, (e) => slotMenu(this.act, slotAt(e), true, days === 1));
     };
     return h(`div.time-grid.days-${days}`,
       h('div.grid-head',
         h('div.gutter'),
         dates.map((d) => h(`div.day-head${sameDay(d, today) ? '.today' : ''}`, h('span.dow', d.toLocaleDateString([], { weekday: 'short' })), h('span.dom', String(d.getDate()))))),
-      h('div.allday-row', h('div.gutter.muted.small', 'all-day'), dates.map((d) => h('div.allday-cell', allDay(d).map((o) => this.chip(o, true))))),
+      h('div.allday-row', h('div.gutter.muted.small', 'all-day'), dates.map((d) => this.withMenu(h('div.allday-cell', allDay(d).map((o) => this.chip(o, true))), () => slotMenu(this.act, d, false, days === 1)))),
       h('div.time-scroll',
         h('div.time-body',
           h('div.gutter.hours', Array.from({ length: 24 }, (_, hr) => h('div.hour-label', { style: { top: `${hr * HOUR_PX}px` } }, hr === 0 ? '' : new Date(2000, 0, 1, hr).toLocaleTimeString([], { hour: 'numeric' })))),
           dates.map(col))));
   }
 
-  private month(): HTMLElement {
-    const [from] = this.range();
+  private month(a: Date): HTMLElement {
+    const [from] = this.range(a);
     const today = new Date();
     return h('div.month-grid',
       ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => h('div.month-dow', d)),
       Array.from({ length: 42 }, (_, i) => {
         const d = addDays(from, i);
         const evs = this.eventsOn(d).sort((a, b) => Number(b.event.all_day) - Number(a.event.all_day) || a.start.localeCompare(b.start));
-        return h(`div.month-cell${d.getMonth() !== this.anchor.getMonth() ? '.other' : ''}${sameDay(d, today) ? '.today' : ''}`,
+        return this.withMenu(h(`div.month-cell${d.getMonth() !== a.getMonth() ? '.other' : ''}${sameDay(d, today) ? '.today' : ''}`,
           { on: { dblclick: () => this.edit(null, new Date(d.getFullYear(), d.getMonth(), d.getDate(), 9)) } },
           h('button.month-date', { title: 'Open this day', on: { click: () => { this.anchor = d; this.setMode('day'); } } }, String(d.getDate())),
           evs.slice(0, 4).map((o) => this.chip(o)),
-          evs.length > 4 && h('span.more.muted.small', `+${evs.length - 4} more`));
+          evs.length > 4 && h('span.more.muted.small', `+${evs.length - 4} more`)), () => slotMenu(this.act, d, false, false));
       }));
   }
 
-  private agenda(): HTMLElement {
-    const [from, to] = this.range();
+  private agenda(a: Date): HTMLElement {
+    const [from, to] = this.range(a);
     const days: HTMLElement[] = [];
     for (let d = from; d < to; d = addDays(d, 1)) {
       const evs = this.eventsOn(d);
       if (!evs.length) continue;
       days.push(h('section.agenda-day',
         h('h3', d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })),
-        evs.map((o) => h('button.agenda-item', { on: { click: () => this.details(o) } },
+        evs.map((o) => this.withMenu(h('button.agenda-item', { on: { click: () => this.details(o) } },
           h('span.swatch', { style: { background: o.color } }),
           h('span.agenda-time', timeRange(o.start, o.end, o.event.all_day)),
           h('span.agenda-title', o.event.title),
           o.event.location && h('span.muted.small', o.event.location),
-          o.event.my_status === 'needs_action' && h('span.status-chip.pending', 'needs response')))));
+          o.event.my_status === 'needs_action' && h('span.status-chip.pending', 'needs response')), o))));
     }
     return h('div.agenda', days.length ? days : h('div.empty-state', icon('calendar', 36), h('p', 'No events in the next 30 days.')));
   }
@@ -267,14 +338,7 @@ export class CalendarView {
     const e = o.event;
     const cal = this.calendars.find((c) => c.id === e.calendar_id);
     const respond = async (r: PartStat) => {
-      try {
-        await api.respondToInvite(e.id!, r);
-        m.close();
-        toast('Response saved');
-        void this.load();
-      } catch (err) {
-        errorToast(err);
-      }
+      if (await this.respond(e, r)) m.close();
     };
     const m = modal(e.title, h('div.event-details',
       h('div', icon('clock', 16), ` ${new Date(o.start).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} · ${timeRange(o.start, o.end, e.all_day)}`),
@@ -292,14 +356,7 @@ export class CalendarView {
           !cal?.read_only && h('button.danger', {
             on: {
               click: async () => {
-                if (!(await confirmDialog('Delete event?', e.rrule ? 'This deletes every occurrence of this repeating event.' : `Delete “${e.title}”?`, 'Delete', true))) return;
-                try {
-                  await api.deleteEvent(e.id!);
-                  m.close();
-                  void this.load();
-                } catch (err) {
-                  errorToast(err);
-                }
+                if (await this.deleteEvent(e)) m.close();
               },
             },
           }, 'Delete'),
@@ -308,79 +365,41 @@ export class CalendarView {
       });
   }
 
-  private edit(existing: CalEvent | null, at?: Date) {
-    const writable = this.calendars.filter((c) => !c.read_only);
-    if (!writable.length) {
-      toast('No writable calendars. Add an account with calendar access first.', { kind: 'error' });
-      return;
+  private async respond(e: CalEvent, r: PartStat): Promise<boolean> {
+    try {
+      await api.respondToInvite(e.id!, r);
+      toast('Response saved', { quiet: true });
+      void this.load();
+      return true;
+    } catch (err) {
+      errorToast(err);
+      return false;
     }
-    const start = existing ? new Date(existing.start) : at ?? new Date(Math.ceil(Date.now() / 1_800_000) * 1_800_000);
-    const end = existing ? new Date(existing.end) : new Date(start.getTime() + 3_600_000);
-    const f = {
-      title: h('input', { type: 'text', value: existing?.title ?? '', placeholder: 'Add title', 'aria-label': 'Title' }),
-      cal: h('select', { 'aria-label': 'Calendar', disabled: !!existing }, writable.map((c) => h('option', { value: c.id, selected: c.id === existing?.calendar_id }, c.name))),
-      allDay: h('input', { type: 'checkbox', checked: existing?.all_day ?? false }),
-      start: h('input', { type: 'datetime-local', value: toLocalInput(start), 'aria-label': 'Start' }),
-      end: h('input', { type: 'datetime-local', value: toLocalInput(end), 'aria-label': 'End' }),
-      repeat: h('select', { 'aria-label': 'Repeat' },
-        [['', 'Does not repeat'], ['FREQ=DAILY', 'Daily'], ['FREQ=WEEKLY', 'Weekly'], ['FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', 'Every weekday'], ['FREQ=MONTHLY', 'Monthly'], ['FREQ=YEARLY', 'Yearly']].map(([v, l]) =>
-          h('option', { value: v, selected: (existing?.rrule ?? '') === v }, l))),
-      location: h('input', { type: 'text', value: existing?.location ?? '', placeholder: 'Location' }),
-      attendees: h('input', { type: 'text', value: existing?.attendees.map((a) => a.email).join(', ') ?? '', placeholder: 'Invite people (emails, comma-separated)' }),
-      desc: h('textarea', { rows: 4, placeholder: 'Description' }),
-    };
-    f.desc.value = existing?.description ?? '';
-    if (existing?.rrule && ![...f.repeat.options].some((o) => o.value === existing.rrule)) f.repeat.appendChild(h('option', { value: existing.rrule, selected: true }, `Custom (${existing.rrule})`));
-    const save = async () => {
-      const s = new Date(f.start.value);
-      let e = new Date(f.end.value);
-      const allDay = f.allDay.checked;
-      if (allDay) {
-        const sd = new Date(Date.UTC(s.getFullYear(), s.getMonth(), s.getDate()));
-        const ed = new Date(Date.UTC(e.getFullYear(), e.getMonth(), e.getDate() + 1));
-        s.setTime(sd.getTime());
-        e = ed;
-      }
-      if (!f.title.value.trim()) return toast('Add a title', { kind: 'error' });
-      if (e <= s) return toast('End must be after start', { kind: 'error' });
-      const prev = existing?.attendees ?? [];
-      const attendees = parseAddresses(f.attendees.value).map((a) => prev.find((p) => p.email.toLowerCase() === a.email.toLowerCase()) ?? { email: a.email, name: a.name ?? null, status: 'needs_action' as PartStat });
-      const ev: CalEvent = {
-        ...(existing ?? { status: 'confirmed', organizer: null, my_status: null, uid: null }),
-        id: existing?.id ?? null,
-        calendar_id: f.cal.value,
-        title: f.title.value.trim(),
-        start: s.toISOString(),
-        end: e.toISOString(),
-        all_day: allDay,
-        timezone: allDay ? null : existing?.timezone ?? localTz,
-        rrule: f.repeat.value || null,
-        location: f.location.value.trim(),
-        description: f.desc.value,
-        attendees,
-      } as CalEvent;
-      try {
-        if (existing) await api.updateEvent(ev);
-        else await api.createEvent(ev);
-        m.close();
-        void this.load();
-        if (attendees.length && !existing) toast('Invitations will be sent by your calendar server');
-      } catch (err) {
-        errorToast(err);
-      }
-    };
-    const m = modal(existing ? 'Edit event' : 'New event', h('div.event-form',
-      f.title,
-      h('label.row', 'Calendar', f.cal),
-      h('div.row', h('label', 'Starts', f.start), h('label', 'Ends', f.end)),
-      h('label.row.inline', f.allDay, 'All day'),
-      h('label.row', 'Repeat', f.repeat),
-      h('label.row', icon('location', 16), f.location),
-      h('label.row', icon('user', 16), f.attendees),
-      f.desc,
-      h('p.muted.small', `Times are in ${existing?.timezone ?? localTz}.`)), {
-      footer: h('div.row.end', h('button', { on: { click: () => m.close() } }, 'Cancel'), h('button.primary', { on: { click: () => void save() } }, existing ? 'Save' : 'Create')),
-    });
-    f.title.focus();
+  }
+
+  /** Delete after asking; true when it was deleted. */
+  private async deleteEvent(e: CalEvent): Promise<boolean> {
+    if (!(await confirmDialog('Delete event?', e.rrule ? 'This deletes every occurrence of this repeating event.' : `Delete “${e.title}”?`, 'Delete', true))) return false;
+    try {
+      await api.deleteEvent(e.id!);
+      void this.load();
+      return true;
+    } catch (err) {
+      errorToast(err);
+      return false;
+    }
+  }
+
+  private async setVisible(visible: (c: Calendar) => boolean) {
+    try {
+      await Promise.all(this.calendars.filter((c) => visible(c) !== c.visible).map((c) => api.setCalendarVisible(c.id, visible(c))));
+    } catch (err) {
+      errorToast(err);
+    }
+    void this.load();
+  }
+
+  private edit(existing: CalEvent | null, at?: Date, allDay = false) {
+    editEvent(this.calendars, existing, () => void this.load(), at, allDay);
   }
 }

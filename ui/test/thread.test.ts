@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { DOMParser } from 'linkedom';
-import { looksDesigned, planFold, stripHtmlQuotes, trimUrl } from '../src/lib/thread.ts';
+import { followHref, followTarget, linkScheme, looksDesigned, planFold, routeLinks, stripHtmlQuotes, trimUrl } from '../src/lib/thread.ts';
 
 globalThis.DOMParser = DOMParser as unknown as typeof globalThis.DOMParser;
 
@@ -182,5 +182,52 @@ describe('trimUrl', () => {
     assert.deepEqual(trimUrl('https://en.wikipedia.org/wiki/Satchel_(bag)'), ['https://en.wikipedia.org/wiki/Satchel_(bag)', '']);
     assert.deepEqual(trimUrl('https://en.wikipedia.org/wiki/Satchel_(bag)).'), ['https://en.wikipedia.org/wiki/Satchel_(bag)', ').']);
     assert.deepEqual(trimUrl('https://x.test/?q=a'), ['https://x.test/?q=a', '']);
+  });
+});
+
+describe('routeLinks', () => {
+  const origin = 'http://127.0.0.1:7781';
+  const hrefs = (html: string) => [...new DOMParser().parseFromString(`<html><body>${html}</body></html>`, 'text/html').querySelectorAll('a')].map((a) => a.getAttribute('href'));
+
+  test('web and email links go through our #follow page, which gives them back', () => {
+    const html = routeLinks('<p><a href="https://evil.test/a?b=1&amp;c=2#x">bank.com</a> <a href="mailto:a@x.test?subject=hi">mail</a></p>', origin, false);
+    const [web, mail] = hrefs(html);
+    assert.equal(web, `${origin}/#follow=${encodeURIComponent('https://evil.test/a?b=1&c=2#x')}`);
+    assert.deepEqual(followTarget(web!, origin), { url: 'https://evil.test/a?b=1&c=2#x', cautious: false });
+    assert.deepEqual(followTarget(mail!, origin), { url: 'mailto:a@x.test?subject=hi', cautious: false });
+    assert.ok(html.includes('target="_blank"') && html.includes('rel="noopener noreferrer"'));
+  });
+
+  test('cautious mail says so', () => {
+    const [href] = hrefs(routeLinks('<a href="https://x.test/">x</a>', origin, true));
+    assert.ok(href!.endsWith('&cautious=1'));
+    assert.deepEqual(followTarget(href!, origin), { url: 'https://x.test/', cautious: true });
+  });
+
+  test('anchors and cid: parts stay; other schemes are routed and then refused', () => {
+    const [top, cid, js] = hrefs(routeLinks('<a href="#top">top</a><a href="cid:logo">logo</a><a href="javascript:alert(1)">x</a>', origin, false));
+    assert.equal(top, '#top');
+    assert.equal(cid, 'cid:logo');
+    assert.equal(linkScheme(followTarget(js!, origin)!.url), null);
+  });
+
+  test('HTML without links comes back unchanged', () => {
+    assert.equal(routeLinks('<p>Hi <b>there</b></p>', origin, false), '<p>Hi <b>there</b></p>');
+  });
+
+  test('only our own origin’s #follow counts, and #session is left alone', () => {
+    assert.equal(followTarget(followHref('http://evil.test', 'https://x.test/', false), origin), null);
+    assert.equal(followTarget(`${origin}/#session=abc`, origin), null);
+    assert.equal(followTarget(`${origin}/other#follow=x`, origin), null);
+    assert.equal(followTarget('not a url', origin), null);
+  });
+});
+
+describe('linkScheme', () => {
+  test('follows web and email links only', () => {
+    assert.equal(linkScheme('HTTPS://x.test'), 'web');
+    assert.equal(linkScheme('http://x.test'), 'web');
+    assert.equal(linkScheme('mailto:a@x.test'), 'mail');
+    for (const u of ['javascript:alert(1)', 'data:text/html,x', 'file:///etc/passwd', 'ftp://x.test', '//x.test', '']) assert.equal(linkScheme(u), null);
   });
 });

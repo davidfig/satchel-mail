@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use tracing::{debug, warn};
 
-use crate::provider::{Download, MailProvider, SyncCtx};
+use crate::provider::{Download, MailProvider, Providers, SyncCtx, priority};
 use crate::store::StoredBlob;
 
 /// What a message with no known size is assumed to take, and the most any
@@ -21,7 +21,11 @@ impl Engine {
     /// first: all mail, or the last `download_days`. With a storage limit,
     /// the oldest content is freed to make room for newer mail, and
     /// downloading stops when only older mail is left to free.
-    pub(crate) async fn fetch_bodies(&self, ctx: &SyncCtx, mail: &dyn MailProvider, limit: u32) {
+    /// Gives way to the user: pauses while they wait on the account, and
+    /// pushes their queued changes between messages (0037).
+    pub(crate) async fn fetch_bodies(&self, ctx: &SyncCtx, providers: &Providers, limit: u32) {
+        let Some(mail) = providers.mail.as_deref() else { return };
+        let gate = self.gate(&ctx.account.id);
         let s = &ctx.settings;
         let since = s.download_days.map(|d| Utc::now() - chrono::Duration::days(d.max(s.initial_sync_days).max(7) as i64));
         let cap = s.storage_limit_mb.map(|mb| mb.saturating_mul(1024 * 1024));
@@ -30,7 +34,8 @@ impl Engine {
                 warn!(account = %ctx.account.email, "freeing space: {e:#}");
             }
         let ids = ctx.store.messages_without_body(&ctx.account.id, since, limit).unwrap_or_default();
-        let total = ids.len();
+        // The whole backlog, not just this batch, so progress means something.
+        let left = ctx.store.count_without_body(&ctx.account.id, since).unwrap_or(ids.len() as u64);
         for (i, (id, date, size)) in ids.into_iter().enumerate() {
             if let Some(cap) = cap {
                 let need = if size == 0 { UNKNOWN_SIZE } else { size.min(MAX_ESTIMATE) };
@@ -44,9 +49,11 @@ impl Engine {
                 }
             }
             if i % 25 == 0 {
-                ctx.progress(format!("Downloading messages {}/{}", i, total));
+                ctx.progress(format!("Downloading messages: {} left", thousands(left.saturating_sub(i as u64))));
             }
-            if let Err(e) = self.ensure_body(ctx, mail, &id).await {
+            gate.wait_for_users().await;
+            self.run_due_ops(ctx, providers).await;
+            if let Err(e) = priority::in_background(gate.clone(), self.ensure_body(ctx, mail, &id)).await {
                 debug!("body {id}: {e:#}");
             }
         }
@@ -110,5 +117,29 @@ impl Engine {
                 self.blobs.delete(old)?;
             }
         Ok(())
+    }
+}
+
+/// `n` with thousands separated by commas.
+fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn thousands() {
+        assert_eq!(super::thousands(0), "0");
+        assert_eq!(super::thousands(999), "999");
+        assert_eq!(super::thousands(31656), "31,656");
+        assert_eq!(super::thousands(1234567), "1,234,567");
     }
 }

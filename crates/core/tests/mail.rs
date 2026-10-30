@@ -133,3 +133,42 @@ async fn a_second_move_finds_the_message_where_the_first_put_it() {
     assert_eq!(ids[0], vec!["r3".to_string()]);
     assert_eq!(ids[1], vec![format!("Archive#{invoice}")], "the second move uses the id the first one gave it");
 }
+
+/// One message stored in two folders (a note to self lands in Sent and the
+/// Inbox; a server may keep a copy in Trash). The reader shows one copy, so
+/// acting on it must reach the others.
+async fn two_copies(fake: &Fake, engine: &Arc<Engine>, account: &str, a: &str, b: &str) -> (String, String) {
+    let note = raw("self", "Me <me@x.test>", "Note to self", None);
+    deliver(fake, "c1", note.clone(), a);
+    deliver(fake, "c2", note, b);
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| engine.store().message_id_by_remote(account, "c2").unwrap().is_some()).await;
+    let id = |rid| engine.store().message_id_by_remote(account, rid).unwrap().unwrap();
+    (id("c1"), id("c2"))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_a_message_moves_every_copy_and_keeps_the_one_in_trash() {
+    let (engine, fake, account, _dir) = setup().await;
+    let (in_trash, archived) = two_copies(&fake, &engine, &account, "Trash", "Archive").await;
+    // The copy on screen happens to be the one already in Trash.
+    engine.handle(&Caller::User, Command::Trash { message_ids: vec![in_trash.clone()] }).await.unwrap();
+    assert!(in_role(&engine, &account, "c2", MailboxRole::Trash), "the other copy goes to Trash");
+    assert!(!in_role(&engine, &account, "c2", MailboxRole::Archive));
+    assert!(engine.store().message_ref(&in_trash).unwrap().is_some(), "nothing is deleted forever while a copy was elsewhere");
+    // Deleting again, now that every copy is in Trash, deletes for good.
+    engine.handle(&Caller::User, Command::Trash { message_ids: vec![archived.clone()] }).await.unwrap();
+    assert!(engine.store().message_ref(&in_trash).unwrap().is_none());
+    assert!(engine.store().message_ref(&archived).unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn archiving_takes_every_copy_out_of_the_inbox_and_flags_reach_them_all() {
+    let (engine, fake, account, _dir) = setup().await;
+    let (in_inbox, in_junk) = two_copies(&fake, &engine, &account, "INBOX", "Junk").await;
+    engine.handle(&Caller::User, Command::SetFlags { message_ids: vec![in_junk.clone()], seen: Some(true), flagged: None }).await.unwrap();
+    assert!(engine.store().message_ref(&in_inbox).unwrap().unwrap().flags.seen, "reading one copy reads them all");
+    engine.handle(&Caller::User, Command::Archive { message_ids: vec![in_junk] }).await.unwrap();
+    assert!(!in_role(&engine, &account, "c1", MailboxRole::Inbox), "the Inbox copy is archived");
+    assert!(in_role(&engine, &account, "c1", MailboxRole::Archive));
+}

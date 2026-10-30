@@ -92,11 +92,14 @@ impl Store {
     }
 
     /// Addresses the user has written to (or replied to), with the names
-    /// they appear under. Used to spot impersonation.
+    /// they appear under. Used to spot impersonation. Only mail in a Sent
+    /// folder counts as written by the user.
     pub fn correspondents(&self) -> Result<Vec<(String, Option<String>)>> {
         self.r(|c| {
             let mut s = c.prepare(
-                "WITH sent AS (SELECT m.to_json, m.cc_json FROM messages m JOIN accounts a ON a.id = m.account_id AND m.from_email = a.email COLLATE NOCASE)
+                "WITH sent AS (SELECT m.to_json, m.cc_json FROM messages m JOIN accounts a ON a.id = m.account_id AND m.from_email = a.email COLLATE NOCASE
+                               WHERE EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id = mm.mailbox_id
+                                             WHERE mm.message_id = m.id AND mb.role = 'sent'))
                  SELECT lower(json_extract(j.value, '$.email')), json_extract(j.value, '$.name') FROM sent, json_each(sent.to_json) j
                  UNION
                  SELECT lower(json_extract(j.value, '$.email')), json_extract(j.value, '$.name') FROM sent, json_each(sent.cc_json) j

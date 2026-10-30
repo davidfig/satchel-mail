@@ -76,6 +76,10 @@ pub(crate) fn normalize_tzid(tz: &str) -> String {
     mapped.to_string()
 }
 
+/// Longest DURATION we accept (about ten years); anything longer is hostile
+/// or a mistake, and would overflow date arithmetic further on.
+pub(crate) const MAX_DURATION_DAYS: i64 = 3653;
+
 pub(crate) fn parse_duration(s: &str) -> Option<Duration> {
     // PnW / PnDTnHnMnS, optional sign.
     let (neg, s) = match s.strip_prefix('-') {
@@ -87,23 +91,30 @@ pub(crate) fn parse_duration(s: &str) -> Option<Duration> {
     let mut num = String::new();
     let mut in_time = false;
     for c in s.chars() {
-        match c {
-            '0'..='9' => num.push(c),
-            'T' => in_time = true,
-            'W' => total += Duration::weeks(num.parse().ok()?),
-            'D' => total += Duration::days(num.parse().ok()?),
-            'H' if in_time => total += Duration::hours(num.parse().ok()?),
-            'M' if in_time => total += Duration::minutes(num.parse().ok()?),
-            'S' if in_time => total += Duration::seconds(num.parse().ok()?),
+        let part = match c {
+            '0'..='9' => {
+                num.push(c);
+                continue;
+            }
+            'T' => {
+                in_time = true;
+                continue;
+            }
+            'W' => Duration::try_weeks(num.parse().ok()?)?,
+            'D' => Duration::try_days(num.parse().ok()?)?,
+            'H' if in_time => Duration::try_hours(num.parse().ok()?)?,
+            'M' if in_time => Duration::try_minutes(num.parse().ok()?)?,
+            'S' if in_time => Duration::try_seconds(num.parse().ok()?)?,
             _ => return None,
+        };
+        total = total.checked_add(&part)?;
+        if total > Duration::days(MAX_DURATION_DAYS) {
+            return None;
         }
-        if !c.is_ascii_digit() && c != 'T' {
-            num.clear();
-        }
+        num.clear();
     }
     Some(if neg { -total } else { total })
 }
-
 
 pub(crate) fn fmt_utc(d: &DateTime<Utc>) -> String {
     d.format("%Y%m%dT%H%M%SZ").to_string()

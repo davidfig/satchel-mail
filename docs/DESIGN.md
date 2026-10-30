@@ -138,7 +138,7 @@ AI action ──► Proposal{ops[], rationale, agent, source refs} (pending_revi
 
 - Ops are durable (survive restart, work offline) and idempotent per provider.
 - **Drafts are special**: an AI-proposed draft is *not* written to the server Drafts folder until approved — it lives only in the proposal. Option (setting): "sync AI drafts to server Drafts folder" so you can review from your phone; still never sent.
-- **`Send` can never originate from an AI scope.** Only a human action in the UI produces a `Send` op. Approving an AI draft opens it in the composer pre-filled; the human hits send.
+- **`Send` can never originate from an AI scope.** Only a human action in the UI produces a `Send` op. Review offers Send (the human presses it, with the usual undo window) or Save as draft, which opens it in the composer (0044).
 - Calendar proposals render as a diff ("Move *Standup* Tue 9:00 → 10:00; invites 4 attendees") and, optionally, as ghost events on the calendar view.
 - Conflict handling: if the target changed since the proposal was made (etag/modseq mismatch), the proposal is marked **stale** and must be re-reviewed.
 - Everything is written to an **audit log**: who/what proposed, what was approved, what was sent.

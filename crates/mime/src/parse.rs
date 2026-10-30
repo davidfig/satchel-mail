@@ -101,13 +101,17 @@ pub fn parse(raw: &[u8]) -> Option<Parsed> {
             .map(|d| d.is_inline())
             .unwrap_or(false)
             || (part.content_id().is_some() && part.attachment_name().is_none());
+        // Checked before cleaning, so hidden characters can't change the verdict;
+        // inline parts too, since clients still offer them for saving.
+        let risky = is_risky_attachment(part.attachment_name().unwrap_or(""), &mime_type);
         attachments.push(Attachment {
             id: i.to_string(),
             filename: part
                 .attachment_name()
-                .map(|s| s.to_string())
+                .map(clean_filename)
+                .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| default_filename(&mime_type, i)),
-            risky: !inline && is_risky_attachment(part.attachment_name().unwrap_or(""), &mime_type),
+            risky,
             mime_type,
             size: part.contents().len() as u64,
             inline,
@@ -134,18 +138,23 @@ pub fn parse(raw: &[u8]) -> Option<Parsed> {
             .find(|(n, _)| n.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.split_whitespace().collect::<Vec<_>>().join(" "))
     };
-    let unsubscribe = header("List-Unsubscribe").and_then(|lu| parse_unsubscribe(&lu, header("List-Unsubscribe-Post").as_deref()));
+    let from = convert_addresses(msg.from()).into_iter().next();
+    let mut unsubscribe = header("List-Unsubscribe").and_then(|lu| parse_unsubscribe(&lu, header("List-Unsubscribe-Post").as_deref()));
+    if let Some(e) = unsubscribe.as_mut().and_then(|u| u.email.as_mut()) {
+        let from_domain = from.as_ref().map(|f| base_domain(&email_domain(&f.email))).unwrap_or_default();
+        e.other_domain = base_domain(&email_domain(&e.to)) != from_domain;
+    }
     Some(Parsed {
         subject: msg.subject().unwrap_or("").trim().to_string(),
-        from: convert_addresses(msg.from()).into_iter().next(),
+        from,
         to: convert_addresses(msg.to()),
         cc: convert_addresses(msg.cc()),
         bcc: convert_addresses(msg.bcc()),
         reply_to: convert_addresses(msg.reply_to()),
         date,
-        message_id: msg.message_id().map(|s| s.to_string()),
-        in_reply_to: header_ids(msg.in_reply_to()).into_iter().next(),
-        references: header_ids(msg.references()),
+        message_id: msg.message_id().map(|s| s.to_string()).filter(|i| is_valid_message_id(i)),
+        in_reply_to: header_ids(msg.in_reply_to()).into_iter().find(|i| is_valid_message_id(i)),
+        references: header_ids(msg.references()).into_iter().filter(|i| is_valid_message_id(i)).collect(),
         text,
         html,
         attachments,

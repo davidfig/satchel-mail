@@ -17,11 +17,15 @@ export class ThreadWindow {
   private inflight = new Map<number, Promise<void>>();
   private gen = 0;
 
-  constructor(
-    private base: () => ThreadQuery,
-    private onChange: () => void,
-    private onError: (e: unknown) => void,
-  ) {}
+  private base: () => ThreadQuery;
+  private onChange: () => void;
+  private onError: (e: unknown) => void;
+
+  constructor(base: () => ThreadQuery, onChange: () => void, onError: (e: unknown) => void) {
+    this.base = base;
+    this.onChange = onChange;
+    this.onError = onError;
+  }
 
   /** Start over (new mailbox or search). */
   async reset() {
@@ -111,6 +115,43 @@ export class ThreadWindow {
       if (t) return t;
     }
     return undefined;
+  }
+
+  /** Drop threads from the cached rows before the server confirms (optimistic
+   *  archive/delete). Later rows shift up. A page left short because the rows
+   *  that should fill it aren't cached is kept short (its tail shows as
+   *  placeholders) rather than dropped, so the visible rows don't blank out;
+   *  the refresh that follows the action fills it in. Returns how many were removed. */
+  remove(threadIds: Set<string>): number {
+    ++this.gen;
+    this.inflight.clear();
+    const old = [...this.pages.keys()].sort((a, b) => a - b);
+    const next = new Map<number, ThreadSummary[]>();
+    let removed = 0;
+    for (let k = 0; k < old.length; ) {
+      // A run of consecutive cached pages, re-chunked after filtering.
+      const start = old[k];
+      let rows: ThreadSummary[] = [];
+      for (; k < old.length && old[k] === start + rows.length / PAGE; k++) rows = rows.concat(this.pages.get(old[k])!);
+      const runEnd = start * PAGE + rows.length;
+      const kept = rows.filter((t) => !threadIds.has(t.thread_id));
+      const shift = removed;
+      removed += rows.length - kept.length;
+      // Rows before this run shifted it up by `shift`; pages start on page boundaries.
+      const absStart = start * PAGE - shift;
+      const firstPage = Math.ceil(absStart / PAGE);
+      const atEnd = runEnd >= this.total;
+      for (let n = firstPage; ; n++) {
+        const chunk = kept.slice(n * PAGE - absStart, (n + 1) * PAGE - absStart);
+        if (!chunk.length) break;
+        next.set(n, chunk);
+        if (chunk.length < PAGE && !atEnd) break;
+      }
+    }
+    this.pages = next;
+    this.total = Math.max(0, this.total - removed);
+    this.onChange();
+    return removed;
   }
 
   /** Re-fetch the count and rows [first, last); everything else is dropped. */

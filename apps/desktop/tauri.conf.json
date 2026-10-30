@@ -5,7 +5,7 @@
   "identifier": "app.satchel.mail",
   "build": {
     "frontendDist": "../../ui/dist",
-    "devUrl": "http://localhost:7780",
+    "devUrl": "http://127.0.0.1:7780",
     "beforeDevCommand": "npm --prefix ../ui run dev",
     "beforeBuildCommand": "npm --prefix ../ui run build"
   },
@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "satchel.email",
         "width": 1360,
         "height": 860,

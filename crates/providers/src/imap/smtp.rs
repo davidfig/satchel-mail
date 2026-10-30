@@ -9,6 +9,9 @@ impl ImapProvider {
         use lettre::transport::smtp::client::{Tls, TlsParameters};
         use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
         let c = &self.cfg;
+        if c.smtp_security == Security::None {
+            crate::net::plaintext_allowed(&c.smtp_host, "SMTP")?;
+        }
         let tls = TlsParameters::builder(c.smtp_host.clone())
             .dangerous_accept_invalid_certs(c.allow_invalid_certs)
             .dangerous_accept_invalid_hostnames(c.allow_invalid_certs)

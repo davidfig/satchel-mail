@@ -152,6 +152,19 @@ impl Store {
         })
     }
 
+    /// Record the file in `proposals/processed/` written for proposal `id`.
+    pub fn set_proposal_file(&self, id: &str, name: &str) -> Result<()> {
+        self.w(|c| {
+            c.execute("UPDATE proposals SET processed_file=? WHERE id=?", params![name, id])?;
+            Ok(())
+        })
+    }
+
+    /// The file in `proposals/processed/` written for proposal `id`, if any.
+    pub fn proposal_file(&self, id: &str) -> Result<Option<String>> {
+        self.r(|c| Ok(c.query_row("SELECT processed_file FROM proposals WHERE id=?", [id], |r| r.get::<_, Option<String>>(0)).optional()?.flatten()))
+    }
+
     pub fn set_proposal_status(&self, id: &str, status: ProposalStatus, note: Option<&str>, action: Option<&ProposalAction>) -> Result<()> {
         self.w(|c| {
             c.execute(

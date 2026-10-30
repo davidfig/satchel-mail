@@ -4,34 +4,92 @@ import { h, icon, listen } from './dom';
 
 // ---------------------------------------------------------------- toasts
 
-let toastHost: HTMLElement | null = null;
+interface ToastOpts {
+  kind?: 'info' | 'error' | 'success';
+  action?: { label: string; run: () => void };
+  ms?: number;
+  /** Only confirms what the screen already shows: flashes briefly and never replaces an error. */
+  quiet?: boolean;
+}
 
-export function toast(message: string, opts: { kind?: 'info' | 'error' | 'success'; action?: { label: string; run: () => void }; ms?: number } = {}) {
+interface Slot {
+  el: HTMLElement;
+  message: string;
+  kind: string;
+  count: number;
+  label: HTMLElement;
+  timers: number[];
+}
+
+// At most two toasts show: one with an action (Undo and the like), which only another action
+// toast replaces, and one plain toast, which any new plain toast replaces. Repeats of the same
+// message count up instead of stacking.
+let toastHost: HTMLElement | null = null;
+const slots: { action: Slot | null; plain: Slot | null } = { action: null, plain: null };
+
+function clearSlot(key: 'action' | 'plain') {
+  const s = slots[key];
+  if (!s) return;
+  s.timers.forEach(clearTimeout);
+  s.el.remove();
+  slots[key] = null;
+}
+
+export function toast(message: string, opts: ToastOpts = {}) {
+  const kind = opts.kind ?? 'info';
+  const key = opts.action ? 'action' : 'plain';
+  const ms = opts.ms ?? (opts.quiet ? 1800 : 4500);
+  const cur = slots[key];
+  if (key === 'plain' && opts.quiet && cur?.kind === 'error') return;
+
+  const arm = (s: Slot) => {
+    s.timers.forEach(clearTimeout);
+    s.el.classList.remove('leaving');
+    s.timers = [window.setTimeout(() => s.el.classList.add('leaving'), ms - 300), window.setTimeout(() => clearSlot(key), ms)];
+  };
+
+  if (cur && cur.message === message && cur.kind === kind && !opts.action) {
+    cur.count++;
+    cur.label.textContent = `${message} ×${cur.count}`;
+    arm(cur);
+    return;
+  }
+  clearSlot(key);
   if (!toastHost) {
     toastHost = h('div.toasts', { role: 'status', 'aria-live': 'polite' });
     document.body.appendChild(toastHost);
   }
-  const t = h(
-    `div.toast.${opts.kind ?? 'info'}`,
-    h('span', message),
+  const label = h('span', message);
+  const el = h(
+    `div.toast.${kind}`,
+    label,
     opts.action &&
       h('button.link', {
         on: {
           click: () => {
             opts.action!.run();
-            t.remove();
+            clearSlot(key);
           },
         },
       }, opts.action.label),
-    h('button.icon-btn', { 'aria-label': 'Dismiss', on: { click: () => t.remove() } }, icon('close', 14)),
+    h('button.icon-btn', { 'aria-label': 'Dismiss', on: { click: () => clearSlot(key) } }, icon('close', 14)),
   );
-  toastHost.appendChild(t);
-  setTimeout(() => t.classList.add('leaving'), (opts.ms ?? 4500) - 300);
-  setTimeout(() => t.remove(), opts.ms ?? 4500);
+  const slot: Slot = { el, message, kind, count: 1, label, timers: [] };
+  slots[key] = slot;
+  // The action toast sits below the plain one, nearest the edge.
+  if (key === 'action') toastHost.appendChild(el);
+  else toastHost.insertBefore(el, toastHost.firstChild);
+  arm(slot);
 }
 
 export function errorToast(e: unknown) {
   toast(e instanceof Error ? e.message : String(e), { kind: 'error', ms: 7000 });
+}
+
+/** Text to paste elsewhere (a token, a command, a prompt) with a Copy button beside it. */
+export function copyBlock(text: string, tag = 'pre.snippet'): HTMLElement {
+  const copy = () => void navigator.clipboard.writeText(text).then(() => toast('Copied', { quiet: true }), errorToast);
+  return h('div.copy-row', h(tag, text), h('button', { title: 'Copy to clipboard', on: { click: copy } }, icon('copy', 16), 'Copy'));
 }
 
 // ---------------------------------------------------------------- modal
@@ -71,7 +129,8 @@ export function modal(title: string, content: Node, opts: { wide?: boolean; onCl
   return { close, body, root };
 }
 
-export function confirmDialog(title: string, message: string, okLabel = 'OK', danger = false): Promise<boolean> {
+/** `message` is plain text, or a node for a richer body. */
+export function confirmDialog(title: string, message: string | Node, okLabel = 'OK', danger = false): Promise<boolean> {
   return new Promise((resolve) => {
     let done = false;
     const finish = (v: boolean) => {
@@ -85,7 +144,7 @@ export function confirmDialog(title: string, message: string, okLabel = 'OK', da
       h('button', { on: { click: () => finish(false) } }, 'Cancel'),
       h(`button.primary${danger ? '.danger' : ''}`, { on: { click: () => finish(true) } }, okLabel),
     );
-    const m = modal(title, h('p', message), { footer, onClose: () => finish(false) });
+    const m = modal(title, typeof message === 'string' ? h('p', message) : message, { footer, onClose: () => finish(false) });
   });
 }
 

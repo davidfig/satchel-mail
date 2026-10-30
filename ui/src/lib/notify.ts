@@ -9,7 +9,13 @@ import type { NewMail } from '../types';
 export async function notifyNewMail(messages: NewMail[]) {
   if (!messages.length || !store.state.settings?.notify_new_mail || document.hasFocus()) return;
   if (!(await transport.canNotify(false))) return;
-  const sender = (m: NewMail) => m.from?.name || m.from?.email || 'Unknown sender';
+  // The address too: anyone can name themselves "Apple Support", and an OS
+  // alert carries no other sign of who it's from.
+  const sender = (m: NewMail) => {
+    const f = m.from;
+    if (!f?.email) return f?.name || 'Unknown sender';
+    return f.name && f.name.toLowerCase() !== f.email.toLowerCase() ? `${f.name} <${f.email}>` : f.email;
+  };
   const open = (thread: string | null) =>
     store.set({ view: 'mail', source: { kind: 'role', role: 'inbox', label: 'Inbox' }, selectedThread: thread });
   if (messages.length === 1) {

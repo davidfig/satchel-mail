@@ -3,6 +3,7 @@
 //! Providers do protocol work only. They write what they find through
 //! [`SyncCtx`], which owns all persistence, threading, indexing and events.
 
+pub mod priority;
 mod sync_ctx;
 
 pub use sync_ctx::SyncCtx;

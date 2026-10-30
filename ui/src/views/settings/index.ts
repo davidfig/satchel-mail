@@ -52,14 +52,17 @@ export class SettingsView {
     void r[this.section]();
   }
 
-  async saveSettings(next: Settings) {
+  /** Saves settings; shows any error and returns whether it worked. */
+  async saveSettings(next: Settings): Promise<boolean> {
     try {
       const saved = await api.updateSettings(next);
       // Saved: what's on screen is no longer an unsaved edit.
       this.editing = false;
       store.set({ settings: saved });
+      return true;
     } catch (e) {
       errorToast(e);
+      return false;
     }
   }
 }

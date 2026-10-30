@@ -140,6 +140,7 @@ impl GraphContactsProvider {
     }
 
     async fn get(&self, url: &str, what: &str) -> Result<Value> {
+        super::graph_link(url)?;
         self.api.json(|h, t| h.get(url).header("Prefer", "IdType=\"ImmutableId\"").bearer_auth(t), what).await
     }
 }
@@ -163,7 +164,7 @@ impl ContactsProvider for GraphContactsProvider {
                 }
             }
             match v["@odata.nextLink"].as_str() {
-                Some(n) => url = n.to_string(),
+                Some(n) => url = super::graph_link(n)?,
                 None => break,
             }
         }
@@ -184,7 +185,7 @@ impl ContactsProvider for GraphContactsProvider {
                         self.api.json(|h, t| h.post(format!("{ME}/contacts")).header("Prefer", "IdType=\"ImmutableId\"").bearer_auth(t).json(&body), "create contact").await.map_err(scope_error)?
                     }
                     Some(id) => {
-                        let current = self.get(&format!("{ME}/contacts/{id}?$select={SELECT}"), "get contact").await?;
+                        let current = self.get(&format!("{ME}/contacts/{}?$select={SELECT}", crate::net::enc(id)), "get contact").await?;
                         if etag.is_some() && current["changeKey"].as_str() != etag.as_deref() {
                             return Err(ApiError::new(ErrorCode::Conflict, "the contact changed in Outlook").into());
                         }
@@ -192,7 +193,7 @@ impl ContactsProvider for GraphContactsProvider {
                         if body.as_object().is_some_and(|o| o.is_empty()) {
                             current
                         } else {
-                            self.api.json(|h, t| h.patch(format!("{ME}/contacts/{id}")).header("Prefer", "IdType=\"ImmutableId\"").bearer_auth(t).json(&body), "update contact").await?
+                            self.api.json(|h, t| h.patch(format!("{ME}/contacts/{}", crate::net::enc(id))).header("Prefer", "IdType=\"ImmutableId\"").bearer_auth(t).json(&body), "update contact").await?
                         }
                     }
                 };
@@ -202,7 +203,7 @@ impl ContactsProvider for GraphContactsProvider {
                     out.card_vcard = Some(vcard);
                 }
             }
-            ContactOp::Delete { card_remote_id, .. } => match self.api.send(|h, t| h.delete(format!("{ME}/contacts/{card_remote_id}")).bearer_auth(t), "delete contact").await {
+            ContactOp::Delete { card_remote_id, .. } => match self.api.send(|h, t| h.delete(format!("{ME}/contacts/{}", crate::net::enc(card_remote_id))).bearer_auth(t), "delete contact").await {
                 Ok(_) => {}
                 Err(e) if e.to_string().contains("HTTP 404") => {}
                 Err(e) => return Err(e),
@@ -212,7 +213,7 @@ impl ContactsProvider for GraphContactsProvider {
     }
 
     async fn fetch(&self, _ctx: &SyncCtx, _book: &str, card_remote_id: &str) -> Result<Option<(Option<String>, String)>> {
-        match self.get(&format!("{ME}/contacts/{card_remote_id}?$select={SELECT}"), "get contact").await {
+        match self.get(&format!("{ME}/contacts/{}?$select={SELECT}", crate::net::enc(card_remote_id)), "get contact").await {
             Ok(v) => Ok(card(&v).map(|(_, etag, vcard)| (etag, vcard))),
             Err(e) if e.to_string().contains("HTTP 404") => Ok(None),
             Err(e) => Err(e),

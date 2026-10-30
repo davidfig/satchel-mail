@@ -22,12 +22,17 @@ impl Engine {
             changed += 1;
         }
         // Untouched automatic contacts follow the best name seen so far, and
-        // go away if the user has since marked them as spam.
+        // go away if the user has since marked them as spam, or if another
+        // contact has the address (a server card that arrived while this
+        // pass ran, or one the user deleted).
         let names: HashMap<&str, &str> = people.iter().filter_map(|p| Some((p.email.as_str(), p.name.as_deref()?))).collect();
         for c in self.store.auto_contacts()? {
             let [e] = c.fields.emails.as_slice() else { continue };
             let email = e.email.to_lowercase();
-            if spam.contains(&email) {
+            let others = self.store.contacts_by_email(&email)?;
+            let superseded = others.first().is_some_and(|o| o.id != c.id)
+                || others.iter().any(|o| o.id != c.id && (o.deleted || o.origin != ContactOrigin::Auto));
+            if spam.contains(&email) || superseded {
                 self.store.delete_contact(&c.id)?;
                 changed += 1;
                 continue;
@@ -243,7 +248,9 @@ impl Engine {
     }
 
     /// Risk notes for an agent's contact proposal (0023: risky ones wait).
-    pub(crate) fn contact_proposal_warnings(&self, contact: &Contact) -> Result<(Vec<String>, Option<i64>)> {
+    /// Only contacts `caller` may see count, so a warning can't reveal one
+    /// outside the agent's accounts.
+    pub(crate) fn contact_proposal_warnings(&self, caller: &Caller, contact: &Contact) -> Result<(Vec<String>, Option<i64>)> {
         let mut warnings = vec![];
         let fields = normalize(&contact.fields)?;
         let version = match &contact.id {
@@ -261,7 +268,7 @@ impl Engine {
                 Some(old.version)
             }
             None => {
-                if !fields.name.is_empty() && self.store.list_contacts(Some(&fields.name), 50)?.iter().any(|c| c.fields.name.eq_ignore_ascii_case(&fields.name)) {
+                if !fields.name.is_empty() && self.list_contacts(caller, Some(&fields.name), Some(50))?.iter().any(|c| c.fields.name.eq_ignore_ascii_case(&fields.name)) {
                     warnings.push(format!("A contact named {} already exists", fields.name));
                 }
                 None

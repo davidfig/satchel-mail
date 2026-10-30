@@ -192,6 +192,7 @@ impl GraphCalendarProvider {
     }
 
     async fn get(&self, url: &str, what: &str) -> Result<Value> {
+        graph_link(url)?;
         self.api.json(|h, t| with_prefs(h.get(url)).bearer_auth(t), what).await
     }
 
@@ -205,7 +206,7 @@ impl GraphCalendarProvider {
             (Some("occurrence"), Some(master)) => master,
             _ => id,
         };
-        self.api.send(|h, t| with_prefs(h.post(format!("{ME}/events/{target}/{action}"))).bearer_auth(t).json(&json!({ "sendResponse": true })), "respond to invite").await?;
+        self.api.send(|h, t| with_prefs(h.post(format!("{ME}/events/{}/{action}", crate::net::enc(target)))).bearer_auth(t).json(&json!({ "sendResponse": true })), "respond to invite").await?;
         Ok(())
     }
 
@@ -213,14 +214,19 @@ impl GraphCalendarProvider {
         let stored = ctx.store.get_calendar(local)?.and_then(|c| c.sync_token);
         let start = (Utc::now() - Duration::days(180)).format("%Y-%m-%dT00:00:00Z");
         let end = (Utc::now() + Duration::days(540)).format("%Y-%m-%dT00:00:00Z");
-        let mut url = stored.unwrap_or_else(|| format!("{ME}/calendars/{cal}/calendarView/delta?startDateTime={start}&endDateTime={end}"));
+        let fresh = format!("{ME}/calendars/{}/calendarView/delta?startDateTime={start}&endDateTime={end}", crate::net::enc(cal));
+        // A saved token that isn't a Graph URL is dropped for a fresh sync.
+        let mut url = stored.filter(|u| is_graph(u)).unwrap_or_else(|| fresh.clone());
         let mut seen: HashSet<String> = HashSet::new();
+        let mut reset = false;
         loop {
             let v = match self.get(&url, "calendar delta").await {
                 Ok(v) => v,
-                Err(e) if e.to_string().contains("HTTP 410") => {
+                // Expired token: start over, but only once a pass.
+                Err(e) if !reset && e.to_string().contains("HTTP 410") => {
                     ctx.store.set_calendar_token(local, None)?;
-                    url = format!("{ME}/calendars/{cal}/calendarView/delta?startDateTime={start}&endDateTime={end}");
+                    url = fresh.clone();
+                    reset = true;
                     continue;
                 }
                 Err(e) => return Err(e),
@@ -232,18 +238,18 @@ impl GraphCalendarProvider {
                     continue;
                 }
                 // Delta pages carry only ids for some changes; fetch the full instance.
-                let full = if e.get("subject").is_none() { self.get(&format!("{ME}/events/{id}"), "get event").await? } else { e };
+                let full = if e.get("subject").is_none() { self.get(&format!("{ME}/events/{}", crate::net::enc(&id)), "get event").await? } else { e };
                 if let Some(ics) = graph_to_ics(&full, local, &self.owner) {
                     ctx.put_event(local, &id, full["changeKey"].as_str(), &ics)?;
                     seen.insert(id);
                 }
             }
             if let Some(n) = v["@odata.nextLink"].as_str() {
-                url = n.to_string();
+                url = graph_link(n)?;
                 continue;
             }
             if let Some(d) = v["@odata.deltaLink"].as_str() {
-                ctx.store.set_calendar_token(local, Some(d))?;
+                ctx.store.set_calendar_token(local, Some(&graph_link(d)?))?;
             }
             break;
         }
@@ -289,13 +295,13 @@ impl CalendarProvider for GraphCalendarProvider {
                         return Err(ApiError::new(ErrorCode::InvalidInput, "Outlook can't add someone else's meeting without inviting its attendees").into());
                     }
                     None => {
-                        let v = self.api.json(|h, t| with_prefs(h.post(format!("{ME}/calendars/{calendar_remote_id}/events"))).bearer_auth(t).json(&body), "create event").await?;
+                        let v = self.api.json(|h, t| with_prefs(h.post(format!("{ME}/calendars/{}/events", crate::net::enc(calendar_remote_id)))).bearer_auth(t).json(&body), "create event").await?;
                         out.event_remote_id = v["id"].as_str().map(String::from);
                         out.event_etag = v["changeKey"].as_str().map(String::from);
                     }
                     Some(id) => {
                         let server = self
-                            .get(&format!("{ME}/events/{id}?$select=bodyPreview,location,attendees,changeKey,isOrganizer,responseStatus,seriesMasterId,type"), "get event")
+                            .get(&format!("{ME}/events/{}?$select=bodyPreview,location,attendees,changeKey,isOrganizer,responseStatus,seriesMasterId,type", crate::net::enc(id)), "get event")
                             .await?;
                         // Outlook knows whose meeting it is; the organizer's address
                         // may be an alias of the account's.
@@ -312,7 +318,7 @@ impl CalendarProvider for GraphCalendarProvider {
                         }
                         let mut body = body;
                         trim_unchanged(&mut body, &server);
-                        let v = self.api.json(|h, t| with_prefs(h.patch(format!("{ME}/events/{id}"))).bearer_auth(t).json(&body), "update event").await?;
+                        let v = self.api.json(|h, t| with_prefs(h.patch(format!("{ME}/events/{}", crate::net::enc(id)))).bearer_auth(t).json(&body), "update event").await?;
                         out.event_remote_id = Some(id.clone());
                         out.event_etag = v["changeKey"].as_str().map(String::from);
                     }
@@ -321,7 +327,7 @@ impl CalendarProvider for GraphCalendarProvider {
             // Deleting as an attendee only removes our copy; Graph sends a
             // response only through accept/decline, so `notify` needs nothing here.
             CalendarOp::Delete { event_remote_id, .. } => {
-                match self.api.send(|h, t| with_prefs(h.delete(format!("{ME}/events/{event_remote_id}"))).bearer_auth(t), "delete event").await {
+                match self.api.send(|h, t| with_prefs(h.delete(format!("{ME}/events/{}", crate::net::enc(event_remote_id)))).bearer_auth(t), "delete event").await {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("HTTP 404") => {}
                     Err(e) => return Err(e),

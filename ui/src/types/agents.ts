@@ -14,7 +14,9 @@ export type ProposalAction =
   | { type: 'update_event'; event: CalEvent }
   | { type: 'cancel_event'; event_id: Id }
   | { type: 'respond_to_invite'; event_id: Id; response: PartStat }
-  | { type: 'save_contact'; contact: Contact };
+  | { type: 'save_contact'; contact: Contact }
+  /** The first contact is kept; the others are merged into it. */
+  | { type: 'merge_contacts'; contact_ids: Id[] };
 
 export type ProposalStatus = 'pending' | 'approved' | 'applied' | 'rejected' | 'stale' | 'failed';
 
@@ -61,6 +63,8 @@ export interface MirrorSettings {
   include_eml: boolean;
   include_attachments: boolean;
   accept_proposals: boolean;
+  include_calendar: boolean;
+  include_contacts: boolean;
 }
 
 export interface Settings {

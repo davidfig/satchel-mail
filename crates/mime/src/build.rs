@@ -43,11 +43,36 @@ pub(crate) fn uuid_like() -> String {
     format!("{:x}.{:x}", n, r)
 }
 
+/// Whether `id` (without angle brackets) is safe to write into Message-ID,
+/// In-Reply-To or References: no whitespace, control characters or angle
+/// brackets, which could end the header or the id early.
+pub fn is_valid_message_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 998 && !id.chars().any(|c| c.is_whitespace() || c.is_control() || c == '<' || c == '>')
+}
+
+/// A MIME type safe to write as a part's Content-Type: `type/subtype` made
+/// of token characters, optionally with simple `; name=value` parameters.
+/// Anything else (line breaks, quotes, stray separators) becomes
+/// application/octet-stream, so it can't add part headers.
+pub(crate) fn safe_mime_type(m: &str) -> String {
+    let token = |t: &str| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || "!#$&-^_.+".contains(c));
+    let mut parts = m.split(';');
+    let ok = parts.next().and_then(|t| t.trim().split_once('/')).is_some_and(|(a, b)| token(a) && token(b))
+        && parts.all(|p| p.trim().split_once('=').is_some_and(|(k, v)| token(k.trim()) && token(v.trim())));
+    if ok { m.trim().to_string() } else { "application/octet-stream".into() }
+}
+
 pub fn build(o: &Outgoing) -> Vec<u8> {
+    let message_id = if is_valid_message_id(&o.message_id) {
+        o.message_id.clone()
+    } else {
+        let domain = email_domain(&o.from.email);
+        new_message_id(if is_valid_message_id(&domain) { &domain } else { "satchel.local" })
+    };
     let mut b = mail_builder::MessageBuilder::new()
         .from(builder_addr(&o.from))
         .subject(o.subject.clone())
-        .message_id(o.message_id.clone())
+        .message_id(message_id)
         .date(o.date.timestamp());
     if !o.to.is_empty() {
         b = b.to(builder_list(&o.to));
@@ -58,11 +83,13 @@ pub fn build(o: &Outgoing) -> Vec<u8> {
     if o.include_bcc_header && !o.bcc.is_empty() {
         b = b.bcc(builder_list(&o.bcc));
     }
-    if let Some(irt) = &o.in_reply_to {
+    // Ids can come from hostile mail; drop any that could break the header.
+    if let Some(irt) = o.in_reply_to.as_ref().filter(|i| is_valid_message_id(i)) {
         b = b.in_reply_to(irt.clone());
     }
-    if !o.references.is_empty() {
-        b = b.references(o.references.clone());
+    let references: Vec<String> = o.references.iter().filter(|r| is_valid_message_id(r)).cloned().collect();
+    if !references.is_empty() {
+        b = b.references(references);
     }
     for (k, v) in &o.extra_headers {
         b = b.header(k.clone(), mail_builder::headers::raw::Raw::new(v.clone()));
@@ -72,7 +99,7 @@ pub fn build(o: &Outgoing) -> Vec<u8> {
         b = b.html_body(h.clone());
     }
     for (name, mime, data) in &o.attachments {
-        b = b.attachment(mime.clone(), name.clone(), data.clone());
+        b = b.attachment(safe_mime_type(mime), name.clone(), data.clone());
     }
     b.write_to_vec().unwrap_or_default()
 }

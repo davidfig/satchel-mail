@@ -3,13 +3,14 @@
 #
 #   scripts/run                  desktop app (Tauri dev, UI hot reload) on your real data
 #   scripts/run web              web UI + API on http://127.0.0.1:7781
-#   scripts/run dev              web UI with hot reload on http://localhost:7780
+#   scripts/run dev              web UI with hot reload on http://127.0.0.1:7780
 #   scripts/run [mode] --test    use the local Stalwart test servers and .dev/test-data
 #   scripts/run [mode] --data DIR use DIR as the data directory (keychain secrets)
 #
 # Real data lives in the default data directory with secrets in the OS
-# keychain. Run scripts/dev-signing-cert once so dev builds are signed with a
-# stable certificate and the keychain's "Always Allow" survives rebuilds.
+# keychain. Create an "Apple Development" certificate in Xcode once so dev
+# builds are signed with your Team ID and the keychain stops asking after rebuilds
+# (see scripts/dev-sign).
 # OAuth client ids for Gmail / Microsoft (see docs/OAUTH.md) are read
 # from .env in the repo root if it exists, e.g.
 #
@@ -65,7 +66,7 @@ case "$mode" in
     # Vite serves the UI and proxies /api to `satchel serve`, sending the
     # shared session token as a bearer header.
     export SATCHEL_SESSION_TOKEN="${SATCHEL_SESSION_TOKEN:-$(openssl rand -hex 16)}"
-    export SATCHEL_DEV_ORIGIN=http://localhost:7780
+    export SATCHEL_DEV_ORIGIN=http://127.0.0.1:7780
     scripts/dev-sign target/debug/satchel serve &
     server=$!
     trap 'kill $server 2>/dev/null' EXIT INT TERM
@@ -83,6 +84,7 @@ case "$mode" in
     triple="$(rustc -vV | sed -n 's/host: //p')"
     mkdir -p apps/desktop/binaries
     cp target/debug/satchel "apps/desktop/binaries/satchel-$triple"
+    scripts/dev-sign --sign-only "apps/desktop/binaries/satchel-$triple"
     # Cargo runs the app through dev-sign, so every rebuild is signed the same way.
     export "CARGO_TARGET_$(tr 'a-z-' 'A-Z_' <<<"$triple")_RUNNER=$ROOT/scripts/dev-sign"
     cd apps/desktop

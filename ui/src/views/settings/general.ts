@@ -20,22 +20,36 @@ export async function mirror(view: SettingsView, el: HTMLElement) {
   const eml = h('input', { type: 'checkbox', checked: mi.include_eml });
   const atts = h('input', { type: 'checkbox', checked: mi.include_attachments });
   const proposals = h('input', { type: 'checkbox', checked: mi.accept_proposals });
+  const calendar = h('input', { type: 'checkbox', checked: mi.include_calendar });
+  const contacts = h('input', { type: 'checkbox', checked: mi.include_contacts });
   const acctBoxes = store.state.accounts.map((a) => ({ a, box: h('input', { type: 'checkbox', checked: !mi.account_ids || mi.account_ids.includes(a.id) }) }));
+  // A folder picked from the system dialog gets a Satchel folder inside it,
+  // so picking Documents doesn't mix mail into the user's own files.
+  const choose = async () => {
+    const picked = await transport.host<string | null>('choose_folder', { title: 'Choose where to keep the AI folder', start: info?.mirror_root ?? null }).catch(errorToast);
+    const sep = picked?.includes('\\') ? '\\' : '/';
+    if (picked) root.value = /[\\/]Satchel$/.test(picked) ? picked : `${picked.replace(/[\\/]$/, '')}${sep}Satchel`;
+  };
   const save = async () => {
     const ids = acctBoxes.filter((x) => x.box.checked).map((x) => x.a.id);
-    await view.saveSettings({ ...s, mirror: { enabled: enabled.checked, root: root.value.trim() || null, since_days: since.value ? Number(since.value) : null, include_eml: eml.checked, include_attachments: atts.checked, accept_proposals: proposals.checked, account_ids: ids.length === store.state.accounts.length ? null : ids } });
-    toast('AI folder settings saved');
+    const saved = await view.saveSettings({ ...s, mirror: { enabled: enabled.checked, root: root.value.trim() || null, since_days: since.value ? Number(since.value) : null, include_eml: eml.checked, include_attachments: atts.checked, accept_proposals: proposals.checked, include_calendar: calendar.checked, include_contacts: contacts.checked, account_ids: ids.length === store.state.accounts.length ? null : ids } });
+    if (!saved) return;
+    const moved = (await api.info().catch(() => null))?.mirror_root !== info?.mirror_root;
+    toast(moved ? 'Moved the AI folder. Point your AI tools at the new location.' : 'AI folder settings saved', { quiet: !moved });
   };
   replace(el,
     h('h1', 'AI folder'),
-    h('p.muted', `Satchel keeps a plain-text copy of your mail and calendar in a folder you can give any AI tool: ${info?.mirror_root ?? '~/Satchel'}. Editing the copies changes nothing; to act, the AI writes a proposal file, which waits in Review for you.`),
+    h('p.muted', `Satchel keeps a plain-text copy of your mail and calendar in a folder you can give any AI tool: ${info?.mirror_root ?? '~/Satchel'}. Editing the copies changes nothing; to act, the AI writes a proposal file, which waits in AI Proposals for you.`),
     h('div.form',
       h('label.row.inline', enabled, 'Keep the AI folder up to date'),
-      field('Location', root, 'Leave empty for the default'),
+      field('Location', transport.kind === 'tauri' ? h('div.row.picker', root, h('button', { type: 'button', title: 'Pick a folder; Satchel keeps its files in a Satchel folder inside it', on: { click: () => void choose() } }, 'Choose…')) : root,
+        'Leave empty for ~/Satchel. Changing it moves the folder, with any proposals waiting in it, when you save.'),
       field('Include mail from', since),
       h('fieldset', h('legend', 'Accounts'), acctBoxes.map(({ a, box }) => h('label.row.inline', box, a.email))),
       h('label.row.inline', eml, 'Include raw .eml files'),
       h('label.row.inline', atts, 'Include attachments (up to 25 MB each)'),
+      h('label.row.inline', calendar, 'Include the calendar'),
+      h('label.row.inline', contacts, 'Include contacts (AI tools can propose edits to them)'),
       h('label.row.inline', proposals, 'Let AI tools propose changes by writing files to proposals/inbox'),
       h('div.row', h('button.primary', { on: { click: () => void save() } }, 'Save'))));
 }
@@ -69,7 +83,7 @@ export function general(view: SettingsView, el: HTMLElement) {
       field('Storage limit per account', limit, 'Over the limit, the content of the oldest mail is removed (it stays listed and searchable, and downloads again when opened).'),
       field('Check for new mail every (seconds)', poll, 'Accounts with push (IMAP IDLE, JMAP) update instantly.'),
       h('label.row.inline', notify, 'Show a notification when new mail arrives in an inbox (only while you’re in another app)'),
-      h('div.row', h('button.primary', { on: { click: () => void view.saveSettings({ ...(store.state.settings ?? s), initial_sync_days: Number(days.value) || 90, download_days: background.value ? Number(background.value) : null, storage_limit_mb: limit.value ? Number(limit.value) : null, poll_interval_secs: Number(poll.value) || 120 }).then(() => toast('Saved')) } }, 'Save'))));
+      h('div.row', h('button.primary', { on: { click: () => void view.saveSettings({ ...(store.state.settings ?? s), initial_sync_days: Number(days.value) || 90, download_days: background.value ? Number(background.value) : null, storage_limit_mb: limit.value ? Number(limit.value) : null, poll_interval_secs: Number(poll.value) || 120 }).then(() => toast('Saved', { quiet: true })) } }, 'Save'))));
 }
 
 export async function activity(view: SettingsView, el: HTMLElement) {
@@ -80,7 +94,7 @@ export async function activity(view: SettingsView, el: HTMLElement) {
       h('h1', 'Activity'),
       failed.length > 0 && h('section',
         h('h2', 'Outbox problems'),
-        h('ul.plain-list', failed.map((o) => h('li', h('strong', o.kind), ` · ${o.status} · ${o.attempts} attempts`, o.last_error && h('div.small.error', o.last_error), h('button.link', { title: 'Try this change again now', on: { click: async () => { await api.retryOutbox(o.id); toast('Retrying'); view.render(); } } }, 'Retry'))))),
+        h('ul.plain-list', failed.map((o) => h('li', h('strong', o.kind), ` · ${o.status} · ${o.attempts} attempts`, o.last_error && h('div.small.error', o.last_error), h('button.link', { title: 'Try this change again now', on: { click: async () => { await api.retryOutbox(o.id); toast('Retrying', { quiet: true }); view.render(); } } }, 'Retry'))))),
       h('h2', 'Audit log'),
       h('p.muted.small', 'Every send, approval and agent proposal is recorded here.'),
       h('table.audit', h('tbody', audit.map((a) => h('tr', h('td.small.muted', { title: fullDate(a.at) }, relative(a.at)), h('td', a.actor), h('td', a.action.replace(/_/g, ' ')), h('td.small.muted', summarize(a.detail)))))));

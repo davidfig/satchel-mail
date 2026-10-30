@@ -28,15 +28,17 @@ Current third-party dependencies and why:
 | keyring | OS keychain |
 | mail-parser, mail-builder | RFC 5322 / MIME |
 | ammonia | HTML sanitizing (security-critical) |
-| html2text | HTML → plain text for snippets, search and agents |
+| html5ever | HTML tokenizing for our HTML → text conversion (0043). Already in the tree through ammonia, at the same version, so it adds no new code |
 | rrule | RFC 5545 recurrence expansion |
 | async-imap | IMAP protocol grammar (we own the sync logic) |
 | lettre | SMTP submission |
 | reqwest, rustls, tokio-rustls, rustls-native-certs, url | HTTP/TLS for JMAP, CalDAV, Gmail, Graph, OAuth |
 | quick-xml | WebDAV/CalDAV XML |
+| libc (unix core, macOS desktop) | `openat`/`renameat`/`unlinkat` so the AI folder can't be tricked by symlinks swapped in mid-walk, and `setxattr` to quarantine saved attachments (0040) |
+| windows-sys (Windows core; `Win32_Foundation`, `Win32_Storage_FileSystem` only) | the Windows side of the same AI-folder safety: link counts, a handle's final path, and renaming and deleting by handle, none of which stable std exposes. Already in the tree through tokio and others, so it adds no new code |
 | rmcp | MCP protocol |
 | axum, tower-http, clap, tracing-subscriber | local HTTP server + static files, CLI parsing, logging |
-| tauri + plugins (opener, dialog, notification, single-instance, updater) | desktop shell; notification shows new-mail alerts in the macOS, Windows and Linux notification centers (0025) |
+| tauri + plugins (opener, dialog, notification, single-instance, window-state, updater) | desktop shell; notification shows new-mail alerts in the macOS, Windows and Linux notification centers (0025); window-state reopens the window at its last position and size, including which monitor and whether it was maximized |
 | @tauri-apps/api; dev: vite, typescript, @tauri-apps/cli, linkedom | UI ↔ Tauri bridge; build tools; linkedom gives `node --test` a DOM for the UI's quote-detection tests (small, no native code; a test-only stand-in for the browser's DOMParser) |
 
 Removed: tantivy (see 0014), rand, urlencoding, bytes, thiserror.

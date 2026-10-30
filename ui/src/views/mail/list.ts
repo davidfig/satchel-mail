@@ -1,7 +1,7 @@
 // The virtualized thread list: scroll geometry and row rendering.
 
-import { h, icon, replace } from '../../lib/dom';
-import { listDate, participantsLabel } from '../../lib/format';
+import { h, icon, patch, replace } from '../../lib/dom';
+import { domainOf, listDate, participantsLabel } from '../../lib/format';
 import { store } from '../../state';
 import type { MailView } from './index';
 
@@ -79,6 +79,7 @@ export function renderRows(view: MailView) {
         h('div.thread-main',
           h('div.thread-line1',
             h('span.who', participantsLabel(t.participants, me)),
+            t.participants.length === 1 && !me.has(t.participants[0].email.toLowerCase()) && h('span.domain', { title: t.participants[0].email }, domainOf(t.participants[0])),
             t.message_count > 1 && h('span.count', String(t.message_count)),
             h('span.spacer'),
             t.has_attachments && icon('paperclip', 14),
@@ -93,7 +94,9 @@ export function renderRows(view: MailView) {
       ),
     );
   }
-  replace(view.rows, out);
+  // Patched, not replaced: this runs on every scroll and refresh, and fresh
+  // rows would drop the hover under the pointer and blink the list.
+  patch(view.rows, out);
 }
 
 function emptyMessage(): string {

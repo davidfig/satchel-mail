@@ -9,7 +9,8 @@ use base64::Engine as _;
 use satchel_api::{Request, Response};
 use satchel_core::secrets::{FileSecretStore, KeychainSecretStore, SecretStore};
 use satchel_core::{Caller, Engine, EngineOptions, Mode};
-use tauri::{Emitter, Manager, State};
+use tauri::webview::NewWindowResponse;
+use tauri::{Emitter, Manager, State, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
 struct AppState {
@@ -37,11 +38,28 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Ask the user to pick a folder, starting in `start` if it exists. Returns
+/// the chosen path, or nothing if they cancelled.
+#[tauri::command]
+async fn choose_folder(app: tauri::AppHandle, title: String, start: Option<String>) -> Result<Option<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut dialog = app.dialog().file().set_title(title).set_can_create_directories(true);
+    if let Some(dir) = start.map(std::path::PathBuf::from).filter(|d| d.is_dir()) {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.pick_folder(move |p| {
+        let _ = tx.send(p);
+    });
+    let Some(path) = rx.await.map_err(|e| e.to_string())? else { return Ok(None) };
+    Ok(Some(path.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned()))
+}
+
 /// Ask where to save an attachment, then write it. Returns the chosen path.
 #[tauri::command]
 async fn save_file(app: tauri::AppHandle, filename: String, data_base64: String) -> Result<Option<String>, String> {
     let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64).map_err(|e| e.to_string())?;
-    let safe: String = filename.chars().map(|c| if "/\\:".contains(c) { '_' } else { c }).collect();
+    // Without the invisible marks that make "invoice\u{202E}fdp.exe" read as "invoiceexe.pdf".
+    let safe: String = satchel_mime::clean_filename(&filename).chars().map(|c| if "/\\:".contains(c) { '_' } else { c }).collect();
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog().file().set_file_name(&safe).save_file(move |p| {
         let _ = tx.send(p);
@@ -49,7 +67,43 @@ async fn save_file(app: tauri::AppHandle, filename: String, data_base64: String)
     let Some(path) = rx.await.map_err(|e| e.to_string())? else { return Ok(None) };
     let path = path.into_path().map_err(|e| e.to_string())?;
     std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    // Mark it as downloaded, so the OS checks it (Gatekeeper, SmartScreen)
+    // when it's opened. A file we can't mark isn't left behind unchecked,
+    // unless the disk can't hold the mark at all (FAT, some network shares).
+    if let Err(e) = mark_downloaded(&path)
+        && !matches!(e.kind(), std::io::ErrorKind::Unsupported | std::io::ErrorKind::InvalidFilename)
+    {
+        let _ = std::fs::remove_file(&path);
+        return Err(format!("couldn't mark the saved file as downloaded from the internet: {e}"));
+    }
     Ok(Some(path.display().to_string()))
+}
+
+/// macOS: the `com.apple.quarantine` attribute browsers set
+/// ("flags;hex time;agent;event id"; 0081 = downloaded, not yet approved).
+#[cfg(target_os = "macos")]
+fn mark_downloaded(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let value = format!("0081;{secs:08x};Satchel Mail;");
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes())?;
+    // SAFETY: both strings are NUL-terminated and `value` outlives the call.
+    let r = unsafe { libc::setxattr(path.as_ptr(), c"com.apple.quarantine".as_ptr(), value.as_ptr().cast(), value.len(), 0, 0) };
+    if r == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+}
+
+/// Windows: the Mark of the Web, a `Zone.Identifier` stream saying the file
+/// came from the Internet zone (3).
+#[cfg(windows)]
+fn mark_downloaded(path: &std::path::Path) -> std::io::Result<()> {
+    let mut stream = path.as_os_str().to_owned();
+    stream.push(":Zone.Identifier");
+    std::fs::write(stream, "[ZoneTransfer]\r\nZoneId=3\r\n")
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn mark_downloaded(_path: &std::path::Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// Absolute path of the bundled `satchel` CLI (used in MCP setup snippets).
@@ -72,6 +126,29 @@ fn lock(dir: &std::path::Path) -> anyhow::Result<Option<std::fs::File>> {
     }
 }
 
+/// The window-state plugin only writes to disk on a clean quit, so a crash,
+/// force-quit or `tauri dev` restart forgets where the window was. Also save
+/// half a second after the window stops moving or resizing.
+fn save_window_state_on_change(window: &tauri::WebviewWindow) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+    let changes = Arc::new(AtomicU64::new(0));
+    let app = window.app_handle().clone();
+    window.on_window_event(move |e| {
+        if !matches!(e, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+            return;
+        }
+        let n = changes.fetch_add(1, Ordering::SeqCst) + 1;
+        let (changes, app) = (changes.clone(), app.clone());
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            if changes.load(Ordering::SeqCst) == n {
+                let _ = app.save_window_state(StateFlags::all());
+            }
+        });
+    });
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,tantivy=warn".into()))
@@ -86,7 +163,9 @@ fn main() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_notification::init())
+        // Reopen the window where and at the size the user last left it.
+        .plugin(tauri_plugin_window_state::Builder::default().build());
     #[cfg(feature = "updater")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
@@ -129,9 +208,36 @@ fn main() {
                 }
             });
             app.manage(AppState { engine, _lock: lock });
+            // Built here, not from the config, so we can catch popups. WebKit
+            // runs no listeners in the script-less message iframe, so its links
+            // open as `target=_blank` popups; hand them to the UI, which asks
+            // first for risky mail and opens them in the system browser.
+            let links = app.handle().clone();
+            let config = app.config().app.windows.iter().find(|w| w.label == "main").ok_or("no main window in tauri.conf.json")?;
+            let window = WebviewWindowBuilder::from_config(app.handle(), config)?
+                .on_new_window(move |url, _| {
+                    let _ = links.emit_to("main", "satchel://open-link", url.as_str());
+                    NewWindowResponse::Deny
+                })
+                .build()?;
+            save_window_state_on_change(&window);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![api, open_url, save_file, cli_path])
+        .invoke_handler(tauri::generate_handler![api, open_url, save_file, choose_folder, cli_path])
         .run(tauri::generate_context!())
         .expect("error while running Satchel Mail");
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    #[test]
+    fn saved_files_are_quarantined() {
+        let path = std::env::temp_dir().join(format!("satchel-quarantine-{}.command", std::process::id()));
+        std::fs::write(&path, "echo hi").unwrap();
+        super::mark_downloaded(&path).unwrap();
+        let out = std::process::Command::new("xattr").arg("-p").arg("com.apple.quarantine").arg(&path).output().unwrap();
+        let _ = std::fs::remove_file(&path);
+        let v = String::from_utf8_lossy(&out.stdout);
+        assert!(v.starts_with("0081;") && v.trim_end().ends_with(";Satchel Mail;"), "{v}");
+    }
 }

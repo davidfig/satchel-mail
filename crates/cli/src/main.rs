@@ -39,6 +39,10 @@ enum Cmd {
         /// Directory with the built UI (ui/dist).
         #[arg(long)]
         ui: Option<PathBuf>,
+        /// Make a new session token, signing out every browser (it also
+        /// rotates by itself every 30 days).
+        #[arg(long)]
+        new_session: bool,
     },
     /// MCP server over stdio. Requires an agent token.
     Mcp {
@@ -152,7 +156,7 @@ fn secrets_store(kind: &str, data_dir: &std::path::Path) -> Result<Arc<dyn Secre
 pub struct EngineLock(#[allow(dead_code)] std::fs::File);
 
 pub fn try_lock(data_dir: &std::path::Path) -> Result<Option<EngineLock>> {
-    std::fs::create_dir_all(data_dir)?;
+    satchel_core::engine::create_private_dir(data_dir)?;
     let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(data_dir.join("engine.lock"))?;
     match f.try_lock() {
         Ok(()) => Ok(Some(EngineLock(f))),
@@ -208,10 +212,10 @@ async fn main() -> Result<()> {
         .init();
 
     match &cli.cmd {
-        Cmd::Serve { port, ui } => {
+        Cmd::Serve { port, ui, new_session } => {
             let (engine, _lock) = open(&cli, Mode::Full, true)?;
             let ui = ui.clone().or_else(default_ui_dir);
-            server::serve(engine, *port, ui).await?;
+            server::serve(engine, *port, ui, *new_session).await?;
         }
         Cmd::Mcp { token } => {
             let (engine, _lock) = open(&cli, Mode::Agent, true)?;
@@ -225,7 +229,7 @@ async fn main() -> Result<()> {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 let accounts = engine.store().list_accounts()?;
-                let done = accounts.iter().all(|a| a.sync.last_success.is_some_and(|t| t > start) || a.sync.state == SyncState::Error);
+                let done = accounts.iter().all(|a| (a.sync.last_success.is_some_and(|t| t > start) && a.sync.state != SyncState::Syncing) || a.sync.state == SyncState::Error);
                 if done && engine.store().unindexed(1)?.is_empty() {
                     for a in &accounts {
                         println!("{}\t{:?}\t{}", a.email, a.sync.state, a.sync.error.clone().unwrap_or_default());
