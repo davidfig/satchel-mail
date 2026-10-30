@@ -27,7 +27,10 @@ pub struct KeychainSecretStore(BundleStore<KeychainItems>);
 #[cfg(feature = "keychain")]
 impl KeychainSecretStore {
     pub fn new(service: impl Into<String>) -> Self {
-        Self(BundleStore::new(KeychainItems { service: service.into() }))
+        // The keychain is the user's, whatever data directory a process uses,
+        // so the lock is in the user's own one.
+        let lock = crate::engine::platform_data_dir().map(|d| d.join("credentials.lock"));
+        Self(BundleStore::new(KeychainItems { service: service.into() }).with_lock(lock))
     }
 }
 
@@ -93,11 +96,20 @@ struct BundleStore<I> {
     /// The bundle as last read or written. A miss reloads it, since another
     /// process (the CLI) may have added the key since.
     cache: Mutex<Option<BTreeMap<String, Value>>>,
+    /// Held while the bundle is read and rewritten, so two processes can't
+    /// each drop the other's change.
+    lock: Option<PathBuf>,
 }
 
 impl<I: Items> BundleStore<I> {
     fn new(items: I) -> Self {
-        Self { items, cache: Mutex::new(None) }
+        Self { items, cache: Mutex::new(None), lock: None }
+    }
+
+    #[cfg_attr(not(feature = "keychain"), allow(dead_code))]
+    fn with_lock(mut self, lock: Option<PathBuf>) -> Self {
+        self.lock = lock;
+        self
     }
 
     fn load(&self) -> Result<BTreeMap<String, Value>> {
@@ -112,6 +124,7 @@ impl<I: Items> BundleStore<I> {
         if let Some(v) = cache.as_ref().and_then(|m| m.get(key)) {
             return Ok(Some(serde_json::from_value(v.clone())?));
         }
+        let _held = self.lock.as_deref().and_then(lock_file);
         let mut map = self.load()?;
         if !map.contains_key(key)
             && let Some(old) = self.items.get(key)?
@@ -128,6 +141,7 @@ impl<I: Items> BundleStore<I> {
 
     fn set(&self, key: &str, value: &Credential) -> Result<()> {
         let mut cache = self.cache.lock().unwrap();
+        let _held = self.lock.as_deref().and_then(lock_file);
         let mut map = self.load()?;
         let value = serde_json::to_value(value)?;
         // Rewriting an unchanged item can still prompt.
@@ -141,6 +155,7 @@ impl<I: Items> BundleStore<I> {
 
     fn delete(&self, key: &str) -> Result<()> {
         let mut cache = self.cache.lock().unwrap();
+        let _held = self.lock.as_deref().and_then(lock_file);
         let mut map = self.load()?;
         if map.remove(key).is_some() {
             self.items.set(BUNDLE, &serde_json::to_string(&map)?)?;
@@ -148,6 +163,23 @@ impl<I: Items> BundleStore<I> {
         self.items.delete(key)?;
         *cache = Some(map);
         Ok(())
+    }
+}
+
+/// Takes an exclusive lock on `path` (created if needed), released when the
+/// file is dropped. Best effort: if the lock can't be had, the write goes
+/// ahead unlocked rather than failing.
+fn lock_file(path: &std::path::Path) -> Option<std::fs::File> {
+    if let Some(d) = path.parent() {
+        let _ = crate::engine::create_private_dir(d);
+    }
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(path);
+    match f.and_then(|f| f.lock().map(|()| f)) {
+        Ok(f) => Some(f),
+        Err(e) => {
+            tracing::warn!("can't lock {}: {e}", path.display());
+            None
+        }
     }
 }
 
@@ -213,12 +245,14 @@ impl SecretStore for FileSecretStore {
     }
     fn set(&self, key: &str, value: &Credential) -> Result<()> {
         let mut c = self.cache.lock().unwrap();
+        let _held = lock_file(&self.path.with_extension("lock"));
         *c = self.reload()?;
         c.insert(key.to_string(), value.clone());
         self.flush(&c)
     }
     fn delete(&self, key: &str) -> Result<()> {
         let mut c = self.cache.lock().unwrap();
+        let _held = lock_file(&self.path.with_extension("lock"));
         *c = self.reload()?;
         c.remove(key);
         self.flush(&c)

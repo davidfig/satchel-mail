@@ -106,9 +106,17 @@ pub fn rrule_to_graph(rule: &str, start: DateTime<Utc>, tz: &str) -> Option<Valu
             let d = parts.get("BYDAY").map(|v| days(v)).unwrap_or_else(|| vec![["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"][local.weekday().num_days_from_monday() as usize]]);
             json!({ "type": "weekly", "interval": interval, "daysOfWeek": d, "firstDayOfWeek": "monday" })
         }
-        // "BYDAY=-1FR": the last Friday; Graph's index has no fifth.
-        "MONTHLY" => match parts.get("BYDAY").and_then(|v| v.split_once(|c: char| c.is_ascii_alphabetic()).map(|(n, _)| (n.to_string(), days(v)))) {
-            Some((n, d)) if !n.is_empty() && d.len() == 1 => {
+        // "BYDAY=-1FR" or "BYDAY=FR;BYSETPOS=-1": the last Friday. Graph has
+        // one index for all the days and no fifth, so other rules don't map.
+        "MONTHLY" => match parts.get("BYDAY") {
+            Some(v) => {
+                let ordinals: Vec<&str> = v.split(',').map(|d| d.trim_end_matches(|c: char| c.is_ascii_alphabetic())).collect();
+                let n = match (ordinals[0], parts.get("BYSETPOS")) {
+                    // With several days BYSETPOS picks among them all, which Graph can't say.
+                    ("", Some(pos)) if ordinals.len() == 1 => pos.as_str(),
+                    (o, None) if !o.is_empty() && ordinals.iter().all(|x| x == &o) => o,
+                    _ => return None,
+                };
                 let index = match n.trim_start_matches('+') {
                     "1" => "first",
                     "2" => "second",
@@ -117,9 +125,13 @@ pub fn rrule_to_graph(rule: &str, start: DateTime<Utc>, tz: &str) -> Option<Valu
                     "-1" => "last",
                     _ => return None,
                 };
+                let d = days(v);
+                if d.len() != ordinals.len() {
+                    return None;
+                }
                 json!({ "type": "relativeMonthly", "interval": interval, "daysOfWeek": d, "index": index })
             }
-            _ => {
+            None => {
                 let day = parts.get("BYMONTHDAY").and_then(|v| v.parse::<u32>().ok()).unwrap_or(local.day());
                 json!({ "type": "absoluteMonthly", "interval": interval, "dayOfMonth": day })
             }
@@ -387,6 +399,14 @@ mod tests {
         assert_eq!(r["range"]["startDate"], "2026-10-30");
         assert_eq!(r["range"]["endDate"], "2027-01-29");
         assert_eq!(rrule_to_graph("FREQ=MONTHLY;BYDAY=2TU", start, "UTC").unwrap()["pattern"]["index"], "second");
+        // The BYSETPOS form other clients write, and one index for several days.
+        let r = rrule_to_graph("FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1", start, "UTC").unwrap();
+        assert_eq!((r["pattern"]["type"].as_str(), r["pattern"]["index"].as_str()), (Some("relativeMonthly"), Some("last")));
+        assert_eq!(rrule_to_graph("FREQ=MONTHLY;BYDAY=1MO,1WE", start, "UTC").unwrap()["pattern"]["daysOfWeek"], json!(["monday", "wednesday"]));
+        // Rules Graph can't hold aren't turned into a different one.
+        for rule in ["FREQ=MONTHLY;BYDAY=1MO,3MO", "FREQ=MONTHLY;BYDAY=FR", "FREQ=MONTHLY;BYDAY=5FR", "FREQ=MONTHLY;BYDAY=MO,TU;BYSETPOS=1"] {
+            assert!(rrule_to_graph(rule, start, "UTC").is_none(), "{rule}");
+        }
     }
 
     #[test]

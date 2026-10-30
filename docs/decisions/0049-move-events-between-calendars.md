@@ -31,8 +31,11 @@ leave to the user.
 
 ## Consequences
 - Moving gives the event a new local id.
-- The put and delete run on separate account queues, so for a moment both
-  servers may have the event, or (if the put fails and is retrying) neither
-  does. The local copy is in the new calendar throughout.
+- The delete is queued before the put. Within one account they run in that
+  order, because some servers (iCloud, Google's CalDAV) refuse a UID that's
+  still in another of the account's calendars; so for a moment the server
+  has neither copy. Across accounts they run on separate queues, so both
+  servers may briefly have it, or (if the put fails and is retrying)
+  neither does. The local copy is in the new calendar throughout.
 - Moving events with guests could come later for Google only, or as an
   explicit "move and re-invite" the user confirms.

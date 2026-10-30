@@ -48,11 +48,14 @@ pub struct GraphMailProvider {
     /// Folders the last sync left with older mail to fetch, for
     /// [`MailProvider::backfill`].
     behind: std::sync::Mutex<Vec<RemoteMailbox>>,
+    /// For those folders, the newest receivedDateTime fetched by `newest`, so
+    /// each pass asks only for mail after it.
+    newest_seen: std::sync::Mutex<HashMap<String, String>>,
 }
 
 impl GraphMailProvider {
     pub fn new(creds: CredentialHandle) -> Result<Self> {
-        Ok(Self { api: api_client(creds)?, behind: Default::default() })
+        Ok(Self { api: api_client(creds)?, behind: Default::default(), newest_seen: Default::default() })
     }
 
     async fn get(&self, url: &str, what: &str) -> Result<Value> {
@@ -148,15 +151,23 @@ impl GraphMailProvider {
         Ok(false)
     }
 
-    /// The newest messages in a folder whose delta round is still going.
-    /// Mail that arrived after the round began only comes with the next
-    /// round, so without this it would wait for the whole backfill (0047).
+    /// New messages in a folder whose delta round is still going. Mail that
+    /// arrived after the round began only comes with the next round, so
+    /// without this it would wait for the whole backfill (0047). The first
+    /// call takes the newest 50; later ones only what arrived since.
     async fn newest(&self, ctx: &SyncCtx, folder: &RemoteMailbox) -> Result<()> {
-        let url = format!("{ME}/mailFolders/{}/messages?$select={SELECT}&$orderby=receivedDateTime%20desc&$top=50", crate::net::enc(&folder.remote_id));
+        let since = self.newest_seen.lock().unwrap().get(&folder.remote_id).cloned();
+        // `ge`, not `gt`: two messages can share a second.
+        let filter = since.as_deref().map(|t| format!("&$filter=receivedDateTime%20ge%20{}", crate::net::enc(t))).unwrap_or_default();
+        let url = format!("{ME}/mailFolders/{}/messages?$select={SELECT}&$orderby=receivedDateTime%20desc&$top=50{filter}", crate::net::enc(&folder.remote_id));
         let v = self.get(&url, "newest messages").await?;
-        for m in v["value"].as_array().cloned().unwrap_or_default() {
+        let found = v["value"].as_array().cloned().unwrap_or_default();
+        for m in &found {
             let parent = m["parentFolderId"].as_str().unwrap_or(&folder.remote_id).to_string();
-            ctx.put_record(record(&m), &[(parent, None)])?;
+            ctx.put_record(record(m), &[(parent, None)])?;
+        }
+        if let Some(t) = found.first().and_then(|m| m["receivedDateTime"].as_str()) {
+            self.newest_seen.lock().unwrap().insert(folder.remote_id.clone(), t.to_string());
         }
         Ok(())
     }
@@ -192,7 +203,9 @@ impl MailProvider for GraphMailProvider {
         let mut behind = vec![];
         for f in order {
             match self.sync_folder(ctx, f, Some(window), usize::MAX).await {
-                Ok(true) => {}
+                Ok(true) => {
+                    self.newest_seen.lock().unwrap().remove(&f.remote_id);
+                }
                 Ok(false) => {
                     if let Err(e) = self.newest(ctx, f).await {
                         warn!(folder = %f.path, "Graph newest mail: {e:#}");

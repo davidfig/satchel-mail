@@ -206,7 +206,6 @@ impl Store {
         })
     }
 
-    /// Returns whether the event existed (so concurrent deletes push one op).
     /// Locations used in events, most used first (then most recent), that
     /// contain `query` (any case). An empty query lists the most used.
     pub fn location_history(&self, query: &str, limit: usize) -> Result<Vec<String>> {
@@ -221,6 +220,7 @@ impl Store {
         })
     }
 
+    /// Returns whether the event existed (so concurrent deletes push one op).
     pub fn delete_event(&self, id: &str) -> Result<bool> {
         self.w(|c| Ok(c.execute("DELETE FROM events WHERE id=?", [id])? > 0))
     }

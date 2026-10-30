@@ -146,8 +146,9 @@ impl Engine {
         let sender_allowed = settings.remote_image_senders.iter().any(|s| s == &sender);
         let sender_verdict = self.store.sender_rule(&sender).ok().flatten();
         // "Always load" never covers spam: mail in Junk or from a sender marked spam.
-        let in_junk = self.store.mailbox_by_role(&m.summary.account_id, MailboxRole::Junk)?.is_some_and(|j| m.summary.mailbox_ids.contains(&j.id));
-        let load_all = settings.load_remote_images && sender_verdict != Some(SenderVerdict::Spam) && !in_junk;
+        let load_all = settings.load_remote_images
+            && sender_verdict != Some(SenderVerdict::Spam)
+            && !self.store.mailbox_by_role(&m.summary.account_id, MailboxRole::Junk)?.is_some_and(|j| m.summary.mailbox_ids.contains(&j.id));
         let mut allow_remote = force_remote;
         let mut invite = None;
         let mut warnings = vec![];

@@ -21,7 +21,9 @@ first time it's read, and is then deleted.
 ## Consequences
 
 - A new copy of the app asks once in total, however many accounts there are.
-- Every write rewrites all credentials, so two processes writing at the same
-  moment can still lose one write. Only the engine owner and short CLI
-  commands write, so this is rare.
+- Every write rewrites all credentials, so writes hold a file lock
+  (`credentials.lock` in the user's data directory) while they re-read and
+  rewrite the item; otherwise two processes writing at once could each drop
+  the other's change. The lock is best effort: if it can't be taken, the
+  write goes ahead.
 - Removing an account rewrites the bundle rather than deleting an item.

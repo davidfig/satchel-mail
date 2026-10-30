@@ -92,8 +92,10 @@ impl Engine {
         let (ics, range) = rewrite_ics(&stored, &mut e);
         let id = self.store.upsert_event(&to.cal.id, &to.cal.account_id, &format!("local:{}", new_id()), None, &stored.uid, &ics, &e.title, e.location.trim(), range, e.rrule.is_some(), true)?;
         self.store.delete_event(&stored.id)?;
-        self.enqueue(&to.cal.account_id, "cal_put", json!({ "event_id": id }), actor)?;
+        // The delete goes first: some servers (iCloud, Google's CalDAV) refuse
+        // a UID that's still in another of the account's calendars.
         self.enqueue(&stored.account_id, "cal_delete", json!({ "calendar_remote_id": from.remote_id, "remote_id": stored.remote_id, "etag": stored.etag, "notify": false }), actor)?;
+        self.enqueue(&to.cal.account_id, "cal_put", json!({ "event_id": id }), actor)?;
         self.store.audit(actor, "event_moved", &json!({ "title": e.title, "from": from.cal.name, "to": to.cal.name }))?;
         self.emit(CoreEvent::CalendarChanged { account_id: stored.account_id.clone() });
         if to.cal.account_id != stored.account_id {

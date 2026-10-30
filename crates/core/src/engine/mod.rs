@@ -98,7 +98,7 @@ pub fn default_data_dir() -> PathBuf {
     platform_data_dir().unwrap_or_else(|| PathBuf::from(".satchel"))
 }
 
-fn platform_data_dir() -> Option<PathBuf> {
+pub(crate) fn platform_data_dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("app", "Satchel", "Satchel Mail").map(|p| p.data_dir().to_path_buf())
 }
 

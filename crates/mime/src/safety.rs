@@ -223,8 +223,9 @@ pub fn deceptive_links(html: &str) -> Vec<(String, String)> {
         let text = decode_entities(&strip_tags(&html[tag_end + 1..close]));
         pos = close;
         let (Some(href), Some(shown)) = (href, shown_host(&unwrap_safe_link(text.trim()))) else { continue };
-        let Some(actual) = url_host(&unwrap_safe_link(&href)) else { continue };
-        let tracked = crate::trackers::is_click_tracker(&actual);
+        let target = unwrap_safe_link(&href);
+        let Some(actual) = url_host(&target) else { continue };
+        let tracked = crate::trackers::is_click_tracker(&actual, url_path(&target));
         if !tracked && base_domain(&shown) != base_domain(&actual) && !out.iter().any(|(s, a)| *s == shown && *a == actual) {
             out.push((shown, actual));
         }
@@ -404,6 +405,13 @@ fn url_host(href: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_string())
 }
 
+/// The path of an http(s) URL ("/track/click"), or "" if it has none.
+fn url_path(href: &str) -> &str {
+    let Some((_, rest)) = href.trim().split_once("://") else { return "" };
+    let rest = rest.split(['?', '#']).next().unwrap_or("");
+    rest.find('/').map_or("", |i| &rest[i..])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,6 +462,10 @@ mod tests {
         assert!(deceptive_links(&format!(r#"<a href="https://play.google.com/store">{}</a>"#, wrap("https%3A%2F%2Fplay.google.com%2Fstore").replace("&amp;", "&"))).is_empty());
         // Newsletter click trackers hide the destination; they don't misstate it.
         assert!(deceptive_links(r#"<a href="https://u4639.ct.sendgrid.net/ls/click?upn=x">github.com</a>"#).is_empty());
+        assert!(deceptive_links(r#"<a href="https://x.us4.list-manage.com/track/click?u=1&amp;id=2">github.com</a>"#).is_empty());
+        // Pages anyone can publish on a tracker's host still count.
+        assert_eq!(deceptive_links(r#"<a href="https://x.us4.list-manage.com/subscribe?u=1">paypal.com</a>"#).len(), 1);
+        assert_eq!(deceptive_links(r#"<a href="https://mailchi.mp/x/login">paypal.com</a>"#).len(), 1);
         assert_eq!(deceptive_links(r#"<a href="https://ct.sendgrid.net.evil.test/">github.com</a>"#).len(), 1);
         assert_eq!(decode_entities("&#x1F600;&#0;&#99999999999;&unknown;&amp"), "\u{1F600}\u{FFFD}\u{FFFD}&unknown;&");
     }
