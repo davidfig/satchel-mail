@@ -1,6 +1,7 @@
 // AI Proposals: everything AI agents propose waits here for the user.
 
 import { api } from '../api';
+import { readJson, writeJson } from '../app/location';
 import { h, icon, replace } from '../lib/dom';
 import { displayName, formatAddress, fullDate, parseAddresses, relative, timeRange } from '../lib/format';
 import { copyBlock, errorToast, modal, toast } from '../lib/ui';
@@ -10,6 +11,8 @@ import { openComposer, sendWithUndo } from './mail/composer';
 
 // Not 'labels': adding Trash or Junk as a label moves mail there (0040 second pass, #3).
 const LOW_RISK = new Set(['archive', 'mark_read', 'flag']);
+/** The user hid the get-started instructions on the empty Waiting tab. */
+const HELP_KEY = 'satchel.agentHelpHidden';
 
 export class ReviewView {
   root = h('div.review-view');
@@ -73,19 +76,28 @@ export class ReviewView {
       shown.length
         ? h('div.proposal-list', cards)
         : h('div.empty-state', icon('sparkle', 36), h('p', this.tab === 'pending' ? 'Nothing waiting for review.' : 'No decisions yet.'),
-            this.tab === 'pending' && !items.length && await this.getStarted()),
+            this.tab === 'pending' && await this.getStarted()),
     );
   }
 
-  /** Until the first proposal arrives: a prompt to paste into any AI tool. */
+  /** On an empty Waiting tab: a prompt to paste into any AI tool, until dismissed. */
   private async getStarted(): Promise<HTMLElement> {
+    const toggle = (hide: boolean) => {
+      writeJson(HELP_KEY, hide);
+      void this.render();
+    };
+    if (readJson<boolean>(HELP_KEY)) {
+      return h('button.link.small', { title: 'Show how to let an AI tool propose changes', on: { click: () => toggle(false) } }, 'How do I connect an AI tool?');
+    }
     const mi = store.state.settings?.mirror;
     const root = (await api.info().catch(() => null))?.mirror_root ?? '~/Satchel';
+    const close = h('button.icon-btn', { title: 'Hide these instructions', 'aria-label': 'Hide', on: { click: () => toggle(true) } }, icon('close', 16));
     if (mi && (!mi.enabled || !mi.accept_proposals)) {
-      return h('p.muted.small', 'To let AI tools propose changes, turn on the AI folder and proposal files in Settings → AI folder. Tools that use MCP can connect in Settings → AI agents.');
+      return h('div.get-started',
+        h('div.get-started-head', h('p.small', 'To let AI tools propose changes, turn on the AI folder and proposal files in Settings → AI folder. Tools that use MCP can connect in Settings → AI agents.'), close));
     }
     return h('div.get-started',
-      h('p.small', 'To get started, paste this into an AI tool that can read and write files on this computer (Claude Code, Codex, Cursor and similar). It needs no setup.'),
+      h('div.get-started-head', h('p.small', 'To get started, paste this into an AI tool that can read and write files on this computer (Claude Code, Codex, Cursor and similar). It needs no setup.'), close),
       copyBlock(agentPrompt(root)),
       h('p.muted.small', 'Tools that use MCP can connect in Settings → AI agents instead.'));
   }

@@ -64,3 +64,5 @@ table.audit, table.shortcuts { width: 100%; border-collapse: collapse; font-size
 table.audit td, table.shortcuts td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .get-started { width: min(640px, 100%); margin-top: 14px; display: flex; flex-direction: column; gap: 10px; text-align: left; color: var(--text-2); }
 .get-started .snippet { max-height: 320px; word-break: normal; overflow-wrap: anywhere; color: var(--text); }
+.get-started-head { display: flex; gap: 8px; align-items: flex-start; }
+.get-started-head > p { flex: 1; margin: 0; }
