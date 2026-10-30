@@ -1,13 +1,13 @@
 //! The README written at the top of the AI folder.
 
-pub const README: &str = r#"# Satchel Mail — AI mirror
+pub const README: &str = r#"# satchel.email — AI mirror
 
-This folder is how AI tools work with your mail and calendars. Satchel Mail
+This folder is how AI tools work with your mail and calendars. satchel.email
 keeps it up to date; read it with ordinary file access.
 
 Editing the mail or calendar files does nothing — they're a copy. To act on
 mail, write a proposal to `proposals/inbox/` (below); the user reviews it in
-Satchel Mail's AI Proposals view. Contacts can also be added or changed by
+satchel.email's AI Proposals view. Contacts can also be added or changed by
 editing their files (see Contacts).
 
 ## Layout
@@ -103,7 +103,7 @@ status over MCP.
 JSON files in the API's proposal shape (`action`, `rationale`,
 `source_thread_ids`) work too. Everything written here comes from the AI
 folder agent, with the access the user gave the folder. Agents connected in
-Satchel Mail (Settings → AI agents), with their own access limits, use
+satchel.email (Settings → AI agents), with their own access limits, use
 `satchel mcp` or `/api/agent/rpc` with their token instead. Never put an
 agent token in a file here: anything with access to the folder could read
 it, so a file with `agent_token:` is refused with an error. Nothing is ever

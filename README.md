@@ -1,4 +1,4 @@
-# Satchel Mail
+# satchel.email
 
 A desktop email and calendar client that keeps your mail on your own disk and
 lets AI agents help — safely. Agents read your mail and calendars through MCP
@@ -102,7 +102,7 @@ Details, the tool list, and the folder-based alternative are in
 ## Installing on your Mac
 
 ```bash
-npm run install-app               # release build → /Applications/Satchel Mail.app
+npm run install-app               # release build → /Applications/satchel.email.app
 ```
 
 Runs it like a normal app when you're not developing; run it again to update.

@@ -19,7 +19,7 @@ pub fn serialize(e: &Event, opts: &SerializeOpts) -> String {
     let mut lines: Vec<String> = vec![
         "BEGIN:VCALENDAR".into(),
         "VERSION:2.0".into(),
-        "PRODID:-//Satchel Mail//EN".into(),
+        "PRODID:-//satchel.email//EN".into(),
         "CALSCALE:GREGORIAN".into(),
     ];
     if let Some(m) = opts.method {

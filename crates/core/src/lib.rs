@@ -1,4 +1,4 @@
-//! Satchel Mail core: local store, sync engine, op queue, proposals, search
+//! satchel.email core: local store, sync engine, op queue, proposals, search
 //! and the AI mirror. Hosts (desktop app, CLI, future server) wrap [`Engine`].
 
 mod accounts;

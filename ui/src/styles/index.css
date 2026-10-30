@@ -1,4 +1,4 @@
-/* Satchel Mail — UI styles, in cascade order. Tokens first; dark mode overrides tokens only. */
+/* satchel.email — UI styles, in cascade order. Tokens first; dark mode overrides tokens only. */
 @import './tokens.css';
 @import './controls.css';
 @import './shell.css';

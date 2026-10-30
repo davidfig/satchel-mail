@@ -24,7 +24,7 @@ async function boot(): Promise<boolean> {
   try {
     await store.init();
   } catch (e) {
-    document.body.append(h('div.fatal', h('h1', 'Can’t reach Satchel Mail'), h('p', e instanceof Error ? e.message : String(e)), h('button.primary', { on: { click: () => location.reload() } }, 'Retry')));
+    document.body.append(h('div.fatal', h('h1', 'Can’t reach satchel.email'), h('p', e instanceof Error ? e.message : String(e)), h('button.primary', { on: { click: () => location.reload() } }, 'Retry')));
     return false;
   }
   if (store.state.accounts.length) restoreLocation();

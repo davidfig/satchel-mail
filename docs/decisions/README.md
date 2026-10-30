@@ -19,7 +19,7 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0013 | [Windowed thread list and stable paging](0013-windowed-thread-list.md) | Accepted |
 | 0014 | [Full-text search with SQLite FTS5](0014-sqlite-fts5-search.md) | Accepted (supersedes the tantivy index) |
 | 0015 | [Credentials in the OS keychain](0015-secrets.md) | Accepted |
-| 0016 | [Name: Satchel Mail](0016-name.md) | Accepted |
+| 0016 | [Name: Satchel Mail](0016-name.md) | Superseded by 0055 |
 | 0017 | [OAuth with PKCE and a loopback redirect](0017-oauth.md) | Accepted |
 | 0018 | [Hosted (cloud) version](0018-hosted-version.md) | Proposed — on hold |
 | 0019 | [Conversations as a chat-style stream](0019-conversation-stream.md) | Accepted |
@@ -59,3 +59,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0052 | [All credentials in one keychain item](0052-one-keychain-item.md) | Accepted |
 | 0053 | [Favorite senders: a local list of addresses, highlighted everywhere](0053-favorite-senders.md) | Accepted |
 | 0054 | [View attachments in the app; Open and Save beside it](0054-attachment-viewer.md) | Accepted |
+| 0055 | [Name: satchel.email](0055-name-satchel-email.md) | Accepted |

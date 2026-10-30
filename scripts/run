@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and run Satchel Mail.
+# Build and run satchel.email.
 #
 #   scripts/run                  desktop app (Tauri dev, UI hot reload) on your real data
 #   scripts/run web              web UI + API on http://127.0.0.1:7781

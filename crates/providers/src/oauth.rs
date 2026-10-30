@@ -211,7 +211,7 @@ async fn finish(app: OAuthApp, listener: std::net::TcpListener, redirect: String
         // Anything on this computer can reach the port: a callback that isn't
         // for this sign-in is turned away, and we keep waiting for the real one.
         if query_param(q, "state").as_deref() != Some(state.as_str()) {
-            respond(&mut sock, "Sign-in failed", "The response didn't match this sign-in attempt. Please try again from Satchel Mail.").await;
+            respond(&mut sock, "Sign-in failed", "The response didn't match this sign-in attempt. Please try again from satchel.email.").await;
             continue;
         }
         if let Some(err) = query_param(q, "error") {
@@ -242,7 +242,7 @@ async fn finish(app: OAuthApp, listener: std::net::TcpListener, redirect: String
     }
     let tok: TokenResponse = serde_json::from_str(&body)?;
     let (email, name) = identity(&http, app.provider, &tok.access_token).await?;
-    respond(&mut sock, "You're signed in", "Return to Satchel Mail — your account is syncing. You can close this tab.").await;
+    respond(&mut sock, "You're signed in", "Return to satchel.email — your account is syncing. You can close this tab.").await;
     let cred = Credential::OAuth { access_token: tok.access_token, refresh_token: tok.refresh_token, expires_at: tok.expires_in.map(|e| now() + e) };
     let config = match app.provider {
         ProviderKind::Gmail => AccountConfig::Gmail { email, display_name: name },

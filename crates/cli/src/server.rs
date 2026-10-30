@@ -83,10 +83,10 @@ pub async fn serve(engine: Arc<Engine>, port: u16, ui: Option<PathBuf>, new_sess
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    tracing::info!("Satchel Mail on http://127.0.0.1:{port}");
+    tracing::info!("satchel.email on http://127.0.0.1:{port}");
     // The link is the key: the page that opens it keeps the token.
     // The token rides in the fragment, which browsers never send or log.
-    eprintln!("\nOpen Satchel Mail: http://127.0.0.1:{port}/#session={session}\n");
+    eprintln!("\nOpen satchel.email: http://127.0.0.1:{port}/#session={session}\n");
     let info = serde_json::json!({ "port": port, "pid": std::process::id() });
     let _ = std::fs::write(data_dir.join("server.json"), info.to_string());
     axum::serve(listener, app).with_graceful_shutdown(async {

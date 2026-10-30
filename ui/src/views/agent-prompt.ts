@@ -23,7 +23,7 @@ export function agentPromptBlock(root: string, note?: string, close?: Node): HTM
 function agentPrompt(root: string): string {
   const sep = root.includes('\\') ? '\\' : '/';
   const at = (p: string) => `${root}${sep}${p.replaceAll('/', sep)}`;
-  return `You can help me with my email, calendar and contacts through Satchel Mail. It keeps an up-to-date, plain-text copy of them in this folder:
+  return `You can help me with my email, calendar and contacts through satchel.email. It keeps an up-to-date, plain-text copy of them in this folder:
 
 ${root}
 

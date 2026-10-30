@@ -1,4 +1,4 @@
-//! Satchel Mail desktop host: owns the engine, bridges the UI over Tauri IPC
+//! satchel.email desktop host: owns the engine, bridges the UI over Tauri IPC
 //! and forwards core events. All product logic lives in satchel-core.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -128,7 +128,7 @@ fn write_downloaded(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> 
 fn mark_downloaded(path: &std::path::Path) -> std::io::Result<()> {
     use std::os::unix::ffi::OsStrExt;
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let value = format!("0081;{secs:08x};Satchel Mail;");
+    let value = format!("0081;{secs:08x};satchel.email;");
     let path = std::ffi::CString::new(path.as_os_str().as_bytes())?;
     // SAFETY: both strings are NUL-terminated and `value` outlives the call.
     let r = unsafe { libc::setxattr(path.as_ptr(), c"com.apple.quarantine".as_ptr(), value.as_ptr().cast(), value.len(), 0, 0) };
@@ -237,7 +237,7 @@ fn main() {
             let data_dir = satchel_core::default_data_dir();
             let Some(lock) = lock(&data_dir)? else {
                 app.dialog()
-                    .message(format!("Satchel Mail is already running for {} (perhaps `satchel serve`). Quit it and try again.", data_dir.display()))
+                    .message(format!("satchel.email is already running for {} (perhaps `satchel serve`). Quit it and try again.", data_dir.display()))
                     .title("Already running")
                     .blocking_show();
                 std::process::exit(1);
@@ -289,7 +289,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![api, open_url, save_file, open_file, choose_folder, cli_path])
         .run(tauri::generate_context!())
-        .expect("error while running Satchel Mail");
+        .expect("error while running satchel.email");
 }
 
 #[cfg(all(test, target_os = "macos"))]
@@ -302,6 +302,6 @@ mod tests {
         let out = std::process::Command::new("xattr").arg("-p").arg("com.apple.quarantine").arg(&path).output().unwrap();
         let _ = std::fs::remove_file(&path);
         let v = String::from_utf8_lossy(&out.stdout);
-        assert!(v.starts_with("0081;") && v.trim_end().ends_with(";Satchel Mail;"), "{v}");
+        assert!(v.starts_with("0081;") && v.trim_end().ends_with(";satchel.email;"), "{v}");
     }
 }

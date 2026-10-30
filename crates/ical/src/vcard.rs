@@ -283,7 +283,7 @@ pub fn build(original: Option<&str>, uid: &str, fields: &ContactFields) -> Strin
         }
         None => {
             lines.push("VERSION:3.0".into());
-            lines.push("PRODID:-//Satchel Mail//EN".into());
+            lines.push("PRODID:-//satchel.email//EN".into());
             lines.push(format!("UID:{}", escape(uid)));
         }
     }

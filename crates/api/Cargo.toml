@@ -1,6 +1,6 @@
 [package]
 name = "satchel-api"
-description = "Command/event schema shared by every Satchel Mail host and client"
+description = "Command/event schema shared by every satchel.email host and client"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

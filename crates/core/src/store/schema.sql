@@ -1,4 +1,4 @@
--- Satchel Mail local store, schema version 2.
+-- satchel.email local store, schema version 2.
 -- Every account-scoped row carries account_id; accounts carry tenant_id so the
 -- same schema can be multi-tenant in the hosted version.
 

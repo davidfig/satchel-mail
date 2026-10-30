@@ -189,7 +189,7 @@ impl Engine {
                     }
                 }
         let domain = acc.email.split('@').nth(1).unwrap_or("satchel.local").to_string();
-        let mut extra = vec![("X-Mailer".to_string(), "Satchel Mail".to_string())];
+        let mut extra = vec![("X-Mailer".to_string(), "satchel.email".to_string())];
         if for_draft_folder
             && let Some(id) = &d.id {
                 extra.push(("X-Satchel-Draft-Id".into(), id.clone()));

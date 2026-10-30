@@ -1,4 +1,4 @@
-# Satchel Mail — Design & Build Plan
+# satchel.email — Design & Build Plan
 
 > Draft v0.2 — 2026-10-23. Name cleared in a basic USPTO search (no SATCHEL MAIL mark; no live SATCHEL software marks); get a formal clearance search before filing.
 
@@ -14,7 +14,7 @@ A desktop email + calendar client that:
 Secondary: a **paid hosted version** that runs the same core in the cloud (always-on sync, AI access from anywhere). Not built in v1, but every v1 decision must keep it cheap to add (§9).
 
 ### Non-goals (v1)
-- A built-in AI/LLM. Satchel Mail is the *substrate*; the AI is external. (A bundled local-model option can come later.)
+- A built-in AI/LLM. satchel.email is the *substrate*; the AI is external. (A bundled local-model option can come later.)
 - Contacts sync (CardDAV/People API) beyond what's needed for address autocomplete.
 - Mobile apps.
 - Auto-send rules for AI. Approval is mandatory in v1; policy-based auto-approve is a later feature.

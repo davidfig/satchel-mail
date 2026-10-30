@@ -1,4 +1,4 @@
-# Satchel Mail — notes for Claude
+# satchel.email — notes for Claude
 
 Local-first email + calendar client. A Rust core syncs accounts into SQLite;
 the desktop app (Tauri) and `satchel serve` host it; AI agents work through the

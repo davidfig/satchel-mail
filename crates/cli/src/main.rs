@@ -1,4 +1,4 @@
-//! `satchel` — headless host for the Satchel Mail core.
+//! `satchel` — headless host for the satchel.email core.
 //!
 //!   satchel serve            run sync + the web UI/API on localhost
 //!   satchel mcp              MCP server over stdio for AI agents
@@ -18,7 +18,7 @@ use satchel_core::secrets::{FileSecretStore, SecretStore};
 use satchel_core::{Caller, Engine, EngineOptions, Mode};
 
 #[derive(Parser)]
-#[command(name = "satchel", version, about = "Satchel Mail headless host")]
+#[command(name = "satchel", version, about = "satchel.email headless host")]
 struct Cli {
     /// Data directory (default: platform app-data dir, or $SATCHEL_DATA_DIR).
     #[arg(long, global = true, env = "SATCHEL_DATA_DIR")]
@@ -170,7 +170,7 @@ fn open(cli: &Cli, mode: Mode, workers: bool) -> Result<(Arc<Engine>, Option<Eng
     let (mode, lock) = if mode == Mode::Full {
         match try_lock(&data_dir)? {
             Some(l) => (Mode::Full, Some(l)),
-            None => bail!("another Satchel Mail process (the app or `satchel serve`) is already running for {}", data_dir.display()),
+            None => bail!("another satchel.email process (the app or `satchel serve`) is already running for {}", data_dir.display()),
         }
     } else {
         (mode, None)

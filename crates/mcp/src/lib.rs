@@ -1,6 +1,6 @@
 //! MCP server for AI agents: read tools plus propose_* tools. Nothing here can
 //! send, delete or change settings — every write becomes a proposal the user
-//! reviews in Satchel Mail.
+//! reviews in satchel.email.
 
 mod call;
 mod slim;
@@ -21,7 +21,7 @@ use satchel_api::*;
 use satchel_core::{Caller, Engine};
 use serde_json::{Value, json};
 
-pub const INSTRUCTIONS: &str = "Satchel Mail gives you read access to the user's email, calendars and contacts and lets you PROPOSE changes. \
+pub const INSTRUCTIONS: &str = "satchel.email gives you read access to the user's email, calendars and contacts and lets you PROPOSE changes. \
 You cannot send, delete, or change anything directly: every propose_* call creates an item in the user's AI Proposals view, \
 and the user approves, edits or rejects it. Typical flow: search_threads -> get_thread -> propose_reply (or propose_archive, \
 propose_event, ...) -> later get_proposal_status to see the decision. Use ids exactly as returned (message_id, thread_id, \
@@ -50,7 +50,7 @@ impl SatchelMcp {
     fn caller(&self) -> Result<Caller, String> {
         match self.engine.store().get_agent(&self.agent_id) {
             Ok(Some(a)) if !a.revoked => Ok(Caller::Agent(a)),
-            Ok(_) => Err("this agent's access was revoked in Satchel Mail".into()),
+            Ok(_) => Err("this agent's access was revoked in satchel.email".into()),
             Err(e) => Err(e.to_string()),
         }
     }

@@ -89,7 +89,7 @@ impl Engine {
 
     pub(crate) fn require_full(&self) -> Result<()> {
         if self.mode != Mode::Full {
-            return Err(err(ErrorCode::Conflict, "this process is read-only; open Satchel Mail to make changes"));
+            return Err(err(ErrorCode::Conflict, "this process is read-only; open satchel.email to make changes"));
         }
         Ok(())
     }

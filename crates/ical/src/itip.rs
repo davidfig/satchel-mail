@@ -65,7 +65,7 @@ pub fn reply(original: &ParsedEvent, attendee_email: &str, attendee_name: Option
     let mut lines: Vec<String> = vec![
         "BEGIN:VCALENDAR".into(),
         "VERSION:2.0".into(),
-        "PRODID:-//Satchel Mail//EN".into(),
+        "PRODID:-//satchel.email//EN".into(),
         "METHOD:REPLY".into(),
         "BEGIN:VEVENT".into(),
         format!("UID:{}", original.uid),

@@ -27,5 +27,5 @@ export async function followPage(url: string, cautious: boolean) {
   replace(page,
     h('h1', 'Link not opened'),
     h('p', 'You can close this tab.'),
-    h('button', { title: 'Open Satchel Mail in this tab', on: { click: () => location.replace('/') } }, 'Go to Satchel'));
+    h('button', { title: 'Open satchel.email in this tab', on: { click: () => location.replace('/') } }, 'Go to Satchel'));
 }

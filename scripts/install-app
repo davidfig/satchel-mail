@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Satchel Mail as a release app and install it in /Applications, so it
+# Build satchel.email as a release app and install it in /Applications, so it
 # runs like any other app when you're not developing. Run it again to update.
 #
 #   scripts/install-app              build, quit the running copy, install
@@ -52,17 +52,17 @@ fi
 BUNDLES=app scripts/release.sh
 
 triple="$(rustc -vV | sed -n 's/host: //p')"
-app="target/$triple/release/bundle/macos/Satchel Mail.app"
+app="target/$triple/release/bundle/macos/satchel.email.app"
 [[ -d "$app" ]] || { echo "build finished but $app is missing" >&2; exit 1; }
 
 if pgrep -xq "satchel-mail"; then
-  echo "==> quitting the running Satchel Mail"
-  osascript -e 'quit app "Satchel Mail"' || true
+  echo "==> quitting the running satchel.email"
+  osascript -e 'quit app "satchel.email"' || true
   for _ in {1..20}; do pgrep -xq "satchel-mail" || break; sleep 0.5; done
 fi
 
 echo "==> installing to $dest"
 mkdir -p "$dest"
-rm -rf "$dest/Satchel Mail.app"
-ditto "$app" "$dest/Satchel Mail.app"
-echo "Installed $dest/Satchel Mail.app"
+rm -rf "$dest/satchel.email.app"
+ditto "$app" "$dest/satchel.email.app"
+echo "Installed $dest/satchel.email.app"

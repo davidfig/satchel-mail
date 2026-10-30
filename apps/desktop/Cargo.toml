@@ -1,6 +1,6 @@
 [package]
 name = "satchel-desktop"
-description = "Satchel Mail desktop app (Tauri)"
+description = "satchel.email desktop app (Tauri)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
