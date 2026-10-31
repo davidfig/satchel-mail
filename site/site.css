@@ -485,3 +485,11 @@ p { margin: 0 0 14px; }
   .flow .arrow::before { left: 11.5px; right: auto; top: auto; bottom: 2px; border: 4.5px solid transparent; border-top: 6px solid var(--text-3); border-bottom: 0; }
   .flow .arrow.back::before { border-top-color: var(--accent); border-left-color: transparent; }
 }
+
+/* Downloads, one per system. */
+.downloads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 8px 0 14px; }
+.dl { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel); color: var(--text); text-decoration: none; }
+.dl:hover { border-color: var(--accent); }
+.dl b { font-weight: 650; }
+.dl span { color: var(--text-2); font-size: 13px; }
+@media (max-width: 680px) { .downloads { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

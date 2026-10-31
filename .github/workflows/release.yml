@@ -1,0 +1,147 @@
+# Builds the desktop app and the `satchel` CLI for macOS (Apple silicon and Intel), Windows and Linux with
+# scripts/release.sh. Pushing a tag like v0.1.0 attaches everything to a draft GitHub release, which you publish by
+# hand after checking it. Pushing a change to this file builds without releasing, to test it.
+#
+# Files get stable names (satchel.email-mac-arm64.dmg, …) so the site can link to
+# releases/latest/download/<name>.
+#
+# Signing and sign-in keys are optional repository secrets; a build without them works but is unsigned:
+#   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#   APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID       macOS signing and notarization
+#   SATCHEL_GOOGLE_CLIENT_ID, SATCHEL_GOOGLE_CLIENT_SECRET,
+#   SATCHEL_MS_CLIENT_ID                                         Google and Microsoft sign-in (docs/OAUTH.md)
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+    # Branch pushes build only when this file changes. Path filters don't apply to tags.
+    branches: ['**']
+    paths: ['.github/workflows/release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: mac-arm64, os: macos-latest, target: aarch64-apple-darwin, bundles: dmg }
+          - { name: mac-x64, os: macos-latest, target: x86_64-apple-darwin, bundles: dmg }
+          - { name: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, bundles: nsis }
+          - { name: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bundles: 'deb,appimage' }
+    env:
+      TARGET: ${{ matrix.target }}
+      BUNDLES: ${{ matrix.bundles }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Linux packages for Tauri
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      # release.sh calls python3, which Windows installs only as python.
+      - name: python3 on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: command -v python3 || cp "$(command -v python)" "$(dirname "$(command -v python)")/python3.exe"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.target }}
+
+      # Only secrets that are set reach the build: an empty APPLE_SIGNING_IDENTITY would make Tauri try to sign.
+      - name: Signing and sign-in keys
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SATCHEL_GOOGLE_CLIENT_ID: ${{ secrets.SATCHEL_GOOGLE_CLIENT_ID }}
+          SATCHEL_GOOGLE_CLIENT_SECRET: ${{ secrets.SATCHEL_GOOGLE_CLIENT_SECRET }}
+          SATCHEL_MS_CLIENT_ID: ${{ secrets.SATCHEL_MS_CLIENT_ID }}
+        run: |
+          keys=(SATCHEL_GOOGLE_CLIENT_ID SATCHEL_GOOGLE_CLIENT_SECRET SATCHEL_MS_CLIENT_ID)
+          [[ "$RUNNER_OS" == macOS ]] && keys+=(APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID)
+          for k in "${keys[@]}"; do
+            if [[ -n "${!k}" ]]; then echo "$k=${!k}" >> "$GITHUB_ENV"; else echo "$k not set"; fi
+          done
+
+      - name: Build
+        shell: bash
+        run: scripts/release.sh
+
+      - name: Collect files
+        shell: bash
+        run: |
+          r="target/$TARGET/release"
+          name="${{ matrix.name }}"
+          mkdir -p out
+          case "$TARGET" in
+            *apple-darwin) cp "$r"/bundle/dmg/*.dmg "out/satchel.email-$name.dmg" ;;
+            *windows*) cp "$r"/bundle/nsis/*-setup.exe "out/satchel.email-$name-setup.exe" ;;
+            *linux*)
+              cp "$r"/bundle/appimage/*.AppImage "out/satchel.email-$name.AppImage"
+              cp "$r"/bundle/deb/*.deb "out/satchel.email-$name.deb" ;;
+          esac
+          # The CLI on its own, with its licenses, for servers and agents.
+          cli="satchel-cli-$name"
+          mkdir "$cli"
+          exe=""; [[ "$RUNNER_OS" == Windows ]] && exe=".exe"
+          cp "$r/satchel$exe" "$cli"/
+          for f in LICENSE "$r/THIRD_PARTY_LICENSES.txt"; do [[ -f "$f" ]] && cp "$f" "$cli"/; done
+          if [[ "$RUNNER_OS" == Windows ]]; then 7z a "out/$cli.zip" "$cli" > /dev/null; else tar czf "out/$cli.tar.gz" "$cli"; fi
+          ls -l out
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "satchel.email ${GITHUB_REF_NAME#v}"

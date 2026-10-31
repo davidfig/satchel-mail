@@ -9,6 +9,14 @@
     try { localStorage.setItem('satchel.site.theme', root.dataset.theme); } catch (e) {}
   });
 
+  // Name the visitor's system on the main download button; the files themselves are in #get.
+  const download = document.getElementById('download');
+  if (download) {
+    const ua = navigator.userAgent;
+    const os = /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) && !/iPhone|iPad/.test(ua) ? 'Mac' : /Linux/.test(ua) && !/Android/.test(ua) ? 'Linux' : '';
+    if (os) download.textContent = `Download for ${os}`;
+  }
+
   // The hero switches between the mail and calendar views, from the switch above it or its own sidebar.
   const hero = document.getElementById('hero');
   if (hero) {
