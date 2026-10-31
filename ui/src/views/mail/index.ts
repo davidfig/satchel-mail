@@ -182,15 +182,21 @@ export class MailView {
     const anchorIdx = Math.floor(top / ROW_H);
     const anchorId = this.scroller.scrollTop > 0 ? this.list.at(anchorIdx)?.thread_id : undefined;
     const within = top - anchorIdx * ROW_H;
-    const cursorId = this.list.at(this.cursor)?.thread_id;
+    const cursor = this.cursor;
+    const scrollTop = this.scroller.scrollTop;
+    const cursorId = this.list.at(cursor)?.thread_id;
     const [first, last] = this.visibleRange(20);
     await this.list.refresh(first, last);
     if (gen !== this.generation) return;
-    if (anchorId) {
+    // If the user moved or scrolled while we fetched (arrowing through mail
+    // marks each thread read, which lands here), their position wins over the
+    // one captured before the fetch, or the cursor would jump back.
+    const moved = this.cursor !== cursor || this.scroller.scrollTop !== scrollTop;
+    if (anchorId && !moved) {
       const now = this.list.indexOf(anchorId);
       if (now >= 0 && now !== anchorIdx) this.scrollToIndex(now, within);
     }
-    if (cursorId) {
+    if (cursorId && !moved) {
       const now = this.list.indexOf(cursorId);
       this.cursor = now >= 0 ? now : Math.min(this.cursor, this.list.total - 1);
     }
@@ -218,8 +224,10 @@ export class MailView {
     else if (y + ROW_H > top + this.scroller.clientHeight) this.scrollToIndex(this.cursor, ROW_H - this.scroller.clientHeight);
     this.renderRows();
     if (store.state.selectedThread) {
-      const t = await this.list.get(this.cursor);
-      if (t) void this.showThread(t.thread_id);
+      const cursor = this.cursor;
+      const t = await this.list.get(cursor);
+      // A later keypress may have moved on while this row was fetched.
+      if (t && cursor === this.cursor) void this.showThread(t.thread_id);
     }
   }
 
