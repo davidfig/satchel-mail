@@ -13,6 +13,11 @@ release. Why it's signed this way: [0059](decisions/0059-signing-releases.md).
    and files, and publish it. The site's download buttons point at
    `releases/latest/download/<file>`, so they follow the newest published
    release.
+4. **First release only:** the site hides its downloads until there is
+   something behind them. In `site/index.html`, remove `data-unreleased` from
+   `<section id="get">` and delete the "Not released yet" notice, and take the
+   "Status: not released yet" section out of the README. Trim the "Early
+   release" notice as Google and Microsoft finish their reviews.
 
 A tag fails unless the Mac and Windows signing keys below are set. To test the
 workflow without releasing, push a change to the workflow file on a branch, or

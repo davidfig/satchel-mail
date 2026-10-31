@@ -21,6 +21,30 @@ sent, moved or scheduled until you approve it in AI Proposals.
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture and
 [docs/decisions/](docs/decisions/README.md) for the decisions behind it.
 
+## Status: not released yet
+
+The code is open and builds today ([Quick start](#quick-start-development)),
+but there are no downloads yet. The first release, v0.1.0, is waiting on:
+
+1. **Google's review of Gmail access.** `https://mail.google.com/` is a
+   restricted scope, so until Google verifies the app only listed test users
+   can sign in with Google. Verification needs the satchel.email site live
+   (home page and privacy policy, on a verified domain), a demo video of the
+   sign-in and of how each scope is used, and a yearly independent security
+   assessment (CASA). See [docs/OAUTH.md](docs/OAUTH.md).
+2. **Signed installers:** an Apple Developer ID with notarization for Mac, and
+   Azure Artifact Signing for Windows, set up as described in
+   [docs/RELEASING.md](docs/RELEASING.md).
+3. **Microsoft publisher verification,** so the Microsoft 365 and Outlook
+   consent screen doesn't say "unverified". Sign-in works without it.
+
+Until then, Fastmail, iCloud and any IMAP or JMAP server work fully. Gmail
+works as an IMAP/SMTP account with a
+[Google app password](https://myaccount.google.com/apppasswords) (mail only;
+Google Calendar and Contacts need the Google sign-in). To build with your own
+Google or Microsoft sign-in, create your own OAuth client ids
+([docs/OAUTH.md](docs/OAUTH.md)).
+
 ## License
 
 | Part | License |

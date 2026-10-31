@@ -55,7 +55,7 @@
         <h1>Email and calendar, open source and on your own computer.</h1>
         <p class="lede">satchel.email is a fully featured mail, calendar and contacts app for Gmail, Outlook, Fastmail and any IMAP server. Your mail syncs straight to your computer, search is instant, and every line of code is open. There's no AI built in. If you want help, point your own agent at the plain files it keeps, or connect it over MCP, and it can propose replies and events for you to approve.</p>
         <div class="cta">
-          <a class="btn primary big" href="#get" id="download">Download</a>
+          <a class="btn primary big" href="#get" id="download">Get satchel.email</a>
           <a class="btn big" href="https://github.com/davidfig/satchel-mail">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.87.87 2.33.67.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0z" /></svg>
             Source on GitHub
@@ -346,8 +346,20 @@ Monday at 10 works for me. Talk then!</span>
           <p class="sig-name">David Figatner, who built satchel.email</p>
         </section>
 
-        <section id="get" class="get">
+        <section id="get" class="get" data-unreleased>
           <h2>Get satchel.email</h2>
+          <!-- Before the first release: remove data-unreleased above and this notice once v0.1.0 is published
+               (docs/RELEASING.md). Until then the downloads stay hidden, since there is nothing behind them yet. -->
+          <div class="notice" id="unreleased">
+            <b>Not released yet</b>
+            <p>The code is open and builds today, but there are no downloads yet. The first release is waiting on:</p>
+            <ul>
+              <li><b>Google&rsquo;s review of Gmail access.</b> Reading and sending Gmail uses a scope Google restricts, so satchel.email needs Google&rsquo;s verification and an independent security assessment before anyone outside a small group of testers can sign in with Google.</li>
+              <li><b>Signed installers</b> for Mac (Apple notarization) and Windows, so they open without security warnings.</li>
+              <li><b>Microsoft&rsquo;s publisher verification,</b> so Outlook and Microsoft 365 sign-in doesn&rsquo;t say &ldquo;unverified&rdquo;.</li>
+            </ul>
+            <p>Until then you can <a href="https://github.com/davidfig/satchel-mail#quick-start-development">build it from source</a>. Fastmail, iCloud and any IMAP or JMAP server work fully, and Gmail works under <i>Other (IMAP/SMTP)</i> with a <a href="https://myaccount.google.com/apppasswords">Google app password</a>. <a href="https://github.com/davidfig/satchel-mail">Watch the repository</a> to hear when the first release is out.</p>
+          </div>
           <!-- site.js picks the visitor's build and puts it in #getMine; the rest stay one click away. Without
                scripts, every build shows. -->
           <div class="get-mine" id="getMine" hidden>
@@ -365,7 +377,7 @@ Monday at 10 works for me. Talk then!</span>
             </div>
             <p class="fine">Also on Linux: a <a href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-linux-x64.deb">.deb package</a>. Just the <code>satchel</code> command line, for servers and agents: <a href="https://github.com/davidfig/satchel-mail/releases/latest">every release</a>. Or <a href="https://github.com/davidfig/satchel-mail#quick-start-development">build it from source</a>.</p>
           </div>
-          <p class="fine">Then point your agent at <code>~/Satchel</code>, or <a href="mcp.html">connect it over MCP</a>.</p>
+          <p class="fine get-then">Then point your agent at <code>~/Satchel</code>, or <a href="mcp.html">connect it over MCP</a>.</p>
 
           <!-- Early release: remove each item when Google and Microsoft approve the app (docs/RELEASING.md). -->
           <div class="notice" id="early">
