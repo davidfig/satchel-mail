@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Calendar and contacts: satchel.email</title>
+    <meta name="description" content="Google, Outlook and CalDAV calendars beside your mail, with recurring events, alerts and RSVP from the email itself. Contacts that build themselves from the people you write to." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="satchel.email" />
+    <meta property="og:title" content="Calendar and contacts: satchel.email" />
+    <meta property="og:description" content="Your calendars and the people you write to, next to your mail." />
+    <link rel="icon" href="satchel-mark.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('satchel.site.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="site.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <header class="chrome">
+      <div class="chrome-in gutter">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <a class="brand" href="./" aria-label="satchel.email home"><img src="satchel-mark.svg" alt="" width="22" height="22" /><span>satchel.email</span></a>
+        <nav class="tabs" aria-label="Pages">
+          <a href="mail.html">Mail</a>
+          <a href="calendar.html" aria-current="page">Calendar</a>
+          <a href="ai.html">AI</a>
+          <a href="mcp.html">MCP</a>
+          <a href="open-source.html">Open source</a>
+        </nav>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark" title="Switch light or dark">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5A5 5 0 0 1 10 3.5z" /></svg>
+        </button>
+        <a class="btn primary" href="./#get">Get it</a>
+      </div>
+    </header>
+
+    <main class="desk gutter">
+      <article class="msg">
+        <p class="crumb"><a href="./">satchel.email</a> &rsaquo; Calendar and contacts</p>
+        <h1>Your calendar and your people, beside your mail.</h1>
+        <p class="lede">Most email is about meeting someone. satchel.email keeps your calendars and contacts in the same app, from the same accounts, so the invitation, the event and the person are one click apart.</p>
+
+        <section>
+          <h2>Calendar</h2>
+          <div class="two">
+            <div>
+              <p>Google Calendar, Outlook and any CalDAV calendar (Fastmail, iCloud, your own server), all in one view. Day, week, month and agenda, with <kbd>t</kbd> for today and <kbd>j</kbd> <kbd>k</kbd> to move through time.</p>
+              <ul class="plain">
+                <li><b>Recurring events, done right.</b> Simple repeats or a custom rule, and occurrences moved or cancelled in another app show up where they really are.</li>
+                <li><b>Answer invitations from the email.</b> Accept, maybe or decline right in the message, and the organizer is told.</li>
+                <li><b>Alerts.</b> Your reminders from Google and Outlook come along, and on a Mac they go off through Notification Center even when the app is closed.</li>
+                <li><b>Places from your history.</b> The location field suggests places you've used before. Map lookups are off until you turn them on.</li>
+                <li><b>Move events between calendars,</b> from work to personal and back.</li>
+                <li><b>Find a free time</b> across your calendars.</li>
+              </ul>
+            </div>
+            <div class="week" aria-hidden="true">
+              <div class="week-h"><span></span><span>Mon</span><span>Tue</span><span class="today">Wed</span><span>Thu</span></div>
+              <div class="week-b">
+                <div class="hours"><span>9</span><span>10</span><span>11</span><span>12</span><span>1</span><span>2</span><span>3</span></div>
+                <div class="day"><i class="e" style="top: 0%; height: 7%">Standup</i><i class="e accent" style="top: 14%; height: 14%">Bob Lee</i></div>
+                <div class="day"><i class="e" style="top: 0%; height: 7%">Standup</i><i class="e" style="top: 43%; height: 21%">Lunch with Carol</i></div>
+                <div class="day"><i class="e" style="top: 0%; height: 7%">Standup</i><i class="e tentative" style="top: 71%; height: 14%">Design review?</i></div>
+                <div class="day"><i class="e" style="top: 0%; height: 7%">Standup</i><i class="e accent" style="top: 86%; height: 14%">Dentist</i></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Contacts that build themselves</h2>
+          <div class="two">
+            <div>
+              <p>Everyone you write to becomes a contact on their own, with the names they use. You don't have to file anyone.</p>
+              <p>Edit a contact and it becomes yours: add phones, a birthday, notes. Merge the two Bobs into one person with both addresses, and his mail and meetings come together.</p>
+              <p>Contacts sync both ways with Google Contacts, Outlook and CardDAV. When satchel.email writes a card back, it changes only what you changed, so photos and fields it doesn't show are left alone.</p>
+            </div>
+            <div class="person" aria-hidden="true">
+              <div class="person-h"><span class="avatar">BL</span><div><b>Bob Lee</b><div class="muted">Hillside Studio</div></div></div>
+              <div class="person-row"><span>bob@hillside.example</span><span class="muted">work</span></div>
+              <div class="person-row"><span>bob.lee@mail.example</span><span class="muted">home</span></div>
+              <div class="person-stats"><span><b>48</b> conversations</span><span><b>6</b> meetings</span></div>
+              <div class="person-tabs"><span class="on">All</span><span>From Bob</span><span>Attachments</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>And your agent can help</h2>
+          <p>With calendars and contacts in the AI folder, an agent can find a time that works, propose the event, answer an invitation, or tidy up a duplicate contact. Like everything else, each one waits for you. An invitation that will email other people is flagged before you approve it.</p>
+        </section>
+
+        <div class="cta">
+          <a class="btn primary big" href="./#get">Get satchel.email</a>
+          <a class="btn big" href="ai.html">How the AI works</a>
+        </div>
+      </article>
+    </main>
+
+    <footer class="foot gutter">
+      <span>satchel.email</span>
+      <span class="foot-links">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+        <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
+        <a href="security.html">Security</a>
+        <a href="trademarks.html">Trademarks</a>
+      </span>
+    </footer>
+  </body>
+</html>

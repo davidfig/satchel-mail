@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! vCard (RFC 6350, and the 3.0 dialect most servers still speak) for the
 //! properties Satchel edits: FN/N, EMAIL, TEL, ORG, TITLE, BDAY, NOTE.
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Signals about whether a message is safe: unsubscribe headers, sender
 //! authentication results, deceptive links and risky attachments. These only
 //! read the message; deciding what to show is the core's job.

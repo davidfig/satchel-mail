@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Parsing incoming mail into Satchel's model, and pulling out attachments.
 
 use super::*;

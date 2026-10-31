@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Terms of use: satchel.email</title>
+    <meta name="description" content="The terms for using satchel.email, a free, open-source email and calendar app." />
+    <link rel="icon" href="satchel-mark.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('satchel.site.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="site.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <header class="chrome">
+      <div class="chrome-in gutter">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <a class="brand" href="./" aria-label="satchel.email home"><img src="satchel-mark.svg" alt="" width="22" height="22" /><span>satchel.email</span></a>
+        <nav class="tabs" aria-label="Pages">
+          <a href="mail.html">Mail</a>
+          <a href="calendar.html">Calendar</a>
+          <a href="ai.html">AI</a>
+          <a href="mcp.html">MCP</a>
+          <a href="open-source.html">Open source</a>
+        </nav>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark" title="Switch light or dark">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5A5 5 0 0 1 10 3.5z" /></svg>
+        </button>
+        <a class="btn primary" href="./#get">Get it</a>
+      </div>
+    </header>
+
+    <main class="desk gutter">
+      <article class="msg legal">
+        <p class="crumb"><a href="./">satchel.email</a> &rsaquo; Terms</p>
+        <h1>Terms of use</h1>
+        <p class="muted">Last updated October 31, 2026</p>
+        <p class="lede">satchel.email is free, open-source software that runs on your computer. These terms are short because there's no service: no account with us, and no server holding your data.</p>
+
+        <section>
+          <h2>The software</h2>
+          <p>The app is licensed under the <a href="https://github.com/davidfig/satchel-mail/blob/main/LICENSE">GNU Affero General Public License v3.0</a>, and its libraries under MIT or Apache-2.0. Those licenses are what let you use, study, change and share it. If these terms and a license ever disagree, the license wins.</p>
+          <p>The software is provided as is, without warranty of any kind, as the licenses say. Keep backups of anything you can't afford to lose; your email provider keeps the original copy of your mail.</p>
+        </section>
+
+        <section>
+          <h2>Your accounts and your agents</h2>
+          <p>You use satchel.email with accounts from Google, Microsoft and other providers, and their terms still apply to those accounts. If you connect an AI agent, you choose what it can read, and you're responsible for the proposals you approve. satchel.email only applies changes you approve, as the app is designed to.</p>
+        </section>
+
+        <section>
+          <h2>The name and logo</h2>
+          <p>The satchel.email name and logo aren't covered by the software licenses. If you share a changed version, please give it a different name. Details are in the <a href="trademarks.html">trademark policy</a>.</p>
+        </section>
+
+        <section>
+          <h2>Privacy</h2>
+          <p>How the app and this site handle your information is in the <a href="privacy.html">privacy policy</a>.</p>
+        </section>
+
+        <section>
+          <h2>Contact</h2>
+          <p><a href="mailto:hello@satchel.email">hello@satchel.email</a>. To report a security problem, see the <a href="security.html">security policy</a>.</p>
+        </section>
+      </article>
+    </main>
+
+    <footer class="foot gutter">
+      <span>satchel.email</span>
+      <span class="foot-links">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+        <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
+        <a href="security.html">Security</a>
+        <a href="trademarks.html">Trademarks</a>
+      </span>
+    </footer>
+  </body>
+</html>

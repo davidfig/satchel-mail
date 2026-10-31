@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Privacy policy: satchel.email</title>
+    <meta name="description" content="satchel.email keeps your mail on your computer. We run no servers that see it, collect no analytics, and never receive your data." />
+    <link rel="icon" href="satchel-mark.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('satchel.site.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="site.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <header class="chrome">
+      <div class="chrome-in gutter">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <a class="brand" href="./" aria-label="satchel.email home"><img src="satchel-mark.svg" alt="" width="22" height="22" /><span>satchel.email</span></a>
+        <nav class="tabs" aria-label="Pages">
+          <a href="mail.html">Mail</a>
+          <a href="calendar.html">Calendar</a>
+          <a href="ai.html">AI</a>
+          <a href="mcp.html">MCP</a>
+          <a href="open-source.html">Open source</a>
+        </nav>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark" title="Switch light or dark">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5A5 5 0 0 1 10 3.5z" /></svg>
+        </button>
+        <a class="btn primary" href="./#get">Get it</a>
+      </div>
+    </header>
+
+    <main class="desk gutter">
+      <article class="msg legal">
+        <p class="crumb"><a href="./">satchel.email</a> &rsaquo; Privacy</p>
+        <h1>Privacy policy</h1>
+        <p class="muted">Last updated October 31, 2026</p>
+        <p class="lede">The short version: satchel.email runs on your computer and keeps your mail there. There is no satchel.email server, so we never receive your mail, calendars, contacts or passwords. We don't collect analytics, telemetry or crash reports, and there are no ads.</p>
+
+        <section>
+          <h2>Who we are</h2>
+          <p>satchel.email is an open-source email, calendar and contacts app made by David Figatner. Questions about this policy: <a href="mailto:hello@satchel.email">hello@satchel.email</a>. The source code, which shows everything below in detail, is at <a href="https://github.com/davidfig/satchel-mail">github.com/davidfig/satchel-mail</a>.</p>
+        </section>
+
+        <section>
+          <h2>The app</h2>
+          <h3>What it stores, and where</h3>
+          <ul class="plain">
+            <li><b>Your mail, calendars and contacts</b> are stored in a database in your user folder on your computer. Attachments are downloaded only when you open or save them.</li>
+            <li><b>Passwords and sign-in tokens</b> are stored in your system's keychain or credential store, not in a file.</li>
+            <li><b>The AI folder.</b> The app also writes a copy of your mail, calendars and contacts as plain files to a folder on your computer (<code>~/Satchel</code> by default), so AI tools you choose can read it. You decide which accounts and how much history it holds, and you can turn it off in Settings &rsaquo; AI folder.</li>
+            <li><b>Removing an account</b> deletes its stored mail, its contacts that aren't in another account, and its saved password from your computer.</li>
+          </ul>
+
+          <h3>Who it connects to</h3>
+          <ul class="plain">
+            <li><b>Your email providers,</b> such as Google, Microsoft, Fastmail, iCloud or your own mail server, to sync your mail, calendars and contacts and to send what you send. Your data goes directly between your computer and them.</li>
+            <li><b>Only when you ask:</b> images in a message after you choose to load them, a mailing list's unsubscribe address when you use one-click unsubscribe, and place suggestions for event locations if you turn on Settings &rsaquo; Privacy &rsaquo; Places (off by default). Place lookups send what you type in the location field to OpenStreetMap's Photon service, or to Apple Maps on a Mac.</li>
+            <li><b>Nothing else.</b> The app doesn't contact any satchel.email server, because there isn't one.</li>
+          </ul>
+
+          <h3>AI agents</h3>
+          <p>satchel.email has no AI built in and never sends your data to an AI service. If you point an AI agent at the AI folder, or connect one over MCP, that agent can read what you've allowed it to read and propose changes for you to approve. What the agent does with what it reads, including sending it to its own provider, is up to that agent and its provider's terms, not satchel.email.</p>
+        </section>
+
+        <section id="google">
+          <h2>Google user data</h2>
+          <p>When you sign in with Google, satchel.email asks for access to your Gmail, Google Calendar and Google Contacts so it can work as your mail, calendar and contacts app: to read, organize, search and send mail, and to show and change your events and contacts.</p>
+          <ul class="plain">
+            <li>Data from Google goes only to your computer, where it's stored as described above. It is never sent to satchel.email or to anyone else, except the services you ask the app to contact.</li>
+            <li>It isn't used for advertising, isn't sold, and isn't used to train AI or machine-learning models.</li>
+            <li>No person at satchel.email can read it, because it never leaves your computer.</li>
+            <li>You can remove satchel.email's access at any time in your <a href="https://myaccount.google.com/permissions">Google account's third-party access settings</a>, and remove the account from the app to delete its data from your computer.</li>
+          </ul>
+          <p>satchel.email's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+        </section>
+
+        <section>
+          <h2>Microsoft user data</h2>
+          <p>When you sign in with Microsoft, satchel.email asks for access to your mail, calendars and contacts for the same reasons, and treats that data the same way: it stays on your computer and is never sent to us. You can remove access in your Microsoft account's app permissions and remove the account from the app.</p>
+        </section>
+
+        <section>
+          <h2>This website</h2>
+          <p>satchel.email's website has no cookies, analytics or trackers. It's served by Cloudflare, which processes basic request information such as your IP address to deliver and protect the site. If you switch between light and dark, your choice is saved in your own browser. Downloads come from GitHub, under <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a>.</p>
+        </section>
+
+        <section>
+          <h2>Children</h2>
+          <p>satchel.email isn't directed at children under 13, and we don't knowingly collect anyone's personal information.</p>
+        </section>
+
+        <section>
+          <h2>Changes</h2>
+          <p>If this policy changes, we'll update it here and change the date at the top. The history of every change is in the <a href="https://github.com/davidfig/satchel-mail/commits/main/site/privacy.html">repository</a>.</p>
+        </section>
+      </article>
+    </main>
+
+    <footer class="foot gutter">
+      <span>satchel.email</span>
+      <span class="foot-links">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+        <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
+        <a href="security.html">Security</a>
+        <a href="trademarks.html">Trademarks</a>
+      </span>
+    </footer>
+  </body>
+</html>

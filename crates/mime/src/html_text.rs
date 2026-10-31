@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! HTML → readable text for snippets, search and agents (0043): one pass
 //! over html5ever's tokens. Blocks and table rows start new lines and cells
 //! are spaced apart, so layout tables read top to bottom.

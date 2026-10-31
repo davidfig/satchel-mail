@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Agents, their proposals (changes awaiting the user's review), settings and the audit log.
 
 use super::*;

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Trademark policy: satchel.email</title>
+    <meta name="description" content="How you may use the satchel.email name and logo. The code is open source; the name and logo are not." />
+    <link rel="icon" href="satchel-mark.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('satchel.site.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="site.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <header class="chrome">
+      <div class="chrome-in gutter">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <a class="brand" href="./" aria-label="satchel.email home"><img src="satchel-mark.svg" alt="" width="22" height="22" /><span>satchel.email</span></a>
+        <nav class="tabs" aria-label="Pages">
+          <a href="mail.html">Mail</a>
+          <a href="calendar.html">Calendar</a>
+          <a href="ai.html">AI</a>
+          <a href="mcp.html">MCP</a>
+          <a href="open-source.html">Open source</a>
+        </nav>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark" title="Switch light or dark">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5A5 5 0 0 1 10 3.5z" /></svg>
+        </button>
+        <a class="btn primary" href="./#get">Get it</a>
+      </div>
+    </header>
+
+    <main class="desk gutter">
+      <article class="msg legal">
+        <p class="crumb"><a href="./">satchel.email</a> &rsaquo; Trademarks</p>
+        <h1>Trademark policy</h1>
+        <p class="lede">"satchel.email", the satchel.email domain and the satchel.email logo and icons are the marks of David Figatner. The code licenses (see the <a href="https://github.com/davidfig/satchel-mail/blob/main/LICENSE">LICENSE</a> and the crates' own license files) cover the code, not these marks.</p>
+
+        <section>
+          <h2>You may</h2>
+          <ul class="plain">
+            <li>say that your software is based on, works with or is a fork of satchel.email;</li>
+            <li>use the name to refer to this project accurately, in articles, talks, package descriptions and so on.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>You may not, without permission</h2>
+          <ul class="plain">
+            <li>ship or host a modified version under the satchel.email name or logo, or under a confusingly similar name;</li>
+            <li>use the marks in a way that suggests the project endorses your product or service.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Forks</h2>
+          <p>A fork should use its own name and icon, and its own OAuth client ids (see <a href="https://github.com/davidfig/satchel-mail/blob/main/docs/OAUTH.md">docs/OAUTH.md</a>). Ask in an <a href="https://github.com/davidfig/satchel-mail/issues">issue</a> if you're unsure.</p>
+          <p class="muted">This page matches <a href="https://github.com/davidfig/satchel-mail/blob/main/TRADEMARKS.md">TRADEMARKS.md</a> in the repository.</p>
+        </section>
+      </article>
+    </main>
+
+    <footer class="foot gutter">
+      <span>satchel.email</span>
+      <span class="foot-links">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+        <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
+        <a href="security.html">Security</a>
+        <a href="trademarks.html">Trademarks</a>
+      </span>
+    </footer>
+  </body>
+</html>

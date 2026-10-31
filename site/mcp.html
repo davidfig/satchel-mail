@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Connect an AI agent over MCP: satchel.email</title>
+    <meta name="description" content="Connect Claude Code, Claude Desktop or any MCP client to satchel.email. Agents read your mail and calendars and propose changes; you approve them." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="satchel.email" />
+    <meta property="og:title" content="Connect an AI agent over MCP: satchel.email" />
+    <meta property="og:description" content="Read and propose tools for your mail, calendars and contacts. Nothing happens until you approve it." />
+    <link rel="icon" href="satchel-mark.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('satchel.site.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="site.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <header class="chrome">
+      <div class="chrome-in gutter">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <a class="brand" href="./" aria-label="satchel.email home"><img src="satchel-mark.svg" alt="" width="22" height="22" /><span>satchel.email</span></a>
+        <nav class="tabs" aria-label="Pages">
+          <a href="mail.html">Mail</a>
+          <a href="calendar.html">Calendar</a>
+          <a href="ai.html">AI</a>
+          <a href="mcp.html" aria-current="page">MCP</a>
+          <a href="open-source.html">Open source</a>
+        </nav>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark" title="Switch light or dark">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5A5 5 0 0 1 10 3.5z" /></svg>
+        </button>
+        <a class="btn primary" href="./#get">Get it</a>
+      </div>
+    </header>
+
+    <main class="desk gutter">
+      <article class="msg">
+
+        <p class="crumb"><a href="./">satchel.email</a> &rsaquo; MCP</p>
+        <h1>Connect an agent over MCP.</h1>
+        <p class="lede">Claude Desktop, web chat apps and any other MCP client can read your mail, calendars and contacts through <code>satchel mcp</code>, and propose replies, filing and events. Everything they propose waits for you in AI Proposals.</p>
+        <p class="muted">If your agent can read files, like Claude Code, you may not need this: the <a href="./#agents">AI folder</a> at <code>~/Satchel</code> gives it the same reads and proposals with no setup.</p>
+
+        <section>
+          <h2>Set it up</h2>
+          <ol class="steps">
+            <li>
+              <b>Create a token.</b> In satchel.email, open Settings &rsaquo; AI agents &rsaquo; <b>Connect an agent</b>. Each agent gets its own token, its own accounts and history window, and its own entry in the log.
+            </li>
+            <li>
+              <b>Add the server.</b> The app shows the exact command, with the full path to its bundled <code>satchel</code>. For Claude Code:
+              <pre class="cmd"><code>claude mcp add satchel --env SATCHEL_AGENT_TOKEN=stk_&hellip; -- satchel mcp</code></pre>
+              For Claude Desktop and other MCP clients, add it to the client's config:
+              <pre class="cmd"><code>{ "mcpServers": { "satchel": {
+  "command": "satchel", "args": ["mcp"],
+  "env": { "SATCHEL_AGENT_TOKEN": "stk_&hellip;" }
+} } }</code></pre>
+            </li>
+            <li>
+              <b>Ask it something.</b> "What do I need to answer today?" or "Find a time next week for lunch with Carol and draft the invite." Proposals show up in AI Proposals right away.
+            </li>
+          </ol>
+          <p class="muted"><code>satchel mcp</code> works whether or not the app is open. It reads your mail from the local database and writes proposals the app picks up as soon as it runs.</p>
+        </section>
+
+        <section>
+          <h2>The tools</h2>
+          <div class="tools">
+            <div class="card">
+              <b>Read</b>
+              <p><code>search_threads</code> <code>get_thread</code> <code>get_message</code> <code>get_attachment</code> <code>list_accounts</code> <code>list_mailboxes</code> <code>list_calendars</code> <code>list_events</code> <code>get_event</code> <code>find_free_time</code> <code>search_contacts</code> <code>get_contact</code> <code>whoami</code></p>
+            </div>
+            <div class="card">
+              <b>Propose</b>
+              <p><code>propose_reply</code> <code>propose_draft</code> <code>propose_archive</code> <code>propose_move</code> <code>propose_labels</code> <code>propose_mark_read</code> <code>propose_flag</code> <code>propose_event</code> <code>propose_event_change</code> <code>propose_cancel_event</code> <code>propose_invite_response</code> <code>propose_contact</code> <code>propose_merge_contacts</code></p>
+            </div>
+            <div class="card">
+              <b>Follow up</b>
+              <p><code>get_proposal_status</code> <code>list_my_proposals</code></p>
+              <p class="tools-note">So an agent can see what you approved, edited or rejected, and read your note.</p>
+            </div>
+          </div>
+          <p class="muted">Search takes the same operators as the app: <code>from:</code> <code>to:</code> <code>with:</code> <code>subject:</code> <code>has:attachment</code> <code>is:unread</code> <code>is:flagged</code> <code>before:</code> <code>after:</code> <code>in:</code>.</p>
+        </section>
+
+        <section>
+          <h2>What stops a bad proposal</h2>
+          <ul class="nots">
+            <li><b>No tool sends, deletes or changes settings.</b> There's nothing to call. Agents read and propose; you decide.</li>
+            <li><b>Risks are flagged in Review:</b> new recipients, Bcc, forwarded attachments, invitations that will go out, moves to Trash.</li>
+            <li><b>Stale proposals are blocked.</b> If the message or event changed after the agent proposed, you look again before it can go.</li>
+            <li><b>Every agent has limits:</b> its own accounts, history window and proposals per hour, and everything it does is in Settings &rsaquo; Activity.</li>
+          </ul>
+          <p class="muted">Email is written by strangers, and a message can try to give your agent instructions. satchel.email tells agents to treat mail as data, but the real protection is structural: whatever an agent is talked into, it can only propose.</p>
+        </section>
+
+        <div class="cta">
+          <a class="btn primary big" href="./#get">Get satchel.email</a>
+          <a class="btn big" href="https://github.com/davidfig/satchel-mail/blob/main/docs/AI_AGENTS.md">Read the agent docs</a>
+        </div>
+      </article>
+    </main>
+
+    <footer class="foot gutter">
+      <span>satchel.email</span>
+      <span class="foot-links">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+        <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
+        <a href="security.html">Security</a>
+        <a href="trademarks.html">Trademarks</a>
+      </span>
+    </footer>
+  </body>
+</html>

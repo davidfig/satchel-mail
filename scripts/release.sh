@@ -30,7 +30,17 @@ cargo build --release -p satchel-cli --target "$TRIPLE"
 mkdir -p apps/desktop/binaries
 cp "target/$TRIPLE/release/satchel$EXE" "apps/desktop/binaries/satchel-$TRIPLE$EXE"
 
-ARGS=(build --target "$TRIPLE")
+echo "==> licenses"
+# The app's license and every bundled dependency's go into the app's resources and next to the CLI.
+python3 scripts/third-party-licenses.py "target/$TRIPLE/release/THIRD_PARTY_LICENSES.txt" --target "$TRIPLE"
+cp LICENSE "target/$TRIPLE/release/LICENSE"
+mkdir -p apps/desktop/licenses
+cp LICENSE "target/$TRIPLE/release/THIRD_PARTY_LICENSES.txt" apps/desktop/licenses/
+cat > apps/desktop/tauri.licenses.json <<EOF
+{ "bundle": { "resources": { "licenses/LICENSE": "LICENSE", "licenses/THIRD_PARTY_LICENSES.txt": "THIRD_PARTY_LICENSES.txt" } } }
+EOF
+
+ARGS=(build --target "$TRIPLE" --config tauri.licenses.json)
 [[ -n "${BUNDLES:-}" ]] && ARGS+=(--bundles "$BUNDLES")
 
 if [[ -n "${SATCHEL_UPDATE_URL:-}" ]]; then
@@ -51,4 +61,4 @@ echo "==> desktop app"
 echo
 echo "Artifacts:"
 find "target/$TRIPLE/release/bundle" -maxdepth 2 -mindepth 2 2>/dev/null | sed 's/^/  /'
-echo "  target/$TRIPLE/release/satchel$EXE"
+echo "  target/$TRIPLE/release/satchel$EXE (ship LICENSE and THIRD_PARTY_LICENSES.txt beside it)"

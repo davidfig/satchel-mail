@@ -21,6 +21,18 @@ sent, moved or scheduled until you approve it in AI Proposals.
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture and
 [docs/decisions/](docs/decisions/README.md) for the decisions behind it.
 
+## License
+
+| Part | License |
+| --- | --- |
+| The app: `core`, `providers`, `mcp`, `cli`, `apps/desktop`, `ui`, and everything else not listed below | [AGPL-3.0](LICENSE) |
+| The libraries: `crates/mime`, `crates/ical`, `crates/api` | MIT OR Apache-2.0 (each crate's `LICENSE-MIT` and `LICENSE-APACHE`) |
+
+The satchel.email name and logo aren't covered by these licenses: see
+[TRADEMARKS.md](TRADEMARKS.md). Dependencies keep their own licenses: see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). To contribute, see
+[CONTRIBUTING.md](CONTRIBUTING.md). Why: [0058](docs/decisions/0058-licensing.md).
+
 ## Layout
 
 ```
@@ -34,6 +46,7 @@ crates/cli        `satchel` binary: serve (web UI + API), mcp, sync, accounts, a
 apps/desktop      Tauri desktop app
 ui/               vanilla TypeScript UI (shared by desktop and web)
 scripts/          dev-servers (local Stalwart), seed fixtures, release build
+site/             marketing site (static HTML, no build)
 ```
 
 ## Quick start (development)

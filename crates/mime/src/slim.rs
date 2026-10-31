@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Copies of messages without their attachments, for storing mail locally
 //! without the disk cost of every file anyone ever sent.
 

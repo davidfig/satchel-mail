@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Commands: everything a client can ask the core to do.
 
 use super::*;

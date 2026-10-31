@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Click-tracking redirectors that newsletter and marketing services wrap
 //! every link in. A link through one hides where it goes instead of naming
 //! the wrong place, so `deceptive_links` doesn't judge it: otherwise nearly

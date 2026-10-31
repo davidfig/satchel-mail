@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Mail: mailboxes, messages, threads, drafts, warnings and sender rules.
 
 use super::*;

@@ -1,0 +1,270 @@
+# Builds the desktop app and the `satchel` CLI for macOS (Apple silicon and Intel), Windows and Linux with
+# scripts/release.sh. Pushing a tag like v0.1.0 attaches everything to a draft GitHub release, which you publish by
+# hand after checking it. Pushing a change to this file builds without releasing, to test it.
+#
+# Files get stable names (satchel.email-mac-arm64.dmg, …) so the site can link to
+# releases/latest/download/<name>.
+#
+# Signing (docs/RELEASING.md, decision 0059): Mac builds are signed with a Developer ID and notarized, Windows builds
+# are signed with Azure Artifact Signing, and every file in a release gets a SHA256SUMS line and, once the repository
+# is public, a GitHub build attestation. Branch builds sign whatever they have keys for; a tag fails unless both Mac
+# and Windows are signed, so nothing unsigned is released by accident.
+#
+# Repository secrets (all optional for branch builds):
+#   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY   Developer ID
+#   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_PRIVATE_KEY (.p8 contents)                 notarization (preferred)
+#   or APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID                              notarization
+#   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET                                  Artifact Signing app
+#   SATCHEL_GOOGLE_CLIENT_ID, SATCHEL_GOOGLE_CLIENT_SECRET, SATCHEL_MS_CLIENT_ID           sign-in (docs/OAUTH.md)
+# Repository variables:
+#   AZURE_ARTIFACT_SIGNING_ENDPOINT (e.g. https://eus.codesigning.azure.net), AZURE_ARTIFACT_SIGNING_ACCOUNT,
+#   AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+    # Branch pushes build only when this file changes. Path filters don't apply to tags.
+    branches: ['**']
+    paths: ['.github/workflows/release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: mac-arm64, os: macos-latest, target: aarch64-apple-darwin, bundles: dmg }
+          - { name: mac-x64, os: macos-latest, target: x86_64-apple-darwin, bundles: dmg }
+          - { name: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, bundles: nsis }
+          - { name: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bundles: 'deb,appimage' }
+    env:
+      TARGET: ${{ matrix.target }}
+      BUNDLES: ${{ matrix.bundles }}
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Linux packages for Tauri
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      # release.sh calls python3, which Windows installs only as python.
+      - name: python3 on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: command -v python3 || cp "$(command -v python)" "$(dirname "$(command -v python)")/python3.exe"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.target }}
+
+      # Only keys that are set reach the build, since an empty one can mean "try" to Tauri.
+      - name: Sign-in keys
+        shell: bash
+        env:
+          SATCHEL_GOOGLE_CLIENT_ID: ${{ secrets.SATCHEL_GOOGLE_CLIENT_ID }}
+          SATCHEL_GOOGLE_CLIENT_SECRET: ${{ secrets.SATCHEL_GOOGLE_CLIENT_SECRET }}
+          SATCHEL_MS_CLIENT_ID: ${{ secrets.SATCHEL_MS_CLIENT_ID }}
+        run: |
+          for k in SATCHEL_GOOGLE_CLIENT_ID SATCHEL_GOOGLE_CLIENT_SECRET SATCHEL_MS_CLIENT_ID; do
+            if [[ -n "${!k}" ]]; then echo "$k=${!k}" >> "$GITHUB_ENV"; else echo "::warning::$k not set: that sign-in won't work in this build"; fi
+          done
+
+      # The Developer ID goes into a keychain of our own (not Tauri's, which it removes after the build) so the
+      # standalone CLI can be signed with it afterwards. Tauri then signs the app, and the satchel inside it, by name.
+      - name: Mac signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [[ -z "$APPLE_CERTIFICATE" || -z "$APPLE_SIGNING_IDENTITY" ]]; then
+            if [[ "$RELEASE" == true ]]; then echo "::error::A release needs the Developer ID secrets (docs/RELEASING.md)"; exit 1; fi
+            echo "::warning::No Developer ID: this Mac build is unsigned"; exit 0
+          fi
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          pw="$(openssl rand -hex 24)"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          # Notarization: an App Store Connect API key if there is one, else the Apple ID.
+          if [[ -n "$APPLE_API_KEY" ]]; then
+            key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+            printf '%s' "$APPLE_API_PRIVATE_KEY" > "$key"
+            { echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"; echo "APPLE_API_KEY=$APPLE_API_KEY"; echo "APPLE_API_KEY_PATH=$key"; } >> "$GITHUB_ENV"
+          elif [[ -n "$APPLE_ID" ]]; then
+            { echo "APPLE_ID=$APPLE_ID"; echo "APPLE_PASSWORD=$APPLE_PASSWORD"; echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"; } >> "$GITHUB_ENV"
+          else
+            if [[ "$RELEASE" == true ]]; then echo "::error::A release needs notarization keys (docs/RELEASING.md)"; exit 1; fi
+            echo "::warning::Signed but not notarized: macOS will still warn about this build"
+          fi
+
+      # Tauri reads tauri.windows.conf.json on its own and runs signCommand on the app, the satchel inside it and the
+      # installer. The account and profile come from the environment.
+      - name: Windows signing
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+        run: |
+          if [[ -z "$AZURE_CLIENT_SECRET" || -z "$ENDPOINT" || -z "$ACCOUNT" || -z "$PROFILE" ]]; then
+            if [[ "$RELEASE" == true ]]; then echo "::error::A release needs the Artifact Signing secrets and variables (docs/RELEASING.md)"; exit 1; fi
+            echo "::warning::No Artifact Signing account: this Windows build is unsigned"; exit 0
+          fi
+          cargo install artifact-signing-cli --version 0.12.0 --locked
+          {
+            echo "AZURE_TENANT_ID=$AZURE_TENANT_ID"; echo "AZURE_CLIENT_ID=$AZURE_CLIENT_ID"; echo "AZURE_CLIENT_SECRET=$AZURE_CLIENT_SECRET"
+            echo "AZURE_ARTIFACT_SIGNING_ACCOUNT=$ACCOUNT"; echo "AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE=$PROFILE"
+            echo "SIGN_ENDPOINT=$ENDPOINT"; echo "WINDOWS_SIGNED=1"
+          } >> "$GITHUB_ENV"
+          printf '{ "bundle": { "windows": { "signCommand": "artifact-signing-cli -e %s -d satchel.email %%1" } } }\n' "$ENDPOINT" > apps/desktop/tauri.windows.conf.json
+
+      - name: Build
+        shell: bash
+        run: scripts/release.sh
+
+      # Tauri signed the copy of satchel inside the app; the standalone one is signed here.
+      - name: Sign the standalone CLI
+        shell: bash
+        run: |
+          r="target/$TARGET/release"
+          if [[ "$RUNNER_OS" == macOS && -n "$APPLE_SIGNING_IDENTITY" ]]; then
+            codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$r/satchel"
+            if [[ -n "$APPLE_API_KEY_PATH$APPLE_ID" ]]; then
+              ditto -c -k "$r/satchel" "$RUNNER_TEMP/satchel.zip"
+              if [[ -n "$APPLE_API_KEY_PATH" ]]; then auth=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
+              else auth=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"); fi
+              xcrun notarytool submit "$RUNNER_TEMP/satchel.zip" "${auth[@]}" --wait
+            fi
+          elif [[ "$RUNNER_OS" == Windows && -n "$WINDOWS_SIGNED" ]]; then
+            artifact-signing-cli -e "$SIGN_ENDPOINT" -d "satchel CLI" "$r/satchel.exe"
+          else
+            echo "Not signing the CLI on $RUNNER_OS"
+          fi
+
+      - name: Check signatures
+        shell: bash
+        run: |
+          r="target/$TARGET/release"
+          case "$RUNNER_OS" in
+            macOS)
+              [[ -z "$APPLE_SIGNING_IDENTITY" ]] && { echo "unsigned"; exit 0; }
+              app="$(ls -d "$r"/bundle/macos/*.app)"
+              codesign --verify --deep --strict --verbose=2 "$app"
+              codesign --verify --strict --verbose=2 "$r/satchel"
+              if [[ -n "$APPLE_API_KEY_PATH$APPLE_ID" ]]; then xcrun stapler validate "$app"; spctl -a -vv -t exec "$app"; fi ;;
+            Windows)
+              [[ -z "$WINDOWS_SIGNED" ]] && { echo "unsigned"; exit 0; }
+              # The app inside the installer is signed by the same signCommand before it's packed.
+              for f in "$r"/bundle/nsis/*-setup.exe "$r/satchel.exe"; do
+                powershell -NoProfile -Command "\$s = Get-AuthenticodeSignature '$f'; \"\$(\$s.Status) $f\"; if (\$s.Status -ne 'Valid') { exit 1 }"
+              done ;;
+            *) echo "Linux builds aren't code-signed; the release attests them instead" ;;
+          esac
+
+      - name: Collect files
+        shell: bash
+        run: |
+          r="target/$TARGET/release"
+          name="${{ matrix.name }}"
+          mkdir -p out
+          case "$TARGET" in
+            *apple-darwin) cp "$r"/bundle/dmg/*.dmg "out/satchel.email-$name.dmg" ;;
+            *windows*) cp "$r"/bundle/nsis/*-setup.exe "out/satchel.email-$name-setup.exe" ;;
+            *linux*)
+              cp "$r"/bundle/appimage/*.AppImage "out/satchel.email-$name.AppImage"
+              cp "$r"/bundle/deb/*.deb "out/satchel.email-$name.deb" ;;
+          esac
+          # The CLI on its own, with its licenses, for servers and agents.
+          cli="satchel-cli-$name"
+          mkdir "$cli"
+          exe=""; [[ "$RUNNER_OS" == Windows ]] && exe=".exe"
+          cp "$r/satchel$exe" "$cli"/
+          for f in LICENSE "$r/THIRD_PARTY_LICENSES.txt"; do [[ -f "$f" ]] && cp "$f" "$cli"/; done
+          if [[ "$RUNNER_OS" == Windows ]]; then 7z a "out/$cli.zip" "$cli" > /dev/null; else tar czf "out/$cli.tar.gz" "$cli"; fi
+          ls -l out
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+
+      # Anyone can check a file with `gh attestation verify <file> --repo <this repo>`. GitHub offers attestations
+      # for private repositories only on Enterprise plans, so they start once the repository is public.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: ${{ !github.event.repository.private }}
+        with:
+          subject-path: dist/*
+
+      - name: Create the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "satchel.email ${GITHUB_REF_NAME#v}"
