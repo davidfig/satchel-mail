@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>satchel.email: open-source email and calendar, on your own computer</title>
+    <meta name="description" content="A fully featured, open-source email, calendar and contacts app for Gmail, Outlook, Fastmail and IMAP. Your mail lives on your computer. No AI is built in: bring your own agent, through plain files or MCP." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="satchel.email" />
+    <meta property="og:title" content="satchel.email: open-source email and calendar, on your own computer" />
+    <meta property="og:description" content="Fully featured email and calendar, open source and local first." />
+    <link rel="icon" href="satchel-mark.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('satchel.site.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="site.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <!-- The page is drawn as the app: a window title bar, a desk in the app's background color, and each page as an
+         open message. Colors and type are the app's own (ui/src/styles/tokens.css). -->
+    <header class="chrome">
+      <div class="chrome-in gutter">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <a class="brand" href="./" aria-label="satchel.email home"><img src="satchel-mark.svg" alt="" width="22" height="22" /><span>satchel.email</span></a>
+        <nav class="tabs" aria-label="Pages">
+          <a href="mail.html">Mail</a>
+          <a href="calendar.html">Calendar</a>
+          <a href="ai.html">AI</a>
+          <a href="mcp.html">MCP</a>
+          <a href="open-source.html">Open source</a>
+        </nav>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark" title="Switch light or dark">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5A5 5 0 0 1 10 3.5z" /></svg>
+        </button>
+        <a class="btn primary" href="#get">Get it</a>
+      </div>
+    </header>
+
+    <main class="desk gutter">
+      <article class="msg">
+        <div class="msg-head">
+          <span class="avatar" aria-hidden="true">DF</span>
+          <div class="who">
+            <b>David Figatner</b> <span class="addr">&lt;david@satchel.email&gt;</span>
+            <div class="to">to you</div>
+          </div>
+          <time class="when">Now</time>
+        </div>
+
+        <h1>Email and calendar, open source and on your own computer.</h1>
+        <p class="lede">satchel.email is a fully featured mail, calendar and contacts app for Gmail, Outlook, Fastmail and any IMAP server. Your mail syncs straight to your computer, search is instant, and every line of code is open. There's no AI built in. If you want help, point your own agent at the plain files it keeps, or connect it over MCP, and it can propose replies and events for you to approve.</p>
+        <div class="cta">
+          <a class="btn primary big" href="#get">Download for Mac</a>
+          <a class="btn big" href="https://github.com/davidfig/satchel-mail">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.87.87 2.33.67.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0z" /></svg>
+            Source on GitHub
+          </a>
+        </div>
+        <p class="fine">Free and open source. No account with us, no server in the middle.</p>
+
+        <!-- The hero: the app as it looks, drawn in HTML so it follows the page's theme. The switch above it (and the
+             Mail and Calendar rows in its sidebar) shows the mail or the calendar view. -->
+        <figure class="hero">
+          <div class="seg" role="tablist" aria-label="Show the app's mail or calendar">
+            <button role="tab" type="button" aria-selected="true" data-view="mail">Mail</button>
+            <button role="tab" type="button" aria-selected="false" data-view="cal">Calendar</button>
+          </div>
+          <div class="shot" id="hero" data-view="mail" role="img" aria-label="satchel.email showing a unified inbox and a conversation with an invitation in it">
+            <aside class="s-side" aria-hidden="true">
+              <div class="s-brand"><img src="satchel-mark.svg" alt="" width="16" height="16" />satchel.email</div>
+              <div class="s-compose">Compose</div>
+              <div class="s-mode" data-go="mail"><i class="ic ic-mail"></i>Mail</div>
+              <div class="s-mode" data-go="cal"><i class="ic ic-cal"></i>Calendar</div>
+              <div class="s-mode"><i class="ic ic-person"></i>Contacts</div>
+              <div class="s-mode"><i class="ic ic-spark"></i>AI Proposals</div>
+              <div class="s-mode"><i class="ic ic-gear"></i>Settings</div>
+              <div class="s-sec only-mail">
+                <div class="s-box on">Inbox <span>9</span></div>
+                <div class="s-box">Favorites</div>
+                <div class="s-box">Drafts</div>
+                <div class="s-box">Sent</div>
+                <div class="s-box">Archive</div>
+                <div class="s-box">Spam</div>
+                <div class="s-acct"><i style="background: var(--a1)"></i>work &middot; Gmail</div>
+                <div class="s-acct"><i style="background: var(--a2)"></i>home &middot; Fastmail</div>
+              </div>
+              <div class="s-sec only-cal">
+                <div class="s-mini">
+                  <b>November 2026</b>
+                  <div class="s-grid"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span><span class="o">26</span><span class="o">27</span><span class="o">28</span><span class="o">29</span><span class="o">30</span><span class="o">31</span><span>1</span><span class="wk">2</span><span class="wk">3</span><span class="wk now">4</span><span class="wk">5</span><span class="wk">6</span><span class="wk">7</span><span class="wk">8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span></div>
+                </div>
+                <div class="s-acct"><i style="background: var(--c1)"></i>Work</div>
+                <div class="s-acct"><i style="background: var(--c2)"></i>Family</div>
+                <div class="s-acct"><i style="background: var(--c3)"></i>Climbing club</div>
+              </div>
+              <div class="s-foot">Updated just now</div>
+            </aside>
+
+            <!-- Mail -->
+            <div class="s-list only-mail" aria-hidden="true">
+              <div class="s-list-h">Inbox</div>
+              <div class="s-search">Search mail</div>
+              <div class="s-row a1 unread sel"><div><b>Dana Ruiz</b><span>hillside.example</span><time>9:41</time></div><p>Offsite in Tahoe, Nov 12</p><small>Booked the cabin! Invite attached, can you&hellip;</small></div>
+              <div class="s-row a2 unread fav"><div><b>Mom</b><time>9:02</time></div><p>Thanksgiving plans</p><small>Your brother is bringing the pie this year so&hellip;</small></div>
+              <div class="s-row a1"><div><b>Bob Lee</b><span>hillside.example</span><time>8:15</time></div><p>Can we move our call?</p><small>Monday 10 or Tuesday 2 both work for me.</small></div>
+              <div class="s-row a1 att"><div><b>Priya Nair</b><span>acme.example</span><time>Tue</time></div><p>Q4 budget (PDF attached)</p><small>Numbers are final, pending one change on p. 3</small></div>
+              <div class="s-row a2"><div><b>Climbing Club</b><span>lists.example</span><time>Tue</time></div><p>Saturday at the crag</p><small>Meet at the trailhead at 8. Bring a helmet.</small></div>
+              <div class="s-row a2"><div><b>The Weekly Byte</b><time>Mon</time></div><p>Issue 214: local-first software</p><small>Why more apps are keeping your data on your&hellip;</small></div>
+              <div class="s-row a1"><div><b>GitHub</b><time>Mon</time></div><p>[satchel-mail] New issue: JMAP push</p><small>Opened by a contributor: it would be great if&hellip;</small></div>
+            </div>
+            <div class="s-read only-mail" aria-hidden="true">
+              <div class="s-read-h"><div><b>Offsite in Tahoe, Nov 12</b><small>Dana, Bob, you</small></div><span class="s-tools"><i class="ic ic-archive"></i><i class="ic ic-trash"></i><i class="ic ic-folder"></i><i class="ic ic-more"></i></span></div>
+              <div class="s-stream">
+                <div class="s-day">Monday</div>
+                <div class="s-msg"><span class="s-av" style="background: #6b8fd6">D</span><div class="s-bub"><b>Dana Ruiz</b>Thinking Tahoe for the offsite. Thursday the 12th, back Friday night?</div></div>
+                <div class="s-msg me"><div class="s-bub">Love it. I'll handle the car.</div></div>
+                <div class="s-sys">Dana added Bob Lee</div>
+                <div class="s-new">New</div>
+                <div class="s-msg"><span class="s-av" style="background: #6b8fd6">D</span><div class="s-bub"><b>Dana Ruiz</b>Booked the cabin! Invite attached, can you confirm by Friday?
+                  <div class="s-invite"><i class="ic ic-cal"></i><div><b>Team offsite</b><small>Thu, Nov 12 &middot; all day &middot; Tahoe City</small></div><span class="s-rsvp"><em class="yes">Yes</em><em>Maybe</em><em>No</em></span></div>
+                </div></div>
+              </div>
+              <div class="s-reply">Reply to all&hellip;</div>
+            </div>
+
+            <!-- Calendar -->
+            <div class="s-cal only-cal" aria-hidden="true">
+              <div class="s-cal-bar"><span class="s-btn">+</span><span class="s-btn">Today</span><span class="s-arrows">&lsaquo; &rsaquo;</span><b>Nov 2 &ndash; 8, 2026</b><span class="s-segs"><em>Day</em><em class="on">Week</em><em>Month</em><em>Agenda</em></span></div>
+              <div class="s-week">
+                <div class="s-wh"><span></span><span>Mon <b>2</b></span><span>Tue <b>3</b></span><span class="now">Wed <b>4</b></span><span>Thu <b>5</b></span><span>Fri <b>6</b></span><span class="we">Sat <b>7</b></span><span class="we">Sun <b>8</b></span></div>
+                <div class="s-wb">
+                  <div class="s-hrs"><span>8 AM</span><span>9</span><span>10</span><span>11</span><span>12 PM</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div>
+                  <div class="s-col"><i class="c1" style="top: 13%; height: 5%">9:30 Standup</i><i class="c1" style="top: 20%; height: 10%">Bob Lee</i><i class="c2" style="top: 80%; height: 10%">Swim lesson</i></div>
+                  <div class="s-col"><i class="c1" style="top: 13%; height: 5%">9:30 Standup</i><i class="c1" style="top: 40%; height: 15%">Lunch with Carol</i><i class="c1" style="top: 60%; height: 15%">Q4 budget review</i></div>
+                  <div class="s-col now"><i class="c1" style="top: 13%; height: 5%">9:30 Standup</i><i class="c1 tent" style="top: 50%; height: 10%">Design review?</i><span class="s-now" style="top: 17%"></span></div>
+                  <div class="s-col"><i class="c1" style="top: 13%; height: 5%">9:30 Standup</i><i class="c2" style="top: 70%; height: 10%">Dentist</i></div>
+                  <div class="s-col"><i class="c1" style="top: 13%; height: 5%">9:30 Standup</i><i class="c1" style="top: 30%; height: 20%">Offsite planning</i><i class="c2" style="top: 90%; height: 10%">Dinner at Mom's</i></div>
+                  <div class="s-col we"><i class="c3" style="top: 0%; height: 45%">Climbing at the crag</i></div>
+                  <div class="s-col we"><i class="c2" style="top: 40%; height: 15%">Farmers market</i></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </figure>
+
+        <!-- The client -->
+        <section id="client">
+          <h2>Everything you expect from your mail app.</h2>
+          <p class="lede small">One app for your mail, your calendars and the people you write to. Fast, quiet, and built for the keyboard.</p>
+          <div class="grid">
+            <div class="card">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4z" /><path d="M4 7l8 6 8-6" /></svg>
+              <b>One inbox for every account</b>
+              <p>Gmail, Microsoft 365 and Outlook, Fastmail and other JMAP servers, and any IMAP/SMTP server.</p>
+            </div>
+            <div class="card">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></svg>
+              <b>Search that's instant</b>
+              <p>Full-text search on your own disk, with <code>from:</code>, <code>has:attachment</code> and friends. No round trip to a server.</p>
+            </div>
+            <div class="card">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M4 10h16M9 3v4M15 3v4" /></svg>
+              <b>Calendar built in</b>
+              <p>Day, week, month and agenda. Recurring events, alerts, and RSVP to an invitation from the email itself.</p>
+            </div>
+            <div class="card">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="3.5" /><path d="M5 20c1.2-3.5 4-5 7-5s5.8 1.5 7 5" /></svg>
+              <b>Contacts that build themselves</b>
+              <p>From the people you write to. One person, many addresses, synced with CardDAV, Google and Outlook.</p>
+            </div>
+            <div class="card">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M7 10h1M11 10h1M15 10h2M7 14h10" /></svg>
+              <b>Keyboard first</b>
+              <p>Shortcuts for everything, and a command palette (<kbd>&#8984;</kbd> <kbd>K</kbd>) that finds the rest.</p>
+            </div>
+            <div class="card">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" /></svg>
+              <b>Private by default</b>
+              <p>Remote images and trackers blocked until you ask. HTML mail is sanitized and shown in a sandbox. Undo send.</p>
+            </div>
+          </div>
+          <p class="more"><a href="mail.html">More about mail &rarr;</a> &nbsp; <a href="calendar.html">Calendar and contacts &rarr;</a></p>
+        </section>
+
+        <!-- AI, second -->
+        <section id="agents">
+          <h2>Bring your own AI.</h2>
+          <p class="lede small">There's no AI inside satchel.email, and it never sends your mail to an AI service. It keeps your mail, calendars and contacts in a folder of plain files, and serves the same over MCP. Point Claude Code, or any agent you already use, at either one. It reads, and writes down what it would do. Nothing is sent, moved or scheduled until you approve it in the app.</p>
+          <div class="flow" role="img" aria-label="satchel.email writes your mail to plain files and serves it over MCP. Your own agent reads either one and writes proposals, which wait in the app for you to approve.">
+            <div class="node"><b>satchel.email</b><span>syncs your mail. No AI inside.</span></div>
+            <div class="arrow"><span>writes</span></div>
+            <div class="node"><b><code>~/Satchel</code> or <code>satchel mcp</code></b><span>plain Markdown, or MCP tools</span></div>
+            <div class="arrow"><span>read by</span></div>
+            <div class="node agent"><b>Your agent</b><span>Claude Code, Claude Desktop or any MCP client</span></div>
+            <div class="arrow back"><span>proposes</span></div>
+            <div class="node"><b>AI Proposals</b><span>you approve, edit or reject</span></div>
+          </div>
+        <!-- The lead demo: the app, small, with three proposals from an agent waiting in AI Proposals. Approving one
+             shows its effect in the mailbox beside it. -->
+        <figure class="lead in-ai">
+          <div class="app" id="demo" role="group" aria-label="satchel.email with three proposals from an AI agent waiting for review">
+            <aside class="side" aria-hidden="true">
+              <div class="side-row">Inbox <span class="count" id="inboxCount">6</span></div>
+              <div class="side-row">Flagged</div>
+              <div class="side-row">Drafts</div>
+              <div class="side-row">Sent</div>
+              <div class="side-row">Archive</div>
+              <div class="side-row on">AI Proposals <span class="count hot" id="propCount">3</span></div>
+              <div class="side-sep"></div>
+              <div class="side-cal">
+                <div class="side-cal-h">Thursday</div>
+                <div class="ev">9:30 Standup</div>
+                <div class="ev new" id="evNew">3:00 Dentist</div>
+              </div>
+            </aside>
+
+            <div class="list" aria-label="Inbox">
+              <div class="list-h">Inbox</div>
+              <div class="row unread" data-thread="bob">
+                <span class="dot"></span><b>Bob Lee</b><span class="subj">Can we move our call?</span><time>9:12</time>
+                <span class="sent-note">You: Monday at 10 works for me.</span>
+              </div>
+              <div class="row unread" data-thread="dentist">
+                <span class="dot"></span><b>Smile Dental</b><span class="subj">Your appointment Thursday at 3 pm</span><time>8:40</time>
+              </div>
+              <div class="row list-mail" data-archive>
+                <span class="dot"></span><b>The Weekly Byte</b><span class="subj">Issue 212: tiny databases</span><time>7:02</time>
+              </div>
+              <div class="row list-mail" data-archive>
+                <span class="dot"></span><b>Shoe Barn</b><span class="subj">48 hours only: 30% off</span><time>6:15</time>
+              </div>
+              <div class="row list-mail" data-archive>
+                <span class="dot"></span><b>Rust Digest</b><span class="subj">This week in async</span><time>Wed</time>
+              </div>
+              <div class="row">
+                <span class="dot"></span><b>Carol Diaz</b><span class="subj">Photos from Saturday</span><time>Wed</time>
+              </div>
+            </div>
+
+            <section class="review" aria-label="AI Proposals">
+              <div class="list-h">AI Proposals <span class="agent-tag">from Claude</span></div>
+              <div class="prop" data-prop="reply">
+                <div class="prop-k">Reply to Bob Lee</div>
+                <div class="prop-body">Monday at 10 works for me. Talk then!</div>
+                <div class="prop-why">Why: Bob offered Monday 10 or Tuesday 2. Your calendar is free Monday morning.</div>
+                <div class="prop-act"><button class="btn small primary" type="button" data-approve>Send</button><button class="btn small" type="button" data-reject>Reject</button></div>
+                <div class="prop-done" aria-live="polite"></div>
+              </div>
+              <div class="prop" data-prop="archive">
+                <div class="prop-k">Archive 3 newsletters</div>
+                <div class="prop-body">The Weekly Byte, Shoe Barn, Rust Digest</div>
+                <div class="prop-why">Why: list mail you haven't opened in a month.</div>
+                <div class="prop-act"><button class="btn small primary" type="button" data-approve>Approve</button><button class="btn small" type="button" data-reject>Reject</button></div>
+                <div class="prop-done" aria-live="polite"></div>
+              </div>
+              <div class="prop" data-prop="event">
+                <div class="prop-k">Add to your calendar</div>
+                <div class="prop-body">Dentist &middot; Thursday 3:00&ndash;4:00 pm</div>
+                <div class="prop-why">Why: confirmed in Smile Dental's email this morning.</div>
+                <div class="prop-act"><button class="btn small primary" type="button" data-approve>Approve</button><button class="btn small" type="button" data-reject>Reject</button></div>
+                <div class="prop-done" aria-live="polite"></div>
+              </div>
+              <div class="review-empty" id="reviewEmpty" hidden>All caught up. <button class="link" type="button" id="resetDemo">Run it again</button></div>
+            </section>
+          </div>
+          <figcaption><b>Your agent does the reading. You make the call.</b> Try it: approve or reject each proposal and watch your mailbox.</figcaption>
+        </figure>
+          <h3>It reads a folder, not your password.</h3>
+          <div class="two">
+            <div>
+              <p>satchel.email writes your mail, calendars and contacts to <code>~/Satchel</code> as plain Markdown. That's the AI folder, and it's on from the start. Point Claude Code, or any agent that can read files, at it. It reads <code>INDEX.md</code>, opens the threads it needs, and drops a proposal into <code>proposals/inbox</code>.</p>
+              <p>Prefer MCP? <code>satchel mcp</code> serves the same reads and proposals as tools. <a href="mcp.html">Connect an agent over MCP</a>.</p>
+              <p class="muted">You choose which accounts and how much history the folder holds. What's in the folder is all your agent sees.</p>
+            </div>
+            <div class="term" role="img" aria-label="An agent in a terminal reading the Satchel folder and writing a reply proposal">
+              <div class="term-bar"><i></i><i></i><i></i><span>~/Satchel</span></div>
+<pre><span class="you">&gt; reply to Bob about moving our call</span>
+<span class="dim">Read</span> mail/work/INDEX.md
+<span class="dim">Read</span> mail/work/threads/2026-10/can-we-move-our-call-7f3a/thread.md
+<span class="dim">Read</span> calendar/AGENDA.md
+<span class="dim">Write</span> proposals/inbox/reply-bob.md
+<span class="file">---
+action: reply
+thread: 7f3a9c
+why: Bob offered Monday 10 or Tuesday 2; Monday is free
+agent: Claude
+---
+Monday at 10 works for me. Talk then!</span>
+<span class="ok">Proposed. It's waiting in AI Proposals.</span></pre>
+            </div>
+          </div>
+
+          <h3>What an agent can never do</h3>
+          <ul class="nots">
+            <li><b>Send, delete or move anything on its own.</b> Agents can read and propose. That's the whole list.</li>
+            <li><b>Delete anything permanently,</b> even with your approval.</li>
+            <li><b>Change your settings,</b> create server-side rules, or touch its own permissions.</li>
+            <li><b>See past its scope.</b> Each agent gets the accounts and history you give it, and every proposal goes in a log.</li>
+          </ul>
+          <p class="muted">Reject a proposal with a note and the agent can read why. Edit one before you approve it and your version is what goes out.</p>
+          <p class="more"><a href="ai.html">More about the AI folder, proposals and safeguards &rarr;</a></p>
+        </section>
+
+
+        <!-- Local-first and open -->
+        <section id="open">
+          <h2>Local first, and open source.</h2>
+          <div class="two">
+            <div>
+              <p>Your mail syncs straight from your provider into a SQLite database on your computer. There's no satchel.email server in the middle, so there's nothing of yours for us to read, sell or lose. Passwords and tokens live in your system keychain.</p>
+              <p>The app is <a href="https://github.com/davidfig/satchel-mail/blob/main/LICENSE">AGPL-3.0</a>. The libraries it's built on are MIT or Apache-2.0, so you can use them in anything:</p>
+              <ul class="crates">
+                <li><code>satchel-mime</code> MIME parsing and building, HTML sanitizing, tracker stripping</li>
+                <li><code>satchel-ical</code> iCalendar, recurrence expansion, invitations, vCard</li>
+                <li><code>satchel-api</code> the command and event schema every client speaks</li>
+              </ul>
+            </div>
+            <div class="stack" aria-label="How it fits together">
+              <div class="layer">Desktop app <span>Tauri</span></div>
+              <div class="layer">Web UI <span>vanilla TypeScript</span></div>
+              <div class="layer split"><span class="pill">CLI</span><span class="pill">MCP</span><span class="pill">AI folder</span></div>
+              <div class="layer core">One command surface <span>Rust core</span></div>
+              <div class="layer">Your disk <span>SQLite + full-text search</span></div>
+              <div class="layer out">IMAP &middot; SMTP &middot; JMAP &middot; Gmail &middot; Graph &middot; CalDAV &middot; CardDAV</div>
+            </div>
+          </div>
+          <div class="cta">
+            <a class="btn big" href="https://github.com/davidfig/satchel-mail">Read the code</a>
+            <a class="btn big" href="https://github.com/davidfig/satchel-mail/blob/main/CONTRIBUTING.md">Contribute</a>
+            <a class="btn big" href="open-source.html">How it's built</a>
+          </div>
+        </section>
+
+        <!-- DRAFT: David, rewrite this in your own words. -->
+        <section id="why">
+          <h2>Why I built this</h2>
+          <p>I wanted an AI to help with my email. Every way to do that asked for the keys: hand over the account, let a service read everything, and hope it doesn't send the wrong thing to the wrong person.</p>
+          <p>So I built the client I wanted. My mail stays on my machine. My agent reads a folder and writes proposals, and I approve them the way I'd review a pull request. Most days that's a few clicks over coffee instead of an hour of inbox.</p>
+          <p>It's open source because a program that holds your mail should be one you can read.</p>
+          <p class="sig">David</p>
+          <p class="sig-name">David Figatner, who built satchel.email</p>
+        </section>
+
+        <section id="get" class="get">
+          <h2>Get satchel.email</h2>
+          <div class="cta">
+            <a class="btn primary big" href="https://github.com/davidfig/satchel-mail/releases/latest">Download for Mac</a>
+            <a class="btn big" href="https://github.com/davidfig/satchel-mail#quick-start-development">Build from source</a>
+          </div>
+          <p class="fine">Requires macOS. Windows and Linux: build from source for now.</p>
+          <p class="fine">Then point your agent at <code>~/Satchel</code>, or <a href="mcp.html">connect it over MCP</a>.</p>
+        </section>
+      </article>
+    </main>
+
+    <footer class="foot gutter">
+      <span>satchel.email</span>
+      <span class="foot-links">
+        <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
+        <a href="https://github.com/davidfig/satchel-mail/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/davidfig/satchel-mail/blob/main/TRADEMARKS.md">Trademarks</a>
+      </span>
+    </footer>
+  </body>
+</html>

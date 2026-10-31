@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>A fast, private mail client: satchel.email</title>
+    <meta name="description" content="One inbox for Gmail, Outlook, Fastmail and IMAP. Conversations that read like chat, instant search on your own disk, remote images blocked, undo send, and a keyboard for everything." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="satchel.email" />
+    <meta property="og:title" content="A fast, private mail client: satchel.email" />
+    <meta property="og:description" content="One inbox for every account, instant search, and your mail on your own disk." />
+    <link rel="icon" href="satchel-mark.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('satchel.site.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="site.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <header class="chrome">
+      <div class="chrome-in gutter">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <a class="brand" href="./" aria-label="satchel.email home"><img src="satchel-mark.svg" alt="" width="22" height="22" /><span>satchel.email</span></a>
+        <nav class="tabs" aria-label="Pages">
+          <a href="mail.html" aria-current="page">Mail</a>
+          <a href="calendar.html">Calendar</a>
+          <a href="ai.html">AI</a>
+          <a href="mcp.html">MCP</a>
+          <a href="open-source.html">Open source</a>
+        </nav>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark" title="Switch light or dark">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5A5 5 0 0 1 10 3.5z" /></svg>
+        </button>
+        <a class="btn primary" href="./#get">Get it</a>
+      </div>
+    </header>
+
+    <main class="desk gutter">
+      <article class="msg">
+        <p class="crumb"><a href="./">satchel.email</a> &rsaquo; Mail</p>
+        <h1>A mail client first.</h1>
+        <p class="lede">With no AI anywhere near it, satchel.email is a complete mail app: one inbox for every account, conversations that read like a chat, search that answers before you finish typing, and a keyboard shortcut for everything.</p>
+
+        <section>
+          <h2>Every account, one inbox</h2>
+          <div class="providers">
+            <div class="card"><b>Gmail</b><p>Labels show as folders, with All Mail beside them. Google Calendar and Contacts come along.</p></div>
+            <div class="card"><b>Microsoft 365 and Outlook</b><p>Mail, calendars and contacts through Microsoft Graph.</p></div>
+            <div class="card"><b>Fastmail and JMAP</b><p>The modern mail protocol, with CalDAV and CardDAV for the rest.</p></div>
+            <div class="card"><b>Any IMAP server</b><p>IMAP and SMTP, plus CalDAV and CardDAV where your host has them.</p></div>
+          </div>
+          <p class="muted">Gmail and Microsoft sign in through your browser. Passwords and tokens are kept in your system keychain, never in a file.</p>
+        </section>
+
+        <section>
+          <h2>Conversations that read like a chat</h2>
+          <div class="two">
+            <div>
+              <p>Mail between people becomes a stream of bubbles, yours on the right, each showing only what that person wrote. The quoted history underneath is folded away. Newsletters and receipts keep their layout as a full-width card.</p>
+              <p>A "New" line marks where you left off. Long threads fold the middle. A reply to an earlier message quotes it, and clicking the quote jumps there. When someone is added to the thread, it says so.</p>
+              <p>The reply box is always open at the bottom, and stays tucked away for mail that doesn't expect an answer, like bank alerts and newsletters.</p>
+            </div>
+            <div class="chat" aria-hidden="true">
+              <div class="chat-day">Tuesday</div>
+              <div class="bub in"><b>Bob Lee</b>Can we move our call? Monday 10 or Tuesday 2 both work for me.</div>
+              <div class="chat-sys">Bob added Dana Ruiz</div>
+              <div class="bub in"><b>Dana Ruiz</b>Either is fine for me too.</div>
+              <div class="chat-new">New</div>
+              <div class="bub out">Monday at 10 works for me. Talk then!</div>
+              <div class="reply-box">Reply to all&hellip;</div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Search on your own disk</h2>
+          <p>All your mail is indexed in a database on your computer, so search doesn't wait for a server. Type words, or narrow it down:</p>
+          <div class="ops">
+            <code>from:bob</code><code>to:carol@example.com</code><code>with:dana</code><code>subject:invoice</code><code>has:attachment</code><code>is:unread</code><code>is:flagged</code><code>is:favorite</code><code>before:2026-01-01</code><code>after:2025-06</code><code>in:archive</code>
+          </div>
+          <p>Click anyone's name to see everything between you: their addresses, how often you write, the meetings you share, and every conversation, filtered by all, from them, or with attachments.</p>
+        </section>
+
+        <section>
+          <h2>Private by default</h2>
+          <div class="grid">
+            <div class="card"><b>Remote images blocked</b><p>Images that report when you opened a message stay off until you load them. Known trackers are stripped.</p></div>
+            <div class="card"><b>HTML in a sandbox</b><p>HTML mail is cleaned before it's shown, then drawn in a sandbox where it can't run scripts or reach the app.</p></div>
+            <div class="card"><b>Phishing warnings</b><p>Links that say one address and go to another, and senders who fail authentication, are called out.</p></div>
+            <div class="card"><b>Spam that listens</b><p>Mark a sender as spam once and their mail goes to Junk from then on. Not spam brings them back.</p></div>
+            <div class="card"><b>One-click unsubscribe</b><p>For mailing lists that support it, without opening a web page.</p></div>
+            <div class="card"><b>No server of ours</b><p>Your mail goes from your provider to your computer. There's nothing in between to read it.</p></div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Small things done properly</h2>
+          <ul class="plain cols">
+            <li><b>Undo send.</b> A few seconds to take it back.</li>
+            <li><b>Sends go out once.</b> If the connection drops mid-send, satchel.email won't quietly send it twice.</li>
+            <li><b>Works offline.</b> Archive, file and write without a connection; it all syncs when you're back.</li>
+            <li><b>Newest mail first.</b> A new account is usable in moments while older mail fills in behind it.</li>
+            <li><b>Attachments in place.</b> Images, PDFs, audio, video, spreadsheets and text open beside the conversation, with <kbd>&larr;</kbd> <kbd>&rarr;</kbd> between them.</li>
+            <li><b>Light on disk.</b> All your mail is kept, but attachments download only when you open them, within a storage limit you set.</li>
+            <li><b>Favorite senders.</b> Heart the people who matter and their mail stands out everywhere.</li>
+            <li><b>Quiet notifications.</b> One notification per batch of new mail, and none while you're looking at the app.</li>
+            <li><b>Drafts sync.</b> Start on your laptop, finish on your phone's mail app.</li>
+            <li><b>Dark mode.</b> Of course.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Built for the keyboard</h2>
+          <p>Every action has a shortcut, and every shortcut is in the command palette, so you can find any of them by name.</p>
+          <div class="keys">
+            <span><kbd>&#8984;</kbd> <kbd>K</kbd> Command palette</span>
+            <span><kbd>j</kbd> <kbd>k</kbd> Next, previous</span>
+            <span><kbd>e</kbd> Archive</span>
+            <span><kbd>r</kbd> Reply</span>
+            <span><kbd>c</kbd> Compose</span>
+            <span><kbd>/</kbd> Search</span>
+            <span><kbd>y</kbd> Copy for AI</span>
+            <span><kbd>g</kbd> <kbd>r</kbd> AI Proposals</span>
+            <span><kbd>?</kbd> All shortcuts</span>
+          </div>
+        </section>
+
+        <div class="cta">
+          <a class="btn primary big" href="./#get">Get satchel.email</a>
+          <a class="btn big" href="calendar.html">Calendar and contacts</a>
+        </div>
+      </article>
+    </main>
+
+    <footer class="foot gutter">
+      <span>satchel.email</span>
+      <span class="foot-links">
+        <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
+        <a href="https://github.com/davidfig/satchel-mail/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/davidfig/satchel-mail/blob/main/TRADEMARKS.md">Trademarks</a>
+      </span>
+    </footer>
+  </body>
+</html>

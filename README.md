@@ -34,6 +34,7 @@ crates/cli        `satchel` binary: serve (web UI + API), mcp, sync, accounts, a
 apps/desktop      Tauri desktop app
 ui/               vanilla TypeScript UI (shared by desktop and web)
 scripts/          dev-servers (local Stalwart), seed fixtures, release build
+site/             marketing site (static HTML, no build)
 ```
 
 ## Quick start (development)

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Open source and local first: satchel.email</title>
+    <meta name="description" content="satchel.email is open source: an AGPL app built on MIT/Apache Rust libraries for MIME and iCalendar. Your mail lives in SQLite on your own computer." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="satchel.email" />
+    <meta property="og:title" content="Open source and local first: satchel.email" />
+    <meta property="og:description" content="Read the code that holds your mail. Rust core, SQLite, vanilla TypeScript." />
+    <link rel="icon" href="satchel-mark.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('satchel.site.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="site.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <header class="chrome">
+      <div class="chrome-in gutter">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <a class="brand" href="./" aria-label="satchel.email home"><img src="satchel-mark.svg" alt="" width="22" height="22" /><span>satchel.email</span></a>
+        <nav class="tabs" aria-label="Pages">
+          <a href="mail.html">Mail</a>
+          <a href="calendar.html">Calendar</a>
+          <a href="ai.html">AI</a>
+          <a href="mcp.html">MCP</a>
+          <a href="open-source.html" aria-current="page">Open source</a>
+        </nav>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark" title="Switch light or dark">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5A5 5 0 0 1 10 3.5z" /></svg>
+        </button>
+        <a class="btn primary" href="./#get">Get it</a>
+      </div>
+    </header>
+
+    <main class="desk gutter">
+      <article class="msg">
+        <p class="crumb"><a href="./">satchel.email</a> &rsaquo; Open source</p>
+        <h1>A program that holds your mail should be one you can read.</h1>
+        <p class="lede">satchel.email is open source, top to bottom. Your mail lives in a database on your own computer, and every line that touches it is on GitHub.</p>
+        <div class="cta">
+          <a class="btn primary big" href="https://github.com/davidfig/satchel-mail">Read the code</a>
+          <a class="btn big" href="https://github.com/davidfig/satchel-mail/blob/main/CONTRIBUTING.md">Contribute</a>
+        </div>
+
+        <section>
+          <h2>Local first</h2>
+          <div class="two">
+            <div>
+              <p>Mail, calendars and contacts sync straight from your provider into SQLite on your computer, with full-text search built in. Gmail and Microsoft sign in through your browser and hand the app a token, and every password and token is kept in your system keychain.</p>
+              <p>There's no satchel.email server in the middle: no account with us, no copy of your mail, nothing to breach. Changes you make are saved locally first and queued for the server, so the app works offline and never waits on the network to show you something.</p>
+              <p class="muted">A hosted version may come later, for people who want it. The desktop app will stay local first.</p>
+            </div>
+            <div class="stack" aria-label="How it fits together">
+              <div class="layer">Desktop app <span>Tauri</span></div>
+              <div class="layer">Web UI <span>vanilla TypeScript</span></div>
+              <div class="layer split"><span class="pill">CLI</span><span class="pill">MCP</span><span class="pill">AI folder</span></div>
+              <div class="layer core">One command surface <span>Rust core</span></div>
+              <div class="layer">Your disk <span>SQLite + full-text search</span></div>
+              <div class="layer out">IMAP &middot; SMTP &middot; JMAP &middot; Gmail &middot; Graph &middot; CalDAV &middot; CardDAV</div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>How it's built</h2>
+          <div class="grid">
+            <div class="card"><b>A Rust core</b><p>Sync, storage, search, the outbound queue and proposals, shared by every way in.</p></div>
+            <div class="card"><b>One command surface</b><p>The app, the CLI and MCP all send the same commands. Agents get a smaller set, checked in one place.</p></div>
+            <div class="card"><b>Vanilla TypeScript</b><p>The interface has no framework: small, fast to load, and easy to read.</p></div>
+            <div class="card"><b>Few dependencies</b><p>iCalendar, vCard and HTML-to-text are our own code. Libraries only where they pay: MIME, recurrence rules, TLS, IMAP, SMTP, HTTP and HTML sanitizing.</p></div>
+            <div class="card"><b>Tested against real servers</b><p>A local mail server with seeded accounts runs the integration tests, with no Docker.</p></div>
+            <div class="card"><b>Decisions written down</b><p>Every significant choice has a short record of what was decided and why. There are 58 of them.</p></div>
+          </div>
+          <p>Run it yourself with <code>satchel serve</code> for the web UI, <code>satchel mcp</code> for agents, or <code>satchel call</code> to send any command from a script.</p>
+        </section>
+
+        <section>
+          <h2>Licenses</h2>
+          <table class="lic">
+            <thead><tr><th>Part</th><th>License</th></tr></thead>
+            <tbody>
+              <tr><td>The app: core, sync, MCP, CLI, desktop and web UI</td><td><a href="https://github.com/davidfig/satchel-mail/blob/main/LICENSE">AGPL-3.0</a></td></tr>
+              <tr><td><code>satchel-mime</code>, <code>satchel-ical</code>, <code>satchel-api</code></td><td>MIT or Apache-2.0</td></tr>
+              <tr><td>The satchel.email name and logo</td><td><a href="https://github.com/davidfig/satchel-mail/blob/main/TRADEMARKS.md">Trademark policy</a></td></tr>
+            </tbody>
+          </table>
+          <p>The app is AGPL so that anyone who runs a changed copy as a service has to share their changes too. The libraries are permissive so you can use them in anything, open or closed.</p>
+        </section>
+
+        <section>
+          <h2>Libraries you can use today</h2>
+          <div class="grid crates-grid">
+            <div class="card"><b><code>satchel-mime</code></b><p>Parse and build MIME messages. Sanitize HTML mail, strip trackers, turn HTML into readable text, quote replies, and spot deceptive links and failed authentication.</p></div>
+            <div class="card"><b><code>satchel-ical</code></b><p>Parse and write iCalendar, expand recurrence rules with their exceptions, handle invitations and replies (iTIP), alarms, and vCard.</p></div>
+            <div class="card"><b><code>satchel-api</code></b><p>The command and event schema every satchel.email client speaks, for building your own front end or tools.</p></div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Contributing</h2>
+          <p>satchel.email is maintained by one person, so the process is small. Bug reports and ideas are welcome as GitHub issues. For anything bigger than a small fix, open an issue first so we can agree on the approach. Your first pull request asks you to sign a short <a href="https://github.com/davidfig/satchel-mail/blob/main/CLA.md">contributor agreement</a>: you keep the copyright in your work.</p>
+          <p>Found a security problem? Please don't open a public issue. Use <b>Report a vulnerability</b> on the repository's Security tab (<a href="https://github.com/davidfig/satchel-mail/blob/main/SECURITY.md">details</a>).</p>
+        </section>
+
+        <div class="cta">
+          <a class="btn primary big" href="https://github.com/davidfig/satchel-mail">satchel-mail on GitHub</a>
+          <a class="btn big" href="https://github.com/davidfig/satchel-mail/tree/main/docs/decisions">Browse the decisions</a>
+        </div>
+      </article>
+    </main>
+
+    <footer class="foot gutter">
+      <span>satchel.email</span>
+      <span class="foot-links">
+        <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
+        <a href="https://github.com/davidfig/satchel-mail/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/davidfig/satchel-mail/blob/main/TRADEMARKS.md">Trademarks</a>
+      </span>
+    </footer>
+  </body>
+</html>

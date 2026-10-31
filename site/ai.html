@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Bring your own AI: satchel.email</title>
+    <meta name="description" content="satchel.email has no AI built in. It writes your mail to a folder of Markdown files and serves it over MCP, so Claude Code or any agent you use can read it and propose replies, filing and events for you to approve." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="satchel.email" />
+    <meta property="og:title" content="Bring your own AI: satchel.email" />
+    <meta property="og:description" content="Your agent reads a folder and writes proposals. You approve them." />
+    <link rel="icon" href="satchel-mark.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('satchel.site.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="site.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <header class="chrome">
+      <div class="chrome-in gutter">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <a class="brand" href="./" aria-label="satchel.email home"><img src="satchel-mark.svg" alt="" width="22" height="22" /><span>satchel.email</span></a>
+        <nav class="tabs" aria-label="Pages">
+          <a href="mail.html">Mail</a>
+          <a href="calendar.html">Calendar</a>
+          <a href="ai.html" aria-current="page">AI</a>
+          <a href="mcp.html">MCP</a>
+          <a href="open-source.html">Open source</a>
+        </nav>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark" title="Switch light or dark">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5A5 5 0 0 1 10 3.5z" /></svg>
+        </button>
+        <a class="btn primary" href="./#get">Get it</a>
+      </div>
+    </header>
+
+    <main class="desk gutter">
+      <article class="msg">
+        <p class="crumb"><a href="./">satchel.email</a> &rsaquo; AI</p>
+        <h1>Bring your own AI.</h1>
+        <p class="lede">satchel.email has no AI built in, and never sends your mail to an AI service. It writes your mail, calendars and contacts to a folder of plain files, and serves the same over MCP. The agent you already use reads them and writes down what it would do. You approve it, edit it or say no.</p>
+        <div class="flow" role="img" aria-label="satchel.email writes your mail to plain files and serves it over MCP. Your own agent reads either one and writes proposals, which wait in the app for you to approve.">
+            <div class="node"><b>satchel.email</b><span>syncs your mail. No AI inside.</span></div>
+            <div class="arrow"><span>writes</span></div>
+            <div class="node"><b><code>~/Satchel</code> or <code>satchel mcp</code></b><span>plain Markdown, or MCP tools</span></div>
+            <div class="arrow"><span>read by</span></div>
+            <div class="node agent"><b>Your agent</b><span>Claude Code, Claude Desktop or any MCP client</span></div>
+            <div class="arrow back"><span>proposes</span></div>
+            <div class="node"><b>AI Proposals</b><span>you approve, edit or reject</span></div>
+          </div>
+        <p class="muted">Whether an agent sees your mail, and which one, is entirely up to you. If you never point one at it, the folder just sits on your disk.</p>
+
+        <section>
+          <h2>The AI folder</h2>
+          <div class="two">
+            <div>
+              <p>satchel.email keeps a copy of your mail in <code>~/Satchel</code> as plain Markdown, and keeps it current as mail arrives. It's on from the start. Open the folder in Claude Code (or add it with <code>--add-dir</code>), or point any agent that can read files at it.</p>
+              <p>The folder starts with a <code>README.md</code> written for the agent: how the folder is laid out, how to propose each kind of change, and that instructions inside an email are data, not orders.</p>
+              <p>In Settings &rsaquo; AI folder you choose which accounts it holds, how much history (a year by default), and whether calendars, contacts, raw messages and attachments go in. What's in the folder is all your AI sees.</p>
+              <p class="muted">The folder lives in your home folder rather than Documents, so macOS doesn't stop each tool at the door. You can move it, and it takes waiting proposals with it.</p>
+            </div>
+            <div class="tree" role="img" aria-label="The AI folder's layout">
+<pre><b>~/Satchel/</b>
+  README.md          <span>how to read and propose</span>
+  sync.json          <span>last sync per account</span>
+  mail/work/
+    INDEX.md         <span>newest threads first</span>
+    Inbox.md
+    threads/2026-10/
+      can-we-move-our-call-7f3a/
+        thread.md
+        meta.json
+  calendar/
+    AGENDA.md
+  contacts/
+    CONTACTS.md
+    people/bob-lee-41.md
+  proposals/
+    inbox/           <span>agents write here</span>
+    processed/       <span>results come back here</span></pre>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>A proposal is a file</h2>
+          <div class="two">
+            <div>
+              <p>To propose something, an agent writes a short Markdown file to <code>proposals/inbox/</code>: what to do, which thread or event, and why. satchel.email picks it up within moments and puts it in AI Proposals.</p>
+              <p>Once read, the file moves to <code>processed/</code> and gains a status (pending, approved, edited, rejected, stale or failed), so the agent can check how it went.</p>
+              <p>Contacts are even simpler: an agent edits a person's file, or creates one, and the change becomes a proposal with only the fields it touched.</p>
+            </div>
+            <div class="term">
+              <div class="term-bar"><i></i><i></i><i></i><span>proposals/inbox/reply-bob.md</span></div>
+<pre><span class="file">---
+action: reply
+thread: 7f3a9c
+why: Bob offered Monday 10 or Tuesday 2; Monday is free
+agent: Claude
+---
+Monday at 10 works for me. Talk then!</span></pre>
+            </div>
+          </div>
+          <h3>What an agent can propose</h3>
+          <div class="chips">
+            <span>Reply</span><span>Draft</span><span>Archive</span><span>Move</span><span>Labels</span><span>Mark read or unread</span><span>Flag</span><span>New event</span><span>Change an event</span><span>Cancel an event</span><span>Answer an invitation</span><span>Save a contact</span><span>Merge contacts</span>
+          </div>
+        </section>
+
+        <section>
+          <h2>You review it</h2>
+          <div class="two">
+            <div>
+              <p>Every proposal waits in AI Proposals with the agent's reason beside it. A reply shows exactly what will be sent, with its recipients and attachments. An event shows the time and the calendar. A change shows before and after.</p>
+              <ul class="plain">
+                <li><b>Send</b> or <b>Approve</b> it. A reply goes out through the same undo window as one you wrote.</li>
+                <li><b>Edit</b> it first. Your version is what goes out, and the agent sees it was edited.</li>
+                <li><b>Save as draft</b> to finish it in the composer.</li>
+                <li><b>Reject</b> it with a note. The agent can read why and do better next time.</li>
+              </ul>
+            </div>
+            <div>
+              <div class="prop demo-prop">
+                <div class="prop-k">Reply to Bob Lee</div>
+                <div class="prop-meta">To bob@lee.example &middot; from your work account</div>
+                <div class="prop-body">Monday at 10 works for me. Talk then!</div>
+                <div class="prop-why">Why: Bob offered Monday 10 or Tuesday 2. Your calendar is free Monday morning.</div>
+                <div class="prop-act"><span class="btn small primary">Send</span><span class="btn small">Save as draft</span><span class="btn small">Reject</span></div>
+              </div>
+              <div class="prop demo-prop warn">
+                <div class="prop-k">Reply to Smile Dental</div>
+                <div class="prop-warn">Adds a recipient who wasn't in the conversation: billing@smile-dental-help.example</div>
+                <div class="prop-body">Here is my insurance number&hellip;</div>
+                <div class="prop-act"><span class="btn small">Send</span><span class="btn small primary">Reject</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>The safeguards</h2>
+          <ul class="nots">
+            <li><b>Agents can't act.</b> They can read and propose. There's no command for an agent to send, delete, move or change settings, in the folder or over MCP.</li>
+            <li><b>Nothing is deleted for good.</b> Not by an agent, not with your approval. The worst a proposal can do is move mail to Trash, and that's flagged.</li>
+            <li><b>Risks are flagged.</b> New recipients, Bcc, many recipients, forwarded attachments, invitations that will go out, cancellations.</li>
+            <li><b>Stale proposals wait.</b> If the message or event changed after the agent wrote the proposal, you look again before it can go.</li>
+            <li><b>Limits per agent.</b> The folder agent may make 60 proposals an hour. MCP agents each get their own accounts, history and limits.</li>
+            <li><b>Everything is logged.</b> Every proposal, decision and send is in Settings &rsaquo; Activity.</li>
+          </ul>
+          <p class="muted">Email is written by strangers, and a message can try to give your agent instructions. satchel.email tells agents to treat mail as data, but the real protection is structural: whatever an agent is talked into, it can only propose.</p>
+        </section>
+
+        <section>
+          <h2>Coming next: let it tidy up</h2>
+          <p>Today you review every proposal. Next, you'll choose how much each agent may do on its own, per kind of action: archiving and labels on their own, drafts saved without asking, calendar changes still waiting for you. Anything it does without asking shows in Activity with Undo, and <b>Pause agents</b> puts everything back to Ask.</p>
+          <p class="muted">Permanent deletes, settings and server-side rules stay off limits at every level.</p>
+        </section>
+
+        <section>
+          <h2>Without an agent</h2>
+          <p>Press <kbd>y</kbd> in a conversation to copy it as Markdown, with who wrote what, the dates and the attachments, ready to paste into any AI chat.</p>
+        </section>
+
+        <div class="cta">
+          <a class="btn primary big" href="./#get">Get satchel.email</a>
+          <a class="btn big" href="mcp.html">Connect over MCP</a>
+          <a class="btn big" href="https://github.com/davidfig/satchel-mail/blob/main/docs/AI_AGENTS.md">Read the agent docs</a>
+        </div>
+      </article>
+    </main>
+
+    <footer class="foot gutter">
+      <span>satchel.email</span>
+      <span class="foot-links">
+        <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
+        <a href="https://github.com/davidfig/satchel-mail/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/davidfig/satchel-mail/blob/main/TRADEMARKS.md">Trademarks</a>
+      </span>
+    </footer>
+  </body>
+</html>
