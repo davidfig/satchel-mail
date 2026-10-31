@@ -1,0 +1,76 @@
+# Contributor License Agreement check (CLA.md). A pull request's author signs once, by
+# commenting the sentence below on any pull request in this repository; the comments are the
+# record. The result is the "CLA" commit status on the pull request's head, so it can be made a
+# required check. The repository owner and bots don't need to sign.
+#
+# Safe on pull_request_target: it never checks out or runs the pull request's code, and reads
+# the comment only through the event payload.
+
+name: CLA
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla:
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request && contains(github.event.comment.body, 'I have read the CLA'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const SENTENCE = 'I have read the CLA and I agree to it.';
+            const MARKER = '<!-- cla-check -->';
+            const { owner, repo } = context.repo;
+            const number = context.payload.pull_request?.number ?? context.payload.issue.number;
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+            const author = pr.user.login;
+            const signs = (comment) =>
+              comment.user.login === author && comment.body.trim().toLowerCase() === SENTENCE.toLowerCase();
+
+            const setStatus = (state, description) => github.rest.repos.createCommitStatus({
+              owner, repo, sha: pr.head.sha, state, context: 'CLA', description,
+            });
+
+            if (author === owner || pr.user.type === 'Bot') {
+              await setStatus('success', 'Not needed for the owner or bots');
+              return;
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number });
+            let signed = comments.some(signs) || (context.payload.comment && signs(context.payload.comment));
+            if (!signed) {
+              // Signed on an earlier pull request? Search can lag a minute behind a new comment,
+              // which is why this pull request's own comments are checked first.
+              const q = `repo:${owner}/${repo} is:pr commenter:${author} "${SENTENCE}"`;
+              const { data: found } = await github.rest.search.issuesAndPullRequests({ q });
+              for (const item of found.items) {
+                const earlier = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: item.number });
+                if (earlier.some(signs)) { signed = true; break; }
+              }
+            }
+
+            const ours = comments.find((c) => c.user.type === 'Bot' && c.body.includes(MARKER));
+            if (signed) {
+              await setStatus('success', `Signed by ${author}`);
+              if (ours) await github.rest.issues.updateComment({ owner, repo, comment_id: ours.id, body: `${MARKER}\nThanks, @${author}: the CLA is signed.` });
+              return;
+            }
+
+            await setStatus('failure', 'The author has not signed the CLA yet');
+            if (!ours) {
+              const link = `https://github.com/${owner}/${repo}/blob/${pr.base.sha}/CLA.md`;
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: number,
+                body: `${MARKER}\nThanks for the pull request, @${author}. Before it can be merged, please read the [Contributor License Agreement](${link}) and, if you agree, reply with this exact comment:\n\n\`\`\`\n${SENTENCE}\n\`\`\`\n\nYou only need to do this once for this repository. You keep the copyright in your work.`,
+              });
+            }
