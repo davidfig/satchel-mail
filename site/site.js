@@ -9,13 +9,48 @@
     try { localStorage.setItem('satchel.site.theme', root.dataset.theme); } catch (e) {}
   });
 
-  // Name the visitor's system on the main download button; the files themselves are in #get.
+  // Downloads: the visitor's build up front, the others behind "Other systems". Macs default to Apple silicon;
+  // Chromium browsers can say when it's an Intel Mac.
+  const ua = navigator.userAgent;
+  const os = /Windows/.test(ua) ? 'windows'
+    : /Mac OS X|Macintosh/.test(ua) && !/iPhone|iPad/.test(ua) && navigator.maxTouchPoints < 2 ? 'mac'
+    : /Linux/.test(ua) && !/Android/.test(ua) ? 'linux' : '';
+  const builds = [...document.querySelectorAll('#getAll .dl')];
+  const pick = (arch) => builds.find((b) => b.dataset.os === os && (!arch || b.dataset.arch === arch));
   const download = document.getElementById('download');
-  if (download) {
-    const ua = navigator.userAgent;
-    const os = /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) && !/iPhone|iPad/.test(ua) ? 'Mac' : /Linux/.test(ua) && !/Android/.test(ua) ? 'Linux' : '';
-    if (os) download.textContent = `Download for ${os}`;
+  const others = document.getElementById('getOthers');
+  const all = document.getElementById('getAll');
+
+  const show = (build) => {
+    const btn = document.getElementById('getBtn');
+    btn.href = build.href;
+    btn.textContent = build.dataset.label;
+    document.getElementById('getNote').textContent = build.querySelector('span').textContent;
+    document.getElementById('getMine').hidden = false;
+    const alt = document.getElementById('getAlt');
+    const other = os === 'mac' && builds.find((b) => b.dataset.os === 'mac' && b !== build);
+    alt.hidden = !other && os !== 'linux';
+    if (other) {
+      alt.replaceChildren(other.dataset.arch === 'x64' ? 'Intel Mac? ' : 'Apple silicon Mac? ', Object.assign(document.createElement('a'), { href: other.href, textContent: 'Download that one' }));
+    } else if (os === 'linux') {
+      alt.replaceChildren('Prefer a package? ', Object.assign(document.createElement('a'), { href: all.querySelector('a[href$=".deb"]').href, textContent: 'Download the .deb' }));
+    }
+    all.hidden = true;
+    others.hidden = false;
+  };
+
+  if (os && pick()) {
+    if (download) download.textContent = `Download for ${os === 'mac' ? 'Mac' : os === 'windows' ? 'Windows' : 'Linux'}`;
+    show(pick(os === 'mac' ? 'arm64' : ''));
+    navigator.userAgentData?.getHighEntropyValues?.(['architecture'])
+      .then((v) => { if (os === 'mac' && v.architecture === 'x86') show(pick('x64')); })
+      .catch(() => {});
   }
+  others?.addEventListener('click', () => {
+    all.hidden = !all.hidden;
+    others.setAttribute('aria-expanded', String(!all.hidden));
+    others.textContent = all.hidden ? 'Other systems' : 'Hide other systems';
+  });
 
   // The hero switches between the mail and calendar views, from the switch above it or its own sidebar.
   const hero = document.getElementById('hero');

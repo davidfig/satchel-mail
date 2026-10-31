@@ -493,3 +493,7 @@ p { margin: 0 0 14px; }
 .dl b { font-weight: 650; }
 .dl span { color: var(--text-2); font-size: 13px; }
 @media (max-width: 680px) { .downloads { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.get-mine { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 8px; }
+.get-note { color: var(--text-2); font-size: 14px; }
+.get-others { margin: 4px 0 6px; font-size: 14px; }
+.get-all .downloads { margin-top: 10px; }

@@ -348,13 +348,23 @@ Monday at 10 works for me. Talk then!</span>
 
         <section id="get" class="get">
           <h2>Get satchel.email</h2>
-          <div class="downloads">
-            <a class="dl" href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-mac-arm64.dmg"><b>Mac</b><span>Apple silicon &middot; .dmg</span></a>
-            <a class="dl" href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-mac-x64.dmg"><b>Mac</b><span>Intel &middot; .dmg</span></a>
-            <a class="dl" href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-windows-x64-setup.exe"><b>Windows</b><span>10 and 11 &middot; installer</span></a>
-            <a class="dl" href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-linux-x64.AppImage"><b>Linux</b><span>x64 &middot; AppImage</span></a>
+          <!-- site.js picks the visitor's build and puts it in #getMine; the rest stay one click away. Without
+               scripts, every build shows. -->
+          <div class="get-mine" id="getMine" hidden>
+            <a class="btn primary big" id="getBtn" href="#"></a>
+            <span class="get-note" id="getNote"></span>
           </div>
-          <p class="fine">Also on Linux: a <a href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-linux-x64.deb">.deb package</a>. Just the <code>satchel</code> command line, for servers and agents: <a href="https://github.com/davidfig/satchel-mail/releases/latest">every release</a>. Or <a href="https://github.com/davidfig/satchel-mail#quick-start-development">build it from source</a>.</p>
+          <p class="fine" id="getAlt" hidden></p>
+          <button class="link get-others" type="button" id="getOthers" aria-expanded="false" aria-controls="getAll" hidden>Other systems</button>
+          <div class="get-all" id="getAll">
+            <div class="downloads">
+              <a class="dl" data-os="mac" data-arch="arm64" data-label="Download for Mac" href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-mac-arm64.dmg"><b>Mac</b><span>Apple silicon &middot; .dmg</span></a>
+              <a class="dl" data-os="mac" data-arch="x64" data-label="Download for Intel Mac" href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-mac-x64.dmg"><b>Mac</b><span>Intel &middot; .dmg</span></a>
+              <a class="dl" data-os="windows" data-label="Download for Windows" href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-windows-x64-setup.exe"><b>Windows</b><span>10 and 11 &middot; installer</span></a>
+              <a class="dl" data-os="linux" data-label="Download for Linux" href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-linux-x64.AppImage"><b>Linux</b><span>x64 &middot; AppImage</span></a>
+            </div>
+            <p class="fine">Also on Linux: a <a href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-linux-x64.deb">.deb package</a>. Just the <code>satchel</code> command line, for servers and agents: <a href="https://github.com/davidfig/satchel-mail/releases/latest">every release</a>. Or <a href="https://github.com/davidfig/satchel-mail#quick-start-development">build it from source</a>.</p>
+          </div>
           <p class="fine">Then point your agent at <code>~/Satchel</code>, or <a href="mcp.html">connect it over MCP</a>.</p>
         </section>
       </article>
