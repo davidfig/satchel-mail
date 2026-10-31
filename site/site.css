@@ -96,10 +96,6 @@ kbd { font: 12px var(--mono); padding: 1px 6px; border: 1px solid var(--line-2);
 /* Title bar. */
 .chrome { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--sidebar) 88%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
 .chrome-in { display: flex; align-items: center; gap: 14px; max-width: 72rem; height: 48px; margin: 0 auto; font-size: 14px; }
-.lights { display: flex; gap: 7px; }
-.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
-.lights i:nth-child(2) { background: #febc2e; }
-.lights i:nth-child(3) { background: #28c840; }
 .brand { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 650; text-decoration: none; letter-spacing: -0.01em; }
 .tabs { display: flex; gap: 2px; margin-left: 8px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .tabs a { padding: 5px 10px; border-radius: 6px; color: var(--text-2); text-decoration: none; white-space: nowrap; }
@@ -245,7 +241,7 @@ p { margin: 0 0 14px; }
 }
 @media (max-width: 680px) {
   body { font-size: 16px; }
-  .lights, .tabs { display: none; }
+  .tabs { display: none; }
   .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: 13rem auto; height: auto; }
   .list { border-right: 0; border-bottom: 1px solid var(--line); overflow-y: auto; }
   .review { overflow: visible; }
