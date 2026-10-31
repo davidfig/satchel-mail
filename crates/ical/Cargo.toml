@@ -3,7 +3,7 @@ name = "satchel-ical"
 description = "iCalendar parsing/building and recurrence expansion"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 satchel-api.workspace = true

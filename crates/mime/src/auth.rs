@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Reading the receiving server's Authentication-Results header (RFC 8601):
 //! failures to warn about, and the positive, aligned pass that trust
 //! decisions need. Anyone can write this header into a message, so a pass

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! MIME helpers: parse incoming mail into Satchel's model, sanitize HTML,
 //! extract attachments, build outgoing messages, and quote/strip replies.
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! iCalendar (RFC 5545) parsing and serialization for the subset Satchel
 //! needs, plus recurrence expansion and iMIP reply generation. vCard, which
 //! shares the content-line syntax, lives in [`vcard`].

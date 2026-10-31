@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! The command/event schema every satchel.email host speaks.
 //!
 //! The UI (over Tauri IPC or HTTP+WebSocket) and the MCP server both talk to the

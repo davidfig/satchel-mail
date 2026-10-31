@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! VALARMs: reading an event's alerts and writing them back (0056).
 
 use super::*;

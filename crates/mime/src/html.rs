@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! HTML: sanitizing for display (converting to text is in `html_text.rs`).
 
 use super::*;

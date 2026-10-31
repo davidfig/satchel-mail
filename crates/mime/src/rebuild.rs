@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Rebuilding a message from its parts as a server describes them, with
 //! attachment contents left out so they are never downloaded. The result is
 //! what [`strip_attachments`] makes of the full message.

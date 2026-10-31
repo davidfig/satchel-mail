@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Accounts: providers, connection settings, credentials and sync status.
 
 use super::*;
