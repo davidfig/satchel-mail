@@ -8,7 +8,8 @@ import { fuzzy } from '../lib/fuzzy';
 import { allZones, fromWall, localZone, offsetLabel, offsetMinutes, toWall, zoneCity, zoneLongName } from '../lib/tz';
 import { confirmDialog, errorToast, modal, toast } from '../lib/ui';
 import { store } from '../state';
-import type { CalEvent, Calendar, PartStat, PlaceSource } from '../types';
+import type { Alert, CalEvent, Calendar, PartStat, PlaceSource } from '../types';
+import { alertsPicker } from './calendar-alerts';
 import { repeatPicker } from './calendar-repeat';
 
 const HOUR = 3_600_000;
@@ -49,6 +50,12 @@ export function editEvent(calendars: Calendar[], existing: CalEvent | null, onSa
     desc: h('textarea', { rows: 3, placeholder: 'Add description', 'aria-label': 'Description' }),
   };
   f.desc.value = existing?.description ?? '';
+  // New timed events start with the default alert from Settings.
+  const defaultAlerts = (all: boolean): Alert[] => {
+    const m = store.state.settings?.default_alert_minutes;
+    return m == null || all ? [] : [{ minutes_before: m }];
+  };
+  const alerts = alertsPicker(existing ? existing.alerts ?? [] : defaultAlerts(isAllDay), () => f.allDay.checked, defaultAlerts);
   const repeat = repeatPicker(existing?.rrule ?? null, () => ({ date: f.startDate.value, time: f.startTime.value, zone, allDay: f.allDay.checked }));
 
   const zoneRow = h('div.ev-zone', f.zone, icon('chevronDown', 16));
@@ -73,6 +80,7 @@ export function editEvent(calendars: Calendar[], existing: CalEvent | null, onSa
   };
   const refresh = () => {
     repeat.refresh();
+    alerts.refresh();
     const all = f.allDay.checked;
     for (const t of times) t.hidden = all;
     zoneRow.hidden = all;
@@ -140,6 +148,7 @@ export function editEvent(calendars: Calendar[], existing: CalEvent | null, onSa
       location: f.location.value.trim(),
       description: f.desc.value,
       attendees,
+      alerts: alerts.value(),
     } as CalEvent;
     try {
       if (existing) await api.updateEvent(ev);
@@ -162,6 +171,7 @@ export function editEvent(calendars: Calendar[], existing: CalEvent | null, onSa
       h('div.ev-opts', h('label.row.inline', f.allDay, 'All day'), zoneRow),
       hint),
     line('refresh', 'Repeat', repeat.el),
+    line('bell', 'Alerts', alerts.el),
     line('location', 'Location', locationRow),
     line('user', 'Guests', f.attendees),
     line('calendar', 'Calendar', f.cal, hasGuests && h('div.muted.small', 'Events with guests stay in their calendar, so guests aren’t sent a cancellation.')),

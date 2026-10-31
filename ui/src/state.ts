@@ -29,6 +29,8 @@ interface AppState {
   selectedThread: string | null;
   /** Contact for the Contacts view to show next. */
   selectedContact: string | null;
+  /** Event occurrence for the Calendar view to open next. */
+  selectedEvent: { id: string; start: string } | null;
   /** Settings section to open next. */
   settingsSection: SettingsSection | null;
   myEmails: Set<string>;
@@ -48,6 +50,7 @@ class Store {
     source: { kind: 'role', role: 'inbox', label: 'Inbox' },
     selectedThread: null,
     selectedContact: null,
+    selectedEvent: null,
     settingsSection: null,
     myEmails: new Set(),
     favorites: new Set(),

@@ -11,6 +11,7 @@ import type {
   AuditEntry,
   CalEvent,
   Calendar,
+  CalendarAlert,
   Contact,
   Credential,
   Draft,
@@ -95,6 +96,10 @@ export const api = {
   updateEvent: (event: CalEvent) => call<CalEvent>('update_event', { event }),
   deleteEvent: (event_id: Id) => call('delete_event', { event_id }),
   respondToInvite: (event_id: Id, response: PartStat) => call('respond_to_invite', { event_id, response }),
+  listAlerts: () => call<CalendarAlert[]>('list_alerts'),
+  snoozeAlert: (alert_id: Id, until: string) => call('snooze_alert', { alert_id, until }),
+  /** `null` dismisses every open alert. */
+  dismissAlert: (alert_id: Id | null) => call('dismiss_alert', { alert_id }),
   respondToEmailInvite: (message_id: Id, response: PartStat) => call<{ ok: boolean; via: string }>('respond_to_email_invite', { message_id, response }),
   suggestLocations: (query: string) => call<PlaceSuggestion[]>('suggest_locations', { query }),
   findFreeTime: (from: string, to: string, duration_minutes: number, timezone: string) =>

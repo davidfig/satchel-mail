@@ -70,6 +70,7 @@ pub(crate) fn from_markdown(store: &Store, text: &str) -> Result<DroppedProposal
                 organizer: None,
                 status: EventStatus::Confirmed,
                 my_status: None,
+                alerts: None,
             };
             if fm.str("start").is_none() {
                 bail!("missing `start:`");

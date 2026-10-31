@@ -10,6 +10,8 @@ pub struct SerializeOpts<'a> {
     pub exdates: &'a [DateTime<Utc>],
     /// Raw VEVENT blocks (overrides) to carry over unchanged.
     pub extra_components: &'a [String],
+    /// Raw VALARM blocks to put in the event, after those for `e.alerts`.
+    pub alarms: &'a [String],
 }
 
 
@@ -72,8 +74,16 @@ pub fn serialize(e: &Event, opts: &SerializeOpts) -> String {
         ));
         lines.push(l);
     }
-    lines.push("END:VEVENT".into());
     let mut out: String = lines.iter().map(|l| fold(l)).collect();
+    for a in e.alerts.iter().flatten() {
+        out.push_str(&valarm(a.minutes_before, "DISPLAY", &[]));
+        out.push_str("\r\n");
+    }
+    for block in opts.alarms {
+        out.push_str(block.trim_end());
+        out.push_str("\r\n");
+    }
+    out.push_str("END:VEVENT\r\n");
     for block in opts.extra_components {
         out.push_str(block.trim_end());
         out.push_str("\r\n");

@@ -71,6 +71,39 @@ pub struct Event {
     /// The account owner's own participation status, if invited.
     #[serde(default)]
     pub my_status: Option<PartStat>,
+    /// Reminders that show on screen. Always set when read; on writes,
+    /// `None` keeps the stored ones (0056).
+    #[serde(default)]
+    pub alerts: Option<Vec<Alert>>,
+}
+
+/// A reminder of an event, relative to its start (0056).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Alert {
+    /// Minutes before the start; negative is after it. All-day events
+    /// count from midnight at the start of their first day.
+    pub minutes_before: i32,
+}
+
+/// An alert that has gone off and hasn't been dismissed, or (from
+/// `ListUpcomingAlerts`) one that will.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CalendarAlert {
+    /// `{event_id}:{occurrence start, ms}:{minutes_before}`: known before it goes off.
+    pub id: Id,
+    pub event_id: Id,
+    pub calendar_id: Id,
+    pub title: String,
+    pub location: String,
+    /// The occurrence the alert is for.
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub all_day: bool,
+    pub color: String,
+    pub minutes_before: i32,
+    /// When it goes off: the alert's time, or (if snoozed) the snooze's end.
+    pub due: DateTime<Utc>,
+    pub snoozed: bool,
 }
 
 fn default_status() -> EventStatus {

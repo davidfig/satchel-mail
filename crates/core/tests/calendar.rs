@@ -51,6 +51,7 @@ async fn events_with_guests_stay_in_their_calendar() {
         organizer: None,
         status: EventStatus::Confirmed,
         my_status: None,
+        alerts: None,
     };
     let mut e: Event = serde_json::from_value(engine.handle(&Caller::User, Command::CreateEvent { event: new }).await.unwrap()).unwrap();
     let home = e.calendar_id.clone();
@@ -88,6 +89,7 @@ async fn locations_come_from_history_and_only_go_online_when_allowed() {
             organizer: None,
             status: EventStatus::Confirmed,
             my_status: None,
+            alerts: None,
         };
         engine.handle(&Caller::User, Command::CreateEvent { event: e }).await.unwrap();
     }

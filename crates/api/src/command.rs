@@ -106,6 +106,15 @@ pub enum Command {
         day_end_hour: Option<u32>,
         timezone: Option<String>,
     },
+    /// Calendar alerts that have gone off and are still open, oldest first (0056).
+    ListAlerts,
+    /// Alerts that will go off by `until` (at most two weeks ahead), for a
+    /// host to schedule with the OS (0057).
+    ListUpcomingAlerts { until: DateTime<Utc> },
+    /// Show an alert again at `until`. Works on an upcoming alert too.
+    SnoozeAlert { alert_id: Id, until: DateTime<Utc> },
+    /// Dismiss one alert, or (`alert_id: null`) every open one.
+    DismissAlert { alert_id: Option<Id> },
     /// Places for an event's location: ones you've used, then (if the user
     /// turned on `look_up_places`) a lookup with the host's place service.
     SuggestLocations { query: String },

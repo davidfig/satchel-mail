@@ -1,5 +1,5 @@
-//! Background workers: the search indexer, the AI folder writer and
-//! deleting unused stored mail.
+//! Background workers: the search indexer, the AI folder writer, deleting
+//! unused stored mail and calendar alerts.
 
 use super::*;
 use std::time::Duration;
@@ -130,6 +130,35 @@ impl Engine {
             }
             drop(e);
             tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+    }
+
+    /// Sends calendar alerts as they come due (0056): sleeps until the next
+    /// one, but at most a minute (the clock may jump, as when the computer
+    /// wakes), and wakes early when calendars, settings or alerts change.
+    pub(crate) async fn alerts_worker(this: std::sync::Weak<Self>) {
+        loop {
+            let Some(e) = this.upgrade() else { return };
+            let e2 = e.clone();
+            let mut wait = Duration::from_secs(60);
+            match tokio::task::spawn_blocking(move || crate::store::background(|| e2.alerts_pass(chrono::Utc::now()))).await {
+                Ok(Ok((due, next))) => {
+                    if !due.is_empty() {
+                        e.emit(CoreEvent::AlertsChanged { due, closed: vec![] });
+                    }
+                    if let Some(n) = next.and_then(|n| (n - chrono::Utc::now()).to_std().ok()) {
+                        wait = wait.min(n + Duration::from_millis(200));
+                    }
+                }
+                Ok(Err(err)) => warn!("alerts: {err:#}"),
+                Err(_) => {}
+            }
+            let wake = e.alerts_wake.clone();
+            drop(e);
+            tokio::select! {
+                _ = tokio::time::sleep(wait) => {},
+                _ = wake.notified() => {},
+            }
         }
     }
 

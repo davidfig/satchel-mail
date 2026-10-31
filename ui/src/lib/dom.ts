@@ -205,6 +205,7 @@ const ICONS: Record<string, string> = {
   sparkle: '<path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/><path d="M15.5 13.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
   warning: '<path d="M10 3l8 14H2z"/><path d="M10 8.5v4M10 14.5v.5"/>',
   user: '<circle cx="10" cy="7" r="3.5"/><path d="M3.5 17a6.5 6.5 0 0 1 13 0"/>',
+  bell: '<path d="M5 13.5V9a5 5 0 0 1 10 0v4.5l1.5 2h-13z"/><path d="M8.5 17.5a1.5 1.5 0 0 0 3 0"/>',
   clock: '<circle cx="10" cy="10" r="7"/><path d="M10 6v4l2.5 2.5"/>',
   location: '<path d="M10 17.5s5.5-5 5.5-9a5.5 5.5 0 0 0-11 0c0 4 5.5 9 5.5 9z"/><circle cx="10" cy="8.5" r="2"/>',
   image: '<rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/><circle cx="7" cy="8" r="1.5"/><path d="M2.5 14l4-4 3 3 3-3 5 5"/>',

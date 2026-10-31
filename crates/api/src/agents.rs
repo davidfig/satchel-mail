@@ -189,6 +189,16 @@ pub struct Settings {
     /// (OpenStreetMap, or Apple Maps in the Mac app) for suggestions.
     #[serde(default)]
     pub look_up_places: bool,
+    /// Show calendar alerts (0056).
+    #[serde(default = "yes")]
+    pub calendar_alerts: bool,
+    /// The alert new timed events start with, in minutes before (None: none).
+    #[serde(default = "default_alert")]
+    pub default_alert_minutes: Option<i32>,
+}
+
+fn default_alert() -> Option<i32> {
+    Some(10)
 }
 
 fn yes() -> bool {
@@ -209,6 +219,8 @@ impl Default for Settings {
             poll_interval_secs: 120,
             notify_new_mail: true,
             look_up_places: false,
+            calendar_alerts: true,
+            default_alert_minutes: default_alert(),
         }
     }
 }

@@ -142,6 +142,7 @@ impl SatchelMcp {
                     organizer: None,
                     status: EventStatus::Confirmed,
                     my_status: None,
+                    alerts: None,
                 };
                 self.run(propose(ProposalAction::CreateEvent { event }, ids("source_thread_ids")?)).await
             }

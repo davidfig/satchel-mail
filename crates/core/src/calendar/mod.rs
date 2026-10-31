@@ -1,6 +1,8 @@
 //! Calendars: occurrence expansion and free-time search here; writes,
-//! emailed invitations and place suggestions in the submodules.
+//! alerts, emailed invitations and place suggestions in the submodules.
 
+mod alerts;
+pub use alerts::{alert_id, parse_alert_id};
 mod events;
 mod invites;
 mod places;

@@ -269,6 +269,26 @@ impl Engine {
                 self.check_calendar_access(caller)?;
                 ok(self.find_free_time(caller, from, to, duration_minutes, day_start_hour, day_end_hour, timezone.as_deref())?)
             }
+            Command::ListAlerts => {
+                self.require_user(caller)?;
+                ok(self.list_alerts()?)
+            }
+            Command::ListUpcomingAlerts { until } => {
+                self.require_user(caller)?;
+                ok(self.upcoming_alerts(chrono::Utc::now(), until)?)
+            }
+            Command::SnoozeAlert { alert_id, until } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                self.snooze_alert(&alert_id, until)?;
+                ok(json!({ "ok": true }))
+            }
+            Command::DismissAlert { alert_id } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                self.dismiss_alert(alert_id.as_deref())?;
+                ok(json!({ "ok": true }))
+            }
             Command::SuggestLocations { query } => ok(self.suggest_locations(&query).await?),
 
             // ---------------------------------------------------------- contacts

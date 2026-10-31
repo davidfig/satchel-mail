@@ -83,6 +83,10 @@ export interface Settings {
   notify_new_mail: boolean;
   /** Send what's typed in an event's location to a place service for suggestions. */
   look_up_places: boolean;
+  /** Show calendar alerts (0056). */
+  calendar_alerts: boolean;
+  /** The alert new timed events start with, in minutes before (null: none). */
+  default_alert_minutes: number | null;
 }
 
 export interface AuditEntry {

@@ -18,6 +18,7 @@ satchel-core.workspace = true
 satchel-providers.workspace = true
 satchel-mime.workspace = true
 anyhow.workspace = true
+chrono.workspace = true
 base64.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -37,6 +38,11 @@ tauri-plugin-updater = { version = "2.14.0", optional = true }
 libc = "0.2.191"
 # Which app notifications are posted as (see `main`).
 mac-notification-sys = "0.6.15"
+# Calendar alerts as scheduled system notifications with actions (0057).
+block2 = "0.6.2"
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSArray", "NSDate", "NSDictionary", "NSError", "NSObject", "NSSet", "NSString", "NSBundle"] }
+objc2-user-notifications = { version = "0.3.2", default-features = false, features = ["std", "bitflags", "block2", "UNNotification", "UNNotificationAction", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }
 
 [features]
 # Passed by `tauri build`; enables production asset embedding.

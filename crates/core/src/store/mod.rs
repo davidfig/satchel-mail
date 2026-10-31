@@ -4,6 +4,7 @@
 
 mod accounts;
 mod agents;
+mod alerts;
 mod audit;
 mod bodies;
 mod calendars;
@@ -21,6 +22,7 @@ mod tests;
 mod threads;
 mod types;
 
+pub use alerts::{AlertRow, AlertState};
 pub use bodies::StoredBlob;
 pub use types::*;
 
@@ -239,7 +241,7 @@ fn open_conn(path: &Path) -> Result<Connection> {
 /// The schema version `schema.sql` creates. To change the schema, edit
 /// `schema.sql` to the new shape, bump this, and append to [`MIGRATIONS`] the
 /// SQL that takes a database from the previous version to this one.
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` database to version `i + 2`.
 const MIGRATIONS: &[&str] = &[
@@ -254,6 +256,17 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE events ADD COLUMN location TEXT NOT NULL DEFAULT '';",
     // 6: favorite senders (0053).
     "CREATE TABLE IF NOT EXISTS favorite_senders (email TEXT PRIMARY KEY, created_at INTEGER NOT NULL);",
+    // 7: calendar alerts that have gone off (0056).
+    "CREATE TABLE IF NOT EXISTS calendar_alerts (
+         id TEXT PRIMARY KEY,
+         event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+         occurrence INTEGER NOT NULL,
+         occurrence_end INTEGER NOT NULL,
+         minutes_before INTEGER NOT NULL,
+         due_at INTEGER NOT NULL,
+         state TEXT NOT NULL,
+         UNIQUE (event_id, occurrence, minutes_before)
+     );",
 ];
 
 /// Create or upgrade the schema, tracked in `PRAGMA user_version`.

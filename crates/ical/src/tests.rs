@@ -74,3 +74,30 @@ fn hostile_durations_do_not_panic() {
         let _ = expand(e, &[], DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC);
     }
 }
+
+#[test]
+fn alarms() {
+    let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\nDTSTART:20261105T160000Z\r\nDTEND:20261105T170000Z\r\n\
+        BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nX-WR-ALARMUID:\r\n x1\r\nEND:VALARM\r\n\
+        BEGIN:VALARM\r\nACTION:AUDIO\r\nTRIGGER;RELATED=END:-PT2H\r\nEND:VALARM\r\n\
+        BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER;VALUE=DATE-TIME:20261104T160000Z\r\nEND:VALARM\r\n\
+        BEGIN:VALARM\r\nACTION:EMAIL\r\nTRIGGER:-P1D\r\nEND:VALARM\r\nEND:VEVENT\r\n\
+        BEGIN:VEVENT\r\nUID:a\r\nRECURRENCE-ID:20261112T160000Z\r\nDTSTART:20261112T170000Z\r\nDTEND:20261112T180000Z\r\n\
+        BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:PT5M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    let c = parse(ics);
+    let minutes = |e: &ParsedEvent| e.alerts().iter().map(|a| a.minutes_before).collect::<Vec<_>>();
+    // Relative to the start, to the end (1 hour long), and at a fixed time; email doesn't show.
+    assert_eq!(minutes(&c.events[0]), [15, 60, 1440]);
+    assert_eq!(minutes(&c.events[1]), [-5], "an override has its own");
+    let blocks = alarm_blocks(ics);
+    assert_eq!(blocks.iter().map(|b| b.1).collect::<Vec<_>>(), [true, true, true, false], "the master's only");
+    assert!(blocks[0].0.contains("X-WR-ALARMUID:x1"));
+
+    // Written back: new alerts first, then the blocks kept.
+    let mut e = c.events[0].to_event("cal", None);
+    e.alerts = Some(vec![Alert { minutes_before: 0 }, Alert { minutes_before: -10 }]);
+    let kept = vec![blocks[3].0.clone()];
+    let out = serialize(&e, &SerializeOpts { alarms: &kept, ..Default::default() });
+    assert!(out.contains("TRIGGER:PT0S") && out.contains("TRIGGER:PT10M") && out.contains("ACTION:EMAIL"), "{out}");
+    assert_eq!(minutes(&parse(&out).events[0]), [0, -10]);
+}

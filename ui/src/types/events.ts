@@ -1,4 +1,5 @@
 import type { SyncStatus } from './account';
+import type { CalendarAlert } from './calendar';
 import type { Address, Id } from './common';
 
 export type CoreEvent =
@@ -14,7 +15,9 @@ export type CoreEvent =
   | { event: 'op_failed'; account_id: Id; description: string; error: string }
   | { event: 'data_changed' }
   | { event: 'notice'; level: string; message: string }
-  | { event: 'new_mail'; account_id: Id; messages: NewMail[] };
+  | { event: 'new_mail'; account_id: Id; messages: NewMail[] }
+  /** Calendar alerts changed: `due` just went off; `closed` stopped showing. */
+  | { event: 'alerts_changed'; due: CalendarAlert[]; closed: Id[] };
 
 export interface NewMail {
   message_id: Id;

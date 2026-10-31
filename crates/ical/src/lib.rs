@@ -4,8 +4,9 @@
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
-use satchel_api::{Address, Attendee, Event, EventStatus, PartStat};
+use satchel_api::{Address, Alert, Attendee, Event, EventStatus, PartStat};
 
+mod alarm;
 mod event;
 mod itip;
 mod lines;
@@ -16,6 +17,7 @@ mod tests;
 mod time;
 pub mod vcard;
 
+pub use alarm::*;
 pub use event::*;
 pub use itip::*;
 use lines::*;

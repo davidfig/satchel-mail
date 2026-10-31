@@ -13,6 +13,7 @@ import { lockWheelAxis, swipePager } from '../lib/swipe';
 import { calendarMenu, eventMenu, slotMenu } from './calendar-menus';
 import type { CalendarActions } from './calendar-menus';
 import { eventRepeatText } from '../lib/repeat-text';
+import { alertLabel } from '../lib/alerts';
 
 type Mode = 'day' | 'week' | 'month' | 'agenda';
 const MODES: Mode[] = ['day', 'week', 'month', 'agenda'];
@@ -124,6 +125,10 @@ export class CalendarView {
     store.onEvent((e) => {
       if ((e.event === 'calendar_changed' || e.event === 'data_changed') && store.state.view === 'calendar') void this.load();
     });
+    // Another part of the app asked to open an event (an alert's "Open").
+    store.subscribe((s, changed) => {
+      if (changed.has('selectedEvent') && s.selectedEvent && s.view === 'calendar') this.show();
+    });
     const s = 'calendar';
     bind('t', 'Today', () => this.goTo(new Date()), s);
     bind('j', 'Next period', () => this.step(1), s);
@@ -147,6 +152,8 @@ export class CalendarView {
 
   show() {
     this.placeNext = true;
+    const wanted = store.state.selectedEvent;
+    if (wanted) this.anchor = this.mode === 'week' ? startOfWeek(new Date(wanted.start)) : startOfDay(new Date(wanted.start));
     void this.load();
   }
 
@@ -292,6 +299,13 @@ export class CalendarView {
     }
     if (strip) this.stripFrom = from;
     this.render();
+    const wanted = store.state.selectedEvent;
+    if (wanted) {
+      store.set({ selectedEvent: null });
+      const o = this.occurrences.find((x) => x.event.id === wanted.id && new Date(x.start).getTime() === new Date(wanted.start).getTime());
+      if (o) this.details(o);
+      else toast('That event is no longer in your calendar', { kind: 'error' });
+    }
   }
 
   /** What to load: the neighbouring periods too, so they show while swiping. */
@@ -539,6 +553,7 @@ export class CalendarView {
       h('div', icon('clock', 16), ` ${new Date(o.start).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} · ${timeRange(o.start, o.end, e.all_day)}`),
       e.rrule && h('div.muted.small', eventRepeatText(e)),
       e.location && h('div', icon('location', 16), ` ${e.location}`),
+      !!e.alerts?.length && h('div.small', icon('bell', 16), ` ${e.alerts.map((a) => alertLabel(a.minutes_before, e.all_day)).join(', ')}`),
       cal && h('div.muted.small', h('span.swatch', { style: { background: cal.color } }), ` ${cal.name}`),
       e.organizer && h('div.small', `Organizer: ${e.organizer.name ?? e.organizer.email}`),
       e.attendees.length > 0 && h('ul.attendees', e.attendees.map((a) => h('li', h(`span.rsvp.${a.status}`), a.name ?? a.email, h('span.muted.small', ` ${a.status.replace('_', ' ')}`)))),

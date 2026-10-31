@@ -111,6 +111,8 @@
 .ev-when input[type=time][hidden] { display: none; }
 .ev-when:has(input[type=time][hidden]) { grid-template-columns: auto minmax(0, 1fr); }
 .ev-opts { display: flex; align-items: center; gap: 14px; }
+.ev-alerts { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.ev-alert { display: flex; align-items: center; gap: 4px; }
 .ev-opts > label { font-size: 13px; color: var(--text-2); flex: none; }
 .ev-location { display: flex; align-items: center; gap: 4px; }
 .ev-location > input { flex: 1; min-width: 0; }

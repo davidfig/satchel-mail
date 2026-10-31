@@ -4,7 +4,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(target_os = "macos")]
+mod mac_alerts;
+#[cfg(target_os = "macos")]
 mod menu;
+mod notify;
 
 use std::sync::Arc;
 
@@ -283,6 +286,11 @@ fn main() {
                     }
                 }
             });
+            // Calendar alerts scheduled with macOS (0057), when running as an app.
+            #[cfg(target_os = "macos")]
+            if mac_alerts::available() {
+                mac_alerts::start(app.handle(), engine.clone());
+            }
             app.manage(AppState { engine, _lock: lock });
             // Built here, not from the config, so we can catch popups. WebKit
             // runs no listeners in the script-less message iframe, so its links
@@ -310,9 +318,26 @@ fn main() {
                 })
                 .build()?;
             save_window_state_on_change(&window);
+            #[cfg(target_os = "macos")]
+            window.on_window_event(|e| {
+                if let tauri::WindowEvent::Focused(f) = e {
+                    mac_alerts::set_focused(*f);
+                }
+            });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![api, open_url, save_file, open_file, choose_folder, cli_path])
+        .invoke_handler(tauri::generate_handler![
+            api,
+            open_url,
+            save_file,
+            open_file,
+            choose_folder,
+            cli_path,
+            notify::os_alerts,
+            notify::can_notify,
+            notify::notify,
+            notify::take_open_request
+        ])
         .run(tauri::generate_context!())
         .expect("error while running satchel.email");
 }

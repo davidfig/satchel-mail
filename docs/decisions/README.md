@@ -60,3 +60,5 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0053 | [Favorite senders: a local list of addresses, highlighted everywhere](0053-favorite-senders.md) | Accepted |
 | 0054 | [View attachments in the app; Open and Save beside it](0054-attachment-viewer.md) | Accepted |
 | 0055 | [Name: satchel.email](0055-name-satchel-email.md) | Accepted |
+| 0056 | [Calendar alerts: VALARMs in the stored event, fired by the core](0056-calendar-alerts.md) | Accepted |
+| 0057 | [Calendar alerts scheduled with macOS](0057-calendar-alerts-in-macos.md) | Accepted |

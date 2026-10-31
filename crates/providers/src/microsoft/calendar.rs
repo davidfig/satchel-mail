@@ -70,6 +70,11 @@ pub fn graph_to_ics(e: &Value, calendar_id: &str, owner: &str) -> Option<String>
         organizer,
         status: if e["isCancelled"] == true { EventStatus::Cancelled } else if e["showAs"] == "tentative" { EventStatus::Tentative } else { EventStatus::Confirmed },
         my_status: None,
+        // Outlook has one reminder per event.
+        alerts: Some(match (e["isReminderOn"] == true, e["reminderMinutesBeforeStart"].as_i64().and_then(|m| i32::try_from(m).ok())) {
+            (true, Some(m)) => vec![Alert { minutes_before: m }],
+            _ => vec![],
+        }),
     };
     Some(satchel_ical::serialize(&ev, &Default::default()))
 }
@@ -178,7 +183,36 @@ fn ics_to_graph(ics: &str) -> Option<(Value, Option<PartStat>, Option<String>)> 
         && let Some(rec) = rrule_to_graph(r, m.start_utc(), &tz) {
             body["recurrence"] = rec;
         }
+    if let Some(o) = body.as_object_mut() {
+        o.extend(reminder(m));
+    }
     Some((body, None, m.organizer.as_ref().map(|o| o.email.clone())))
+}
+
+/// The first alert as Outlook's one reminder (0056).
+fn reminder(m: &satchel_ical::ParsedEvent) -> serde_json::Map<String, Value> {
+    let first = m.alerts().first().map(|a| a.minutes_before.max(0));
+    let mut o = serde_json::Map::new();
+    o.insert("isReminderOn".into(), json!(first.is_some()));
+    if let Some(m) = first {
+        o.insert("reminderMinutesBeforeStart".into(), json!(m));
+    }
+    o
+}
+
+/// The reminder fields of `body` that differ from `server`'s, if any.
+fn changed_reminder(body: &Value, server: &Value) -> Option<Value> {
+    let on = body["isReminderOn"] == true;
+    let same = on == (server["isReminderOn"] == true) && (!on || body["reminderMinutesBeforeStart"] == server["reminderMinutesBeforeStart"]);
+    (!same).then(|| {
+        let mut o = serde_json::Map::new();
+        for k in ["isReminderOn", "reminderMinutesBeforeStart"] {
+            if let Some(v) = body.get(k) {
+                o.insert(k.into(), v.clone());
+            }
+        }
+        Value::Object(o)
+    })
 }
 
 /// The Graph response action for our status in `ics`, if it differs from
@@ -218,6 +252,11 @@ fn trim_unchanged(patch: &mut Value, server: &Value) {
     if people(&o["attendees"]) == people(&server["attendees"]) {
         o.remove("attendees");
     }
+    if changed_reminder(patch, server).is_none()
+        && let Some(o) = patch.as_object_mut() {
+            o.remove("isReminderOn");
+            o.remove("reminderMinutesBeforeStart");
+        }
 }
 
 impl GraphCalendarProvider {
@@ -335,12 +374,17 @@ impl CalendarProvider for GraphCalendarProvider {
                     }
                     Some(id) => {
                         let server = self
-                            .get(&format!("{ME}/events/{}?$select=bodyPreview,location,attendees,changeKey,isOrganizer,responseStatus,seriesMasterId,type", crate::net::enc(id)), "get event")
+                            .get(&format!("{ME}/events/{}?$select=bodyPreview,location,attendees,changeKey,isOrganizer,responseStatus,seriesMasterId,type,isReminderOn,reminderMinutesBeforeStart", crate::net::enc(id)), "get event")
                             .await?;
                         // Outlook knows whose meeting it is; the organizer's address
                         // may be an alias of the account's.
                         if !server["isOrganizer"].as_bool().unwrap_or(i_organize) {
                             self.respond(&server, id, ics).await?;
+                            // The reminder is ours to set, even on someone else's meeting.
+                            if let Some(r) = changed_reminder(&body, &server) {
+                                let v = self.api.json(|h, t| with_prefs(h.patch(format!("{ME}/events/{}", crate::net::enc(id)))).bearer_auth(t).json(&r), "update reminder").await?;
+                                out.event_etag = v["changeKey"].as_str().map(String::from);
+                            }
                             out.event_remote_id = Some(id.clone());
                             return Ok(out);
                         }
@@ -448,5 +492,20 @@ mod tests {
         let mut changed = json!({ "body": { "content": "New agenda" }, "location": { "displayName": "Room 5" }, "attendees": [] });
         trim_unchanged(&mut changed, &server);
         assert!(changed.get("body").is_some() && changed.get("location").is_some() && changed.get("attendees").is_some());
+    }
+
+    #[test]
+    fn one_reminder_each_way() {
+        let e = json!({ "id": "E1", "subject": "1:1", "start": { "dateTime": "2026-03-01T15:00:00", "timeZone": "UTC" }, "end": { "dateTime": "2026-03-01T15:30:00", "timeZone": "UTC" },
+            "isReminderOn": true, "reminderMinutesBeforeStart": 15 });
+        let ics = graph_to_ics(&e, "cal", "me@x.test").unwrap();
+        assert_eq!(satchel_ical::parse(&ics).events[0].alerts(), [Alert { minutes_before: 15 }]);
+        let (body, _, _) = ics_to_graph(&ics).unwrap();
+        assert_eq!((body["isReminderOn"].clone(), body["reminderMinutesBeforeStart"].clone()), (json!(true), json!(15)));
+        // Unchanged, the reminder stays out of a PATCH; changed, it's all that's sent for someone else's meeting.
+        assert!(changed_reminder(&body, &e).is_none());
+        let off = graph_to_ics(&json!({ "subject": "1:1", "start": e["start"], "end": e["end"], "isReminderOn": false }), "cal", "me@x.test").unwrap();
+        let (off, _, _) = ics_to_graph(&off).unwrap();
+        assert_eq!(changed_reminder(&off, &e), Some(json!({ "isReminderOn": false })));
     }
 }

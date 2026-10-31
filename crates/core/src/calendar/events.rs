@@ -49,6 +49,10 @@ impl Engine {
         if !e.attendees.is_empty() && e.organizer.is_none() {
             e.organizer = Some(Address { name: Some(acc.display_name.clone()), email: acc.email.clone() });
         }
+        // Agents and older clients don't say: new timed events get the default alert.
+        if e.alerts.is_none() {
+            e.alerts = Some(self.settings().default_alert_minutes.filter(|_| !e.all_day).map(|m| Alert { minutes_before: m }).into_iter().collect());
+        }
         let ics = satchel_ical::serialize(&e, &Default::default());
         let parsed = satchel_ical::parse(&ics);
         let range = crate::calendar::series_range(&parsed.events);
@@ -189,8 +193,12 @@ impl Engine {
 }
 
 /// `e` as iCalendar, keeping what the editor doesn't show from the stored
-/// copy: its UID, cancelled dates and changed occurrences, with the sequence
-/// bumped. Also returns the span the series covers.
+/// copy: its UID, cancelled dates, changed occurrences and alarms, with the
+/// sequence bumped. Also returns the span the series covers.
+///
+/// Alarms set elsewhere survive the edit untouched (with properties we don't
+/// model) unless `e.alerts` changes them; then new ones replace those that
+/// show, and email alarms stay (0056).
 fn rewrite_ics(stored: &crate::store::StoredEvent, e: &mut Event) -> (String, (DateTime<Utc>, DateTime<Utc>)) {
     let old = satchel_ical::parse(&stored.ics);
     let master = old.events.iter().find(|x| x.recurrence_id.is_none());
@@ -198,7 +206,15 @@ fn rewrite_ics(stored: &crate::store::StoredEvent, e: &mut Event) -> (String, (D
     let sequence = master.map(|m| m.sequence + 1).unwrap_or(1);
     e.uid = Some(stored.uid.clone());
     let overrides = if e.rrule.is_some() { satchel_ical::override_blocks(&stored.ics) } else { vec![] };
-    let ics = satchel_ical::serialize(e, &satchel_ical::SerializeOpts { sequence, exdates: &exdates, extra_components: &overrides, ..Default::default() });
-    let range = crate::calendar::series_range(&satchel_ical::parse(&ics).events);
+    let old_alerts = master.map(|m| m.alerts()).unwrap_or_default();
+    let unchanged = e.alerts.as_ref().is_none_or(|a| *a == old_alerts);
+    let alarms: Vec<String> = satchel_ical::alarm_blocks(&stored.ics).into_iter().filter(|(_, shows)| unchanged || !shows).map(|(b, _)| b).collect();
+    if unchanged {
+        e.alerts = None;
+    }
+    let ics = satchel_ical::serialize(e, &satchel_ical::SerializeOpts { sequence, exdates: &exdates, extra_components: &overrides, alarms: &alarms, ..Default::default() });
+    let parsed = satchel_ical::parse(&ics);
+    e.alerts = Some(parsed.events.iter().find(|x| x.recurrence_id.is_none()).map(|m| m.alerts()).unwrap_or_default());
+    let range = crate::calendar::series_range(&parsed.events);
     (ics, range)
 }

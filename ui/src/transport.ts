@@ -21,6 +21,10 @@ export interface Transport {
   canNotify(ask: boolean): Promise<boolean>;
   /** Shows a system notification. `onClick` runs only where the platform reports clicks (the web). */
   notify(title: string, body: string, onClick?: () => void): void;
+  /** Whether the host schedules calendar alerts with the OS (the Mac app), so the UI shouldn't notify for them (0057). */
+  osAlerts(): Promise<boolean>;
+  /** Events an alert's notification asked to open (the Mac app). The web has none. */
+  onOpenEvent(fn: (e: { id: string; start: string }) => void): void;
   readonly kind: 'tauri' | 'http';
 }
 
@@ -92,15 +96,28 @@ class TauriTransport implements Transport {
   }
 
   async canNotify(ask: boolean) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    const granted = await invoke<boolean | null>('plugin:notification|is_permission_granted');
-    if (granted !== null || !ask) return granted === true;
-    return (await invoke<string>('plugin:notification|request_permission')) === 'granted';
+    return this.host<boolean>('can_notify', { ask });
   }
 
   notify(title: string, body: string) {
     // Desktop notifications don't report clicks; clicking one brings the app forward.
-    void import('@tauri-apps/api/core').then(({ invoke }) => invoke('plugin:notification|notify', { options: { title, body } }));
+    void this.host('notify', { title, body });
+  }
+
+  private os: Promise<boolean> | undefined;
+  osAlerts() {
+    this.os ??= this.host<boolean>('os_alerts').catch(() => false);
+    return this.os;
+  }
+
+  onOpenEvent(fn: (e: { id: string; start: string }) => void) {
+    void import('@tauri-apps/api/event').then(({ listen }) => listen<{ id: string; start: string }>('satchel://open-event', (msg) => {
+      // Taken, so it isn't opened again at the next start.
+      void this.host('take_open_request');
+      fn(msg.payload);
+    }));
+    // One clicked while the app was quit, before this was listening.
+    void this.host<{ id: string; start: string } | null>('take_open_request').then((e) => { if (e) fn(e); });
   }
 }
 
@@ -142,6 +159,14 @@ class HttpTransport implements Transport {
 
   onFullscreen() {
     // The browser's full screen has no title bar to leave room for.
+  }
+
+  async osAlerts() {
+    return false;
+  }
+
+  onOpenEvent() {
+    // Web notifications report clicks themselves (see `notify`).
   }
 
   private connecting = false;

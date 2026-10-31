@@ -74,6 +74,8 @@ pub struct Engine {
     /// Held while the AI folder is written or moved, so a move can't race a write.
     pub(crate) mirror_lock: Mutex<()>,
     pub(crate) contacts_wake: Arc<Notify>,
+    /// Wakes the alerts worker: calendars, settings or alerts changed.
+    pub(crate) alerts_wake: Arc<Notify>,
     /// Accounts whose address books sync on the next pass ("Sync now").
     pub(crate) contacts_due: Mutex<std::collections::HashSet<String>>,
     pub(crate) correspondents: Mutex<Option<(std::time::Instant, Arc<crate::mail::spam::Correspondents>)>>,
@@ -158,6 +160,7 @@ impl Engine {
             mirror_wake: Arc::new(Notify::new()),
             mirror_lock: Mutex::new(()),
             contacts_wake: Arc::new(Notify::new()),
+            alerts_wake: Arc::new(Notify::new()),
             contacts_due: Mutex::new(Default::default()),
             correspondents: Mutex::new(None),
             contact_files: Mutex::new(HashMap::new()),
@@ -180,6 +183,9 @@ impl Engine {
     pub(crate) fn emit(&self, e: CoreEvent) {
         if matches!(e, CoreEvent::ContactsChanged) {
             self.contacts_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if matches!(e, CoreEvent::CalendarChanged { .. } | CoreEvent::DataChanged) {
+            self.alerts_wake.notify_one();
         }
         let _ = self.events.send(e);
     }
@@ -207,6 +213,7 @@ impl Engine {
         w.push(tokio::spawn(Self::mirror_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::contacts_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::blob_worker(Arc::downgrade(self))));
+        w.push(tokio::spawn(Self::alerts_worker(Arc::downgrade(self))));
     }
 
     pub fn shutdown(&self) {

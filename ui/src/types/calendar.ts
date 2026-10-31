@@ -35,6 +35,33 @@ export interface CalEvent {
   organizer?: Address | null;
   status: EventStatus;
   my_status?: PartStat | null;
+  /** Reminders that show on screen. Always set when read; null on a write keeps the stored ones (0056). */
+  alerts?: Alert[] | null;
+}
+
+/** A reminder of an event, relative to its start. */
+export interface Alert {
+  /** Minutes before the start; negative is after. All-day events count from midnight on their first day. */
+  minutes_before: number;
+}
+
+/** An alert that has gone off and hasn't been dismissed. */
+export interface CalendarAlert {
+  /** `{event_id}:{occurrence start, ms}:{minutes_before}`: known before it goes off. */
+  id: Id;
+  event_id: Id;
+  calendar_id: Id;
+  title: string;
+  location: string;
+  /** The occurrence the alert is for. */
+  start: ISODate;
+  end: ISODate;
+  all_day: boolean;
+  color: string;
+  minutes_before: number;
+  /** When it goes off: the alert's time, or (if snoozed) the snooze's end. */
+  due: ISODate;
+  snoozed: boolean;
 }
 
 export interface Occurrence {

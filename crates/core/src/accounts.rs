@@ -23,6 +23,11 @@ impl Engine {
         self.store.set_setting("settings", &s)?;
         let mirror_changed = serde_json::to_string(&old.mirror)? != serde_json::to_string(&s.mirror)?;
         *self.settings.write().unwrap() = s.clone();
+        self.alerts_wake.notify_one();
+        if old.calendar_alerts != s.calendar_alerts {
+            // Hosts reschedule (or take down) the alerts they gave the OS.
+            self.emit(CoreEvent::AlertsChanged { due: vec![], closed: vec![] });
+        }
         if mirror_changed {
             if !s.mirror.enabled {
                 let _ = crate::ai_folder::remove_dir_all(&new_root, &new_root.join("mail"));

@@ -50,6 +50,17 @@
 .toast.error { background: #5a1d1d; }
 .toast.success { background: #1d4a31; }
 .toast.leaving { opacity: 0; transition: opacity .3s; }
+/* Calendar alerts (app/alerts.ts), bottom right: under modals, which they would otherwise cover. */
+.alert-stack { position: fixed; bottom: 16px; right: 16px; z-index: 55; display: flex; flex-direction: column; gap: 8px; width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; }
+.alert-stack[hidden] { display: none; }
+.alert-all { display: flex; align-items: center; justify-content: space-between; padding: 0 4px; }
+.alert-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--ev, var(--accent)); border-radius: 10px; box-shadow: var(--shadow); padding: 10px 10px 10px 12px; display: flex; flex-direction: column; gap: 4px; animation: rise .18s; }
+.alert-head { display: flex; align-items: center; gap: 8px; color: var(--text-3); }
+.alert-title { flex: 1; min-width: 0; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alert-when { font-size: 13px; }
+.alert-where { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alert-actions { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.alert-actions button { gap: 4px; }
 @keyframes rise { from { transform: translateY(8px); opacity: 0; } }
 .fatal { padding: 60px; text-align: center; }
 .link-address { font: 12.5px var(--mono); overflow-wrap: anywhere; max-height: 8em; overflow: auto; padding: 6px 8px; background: var(--panel-2); border-radius: 6px; user-select: all; }

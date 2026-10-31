@@ -129,6 +129,7 @@ async fn event_proposals_show_attendee_changes_and_keep_their_uid() {
         organizer: None,
         status: EventStatus::Confirmed,
         my_status: None,
+        alerts: None,
     };
     let stored: Event = serde_json::from_value(engine.handle(&Caller::User, Command::CreateEvent { event: new.clone() }).await.unwrap()).unwrap();
 
@@ -264,6 +265,7 @@ async fn agents_can_never_run_write_commands() {
         organizer: None,
         status: EventStatus::Confirmed,
         my_status: None,
+        alerts: None,
     };
     let writes = vec![
         Command::Send { draft: send_draft(&account) },
@@ -384,6 +386,7 @@ async fn an_out_of_scope_event_looks_like_a_missing_one() {
         organizer: None,
         status: EventStatus::Confirmed,
         my_status: None,
+        alerts: None,
     };
     let stored: Event = serde_json::from_value(engine.handle(&Caller::User, Command::CreateEvent { event: event.clone() }).await.unwrap()).unwrap();
     let foreign = stored.id.clone().unwrap();

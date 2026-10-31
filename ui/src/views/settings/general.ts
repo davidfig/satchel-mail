@@ -2,6 +2,7 @@
 
 import { api } from '../../api';
 import { debounce, h, patch } from '../../lib/dom';
+import { TIMED_ALERTS, alertLabel } from '../../lib/alerts';
 import { fullDate, relative } from '../../lib/format';
 import { errorToast, toast } from '../../lib/ui';
 import { applyTheme, store } from '../../state';
@@ -104,6 +105,19 @@ export function general(view: SettingsView, el: HTMLElement) {
       },
     },
   });
+  const alertsOn = h('input', {
+    type: 'checkbox',
+    checked: s.calendar_alerts,
+    on: {
+      change: async (e: Event) => {
+        const on = (e.currentTarget as HTMLInputElement).checked;
+        if (on && !(await transport.canNotify(true))) toast('Notifications are turned off for Satchel, so alerts only show in the app. Allow them in your system or browser settings.', { kind: 'error', ms: 7000 });
+        save({ calendar_alerts: on });
+      },
+    },
+  });
+  const defaultAlert = h('select', { on: { change: (e: Event) => save({ default_alert_minutes: optional(value(e)) }) } },
+    [['', 'None'], ...TIMED_ALERTS.map((m) => [String(m), alertLabel(m, false)])].map(option(s.default_alert_minutes)));
   patch(el,
     h('h1', 'General'),
     h('div.form',
@@ -112,7 +126,9 @@ export function general(view: SettingsView, el: HTMLElement) {
       field('Keep downloading in the background', background, 'Older mail downloads when you open it. Attachments always download only when you open them.'),
       field('Storage limit per account', limit, 'Over the limit, the content of the oldest mail is removed (it stays listed and searchable, and downloads again when opened).'),
       field('Check for new mail every (seconds)', poll, 'Accounts with push (IMAP IDLE, JMAP) update instantly.'),
-      h('label.row.inline', notify, 'Show a notification when new mail arrives in an inbox (only while you’re in another app)')));
+      h('label.row.inline', notify, 'Show a notification when new mail arrives in an inbox (only while you’re in another app)'),
+      h('label.row.inline', alertsOn, 'Show calendar alerts (and a notification while you’re in another app)'),
+      field('Default alert for new events', defaultAlert, 'For events you create here. Alerts are saved with each event, so your other devices use them too.')));
 }
 
 export async function activity(view: SettingsView, el: HTMLElement) {

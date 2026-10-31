@@ -181,6 +181,20 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_range ON events(range_start, range_end);
 CREATE INDEX IF NOT EXISTS events_uid ON events(account_id, uid);
 
+-- Calendar alerts that have gone off (0056): one row per event, occurrence
+-- (start, ms) and alert, so each goes off once. `state` is due, snoozed or
+-- dismissed; `due_at` is when it went off, or when a snooze ends.
+CREATE TABLE IF NOT EXISTS calendar_alerts (
+    id             TEXT PRIMARY KEY,
+    event_id       TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    occurrence     INTEGER NOT NULL,
+    occurrence_end INTEGER NOT NULL,
+    minutes_before INTEGER NOT NULL,
+    due_at         INTEGER NOT NULL,
+    state          TEXT NOT NULL,
+    UNIQUE (event_id, occurrence, minutes_before)
+);
+
 -- People. `origin` is auto (generated from mail and untouched by the user),
 -- local (created or edited here) or remote (from a server address book).
 -- Deleted contacts stay as tombstones, with their addresses, so automatic
