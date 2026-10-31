@@ -366,6 +366,16 @@ Monday at 10 works for me. Talk then!</span>
             <p class="fine">Also on Linux: a <a href="https://github.com/davidfig/satchel-mail/releases/latest/download/satchel.email-linux-x64.deb">.deb package</a>. Just the <code>satchel</code> command line, for servers and agents: <a href="https://github.com/davidfig/satchel-mail/releases/latest">every release</a>. Or <a href="https://github.com/davidfig/satchel-mail#quick-start-development">build it from source</a>.</p>
           </div>
           <p class="fine">Then point your agent at <code>~/Satchel</code>, or <a href="mcp.html">connect it over MCP</a>.</p>
+
+          <!-- Early release: remove each item when Google and Microsoft approve the app (docs/RELEASING.md). -->
+          <div class="notice" id="early">
+            <b>Early release: what works today</b>
+            <ul>
+              <li><b>Fastmail, iCloud and any IMAP or JMAP server:</b> everything, including calendars and contacts.</li>
+              <li><b>Gmail:</b> Google is still reviewing satchel.email's access to Gmail, so signing in with Google is open only to a small group of early testers for now. Until then, you can add Gmail under <i>Other (IMAP/SMTP)</i> with a <a href="https://myaccount.google.com/apppasswords">Google app password</a>. That gives you mail; Google Calendar and Contacts arrive with Google's approval.</li>
+              <li><b>Microsoft 365 and Outlook:</b> signing in works, but Microsoft labels the app "unverified" until its review is done, and some workplaces need an admin to approve it first.</li>
+            </ul>
+          </div>
         </section>
       </article>
     </main>
@@ -373,9 +383,11 @@ Monday at 10 works for me. Talk then!</span>
     <footer class="foot gutter">
       <span>satchel.email</span>
       <span class="foot-links">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
         <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
-        <a href="https://github.com/davidfig/satchel-mail/blob/main/SECURITY.md">Security</a>
-        <a href="https://github.com/davidfig/satchel-mail/blob/main/TRADEMARKS.md">Trademarks</a>
+        <a href="security.html">Security</a>
+        <a href="trademarks.html">Trademarks</a>
       </span>
     </footer>
   </body>

@@ -1,0 +1,6 @@
+Contact: mailto:hello@satchel.email
+Contact: https://github.com/davidfig/satchel-mail/security/advisories/new
+Expires: 2027-10-31T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://satchel.email/.well-known/security.txt
+Policy: https://satchel.email/security.html

@@ -497,3 +497,16 @@ p { margin: 0 0 14px; }
 .get-note { color: var(--text-2); font-size: 14px; }
 .get-others { margin: 4px 0 6px; font-size: 14px; }
 .get-all .downloads { margin-top: 10px; }
+
+/* A note that something isn't finished yet. */
+.notice { margin-top: 18px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--warn, #b7791f) 45%, var(--line-2)); border-left: 4px solid var(--warn, #b7791f); border-radius: 8px; background: var(--panel); font-size: 0.95rem; }
+.notice > b { display: block; margin-bottom: 6px; }
+.notice ul { margin: 0; padding-left: 1.1em; }
+.notice li { margin-bottom: 6px; color: var(--text-2); }
+.notice li b { color: var(--text); }
+
+/* Legal pages: a reading column. */
+.legal { max-width: 46rem; }
+.legal > section { margin-top: 40px; }
+.legal h2 { font-size: 1.5rem; }
+.legal .plain li { color: var(--text); }

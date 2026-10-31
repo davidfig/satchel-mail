@@ -85,3 +85,15 @@ added.
 Each build job ends with **Check signatures**: `codesign`, `stapler` and
 `spctl` on the Mac app and CLI, and `Get-AuthenticodeSignature` on the Windows
 installer and CLI. A build without keys says it's unsigned and moves on.
+
+## The website
+
+`site/` is plain HTML with no build. Cloudflare serves it straight from this
+repository: Workers & Pages → Create → Import a repository → this repo, with
+no build command, the root directory `site`, and production branch `main`.
+Every push to `main` deploys, and other branches get preview URLs. Attach
+`satchel.email` (and `www`) as custom domains on the project.
+
+Cloudflare reads two files from the folder: `_headers` (the security headers,
+including the hash of the inline theme script in every page; its comment says
+how to recompute it) and `404.html`.

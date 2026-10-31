@@ -1,0 +1,8 @@
+# Read by Cloudflare when it serves this folder; not served itself.
+# The script hash is the theme script inlined at the top of every page. If that script changes, recompute it:
+#   python3 -c "import re,hashlib,base64;s=re.search(r'<script>(.*?)</script>',open('index.html').read(),re.S).group(1);print(base64.b64encode(hashlib.sha256(s.encode()).digest()).decode())"
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-uiIsivswLM/Fakv2sDDzZzx3R2So0HRFp8tnnOToeOM='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), browsing-topics=()
