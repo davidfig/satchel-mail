@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { DOMParser } from 'linkedom';
-import { followHref, followTarget, linkScheme, looksDesigned, planFold, routeLinks, stripHtmlQuotes, trimUrl } from '../src/lib/thread.ts';
+import { followHref, followTarget, linkScheme, looksDesigned, planFold, routeLinks, stripHtmlQuotes, threadMarkdown, trimUrl } from '../src/lib/thread.ts';
+import type { MessageDetail } from '../src/types/index.ts';
 
 globalThis.DOMParser = DOMParser as unknown as typeof globalThis.DOMParser;
 
@@ -229,5 +230,32 @@ describe('linkScheme', () => {
     assert.equal(linkScheme('http://x.test'), 'web');
     assert.equal(linkScheme('mailto:a@x.test'), 'mail');
     for (const u of ['javascript:alert(1)', 'data:text/html,x', 'file:///etc/passwd', 'ftp://x.test', '//x.test', '']) assert.equal(linkScheme(u), null);
+  });
+});
+
+describe('threadMarkdown', () => {
+  const msg = (over: Partial<MessageDetail>): MessageDetail => ({
+    id: 'm1', account_id: 'a', thread_id: 't', subject: 'Lunch', from: { name: 'Bob', email: 'bob@satchel.test' }, to: [{ name: null, email: 'alice@satchel.test' }],
+    date: '2026-10-30T12:00:00Z', snippet: 'snip', flags: { seen: true, flagged: false, answered: false, draft: false }, mailbox_ids: [], has_attachments: false,
+    cc: [], bcc: [], reply_to: [], message_id_header: null, in_reply_to: null, references: [], text_body: 'Hi', html_body: null,
+    remote_images_blocked: false, remote_images_allowed: false, attachments: [], body_pending: false, ...over,
+  } as MessageDetail);
+
+  test('fences each body and lists who it was from and to', () => {
+    const md = threadMarkdown('Lunch', [msg({ text_body: 'Noon?' })]);
+    assert.match(md, /^# Lunch\n/);
+    assert.match(md, /## Bob <bob@satchel.test>/);
+    assert.match(md, /- to: alice@satchel.test/);
+    assert.match(md, /```text\nNoon\?\n```/);
+  });
+
+  test('trims quoted history in a thread, keeps it for one message', () => {
+    const reply = msg({ id: 'm2', text_body: 'Sure.\n\nOn Mon, Bob wrote:\n> Noon?' });
+    assert.ok(!threadMarkdown('Lunch', [msg({}), reply]).includes('> Noon?'));
+    assert.ok(threadMarkdown('Lunch', [reply]).includes('> Noon?'));
+  });
+
+  test('a body with backticks gets a longer fence', () => {
+    assert.match(threadMarkdown('x', [msg({ text_body: 'run ```ls```' })]), /````text\nrun ```ls```\n````/);
   });
 });

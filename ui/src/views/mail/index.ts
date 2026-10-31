@@ -260,6 +260,7 @@ export class MailView {
     bind('a', 'Reply all', () => this.replyBox?.focus('reply_all'), s, reading);
     bind('f', 'Forward', () => void this.reply('forward'), s, reading);
     bind('v', 'Move to…', () => { const b = this.reader.querySelector<HTMLElement>('[aria-label="Move"]'); if (b) this.moveMenu(b); }, s, reading);
+    bind('y', 'Copy conversation for AI', () => { if (this.openThread) actions.copyThread(this.openThread); }, s, reading);
     bind('/', 'Search', () => { this.searchInput.focus(); this.searchInput.select(); }, s);
     bind('Escape', 'Close conversation', () => { store.set({ selectedThread: null }); this.renderEmptyReader(); this.renderRows(); this.scroller.focus(); }, s);
     commandSource(() => actions.paletteCommands(this), s);

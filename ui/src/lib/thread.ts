@@ -143,3 +143,36 @@ export function routeLinks(html: string, origin: string, cautious: boolean): str
   }
   return changed ? doc.body.innerHTML : html;
 }
+
+/**
+ * A conversation as Markdown, for pasting into an AI chat. Each body is fenced
+ * so the sender's text can't pass itself off as another message. With
+ * `trimQuotes`, a reply loses the quoted history the earlier messages already show.
+ */
+export function threadMarkdown(subject: string, msgs: MessageDetail[], trimQuotes = msgs.length > 1): string {
+  const addrs = (list: Address[]) => list.map((a) => (a.name?.trim() ? `${a.name.trim()} <${a.email}>` : a.email)).join(', ');
+  const out = [`# ${subject.trim() || '(no subject)'}`, ''];
+  for (const m of msgs) {
+    out.push(`## ${m.from ? addrs([m.from]) : '(unknown sender)'}`, '');
+    out.push(`- date: ${new Date(m.date).toString()}`);
+    if (m.to.length) out.push(`- to: ${addrs(m.to)}`);
+    if (m.cc.length) out.push(`- cc: ${addrs(m.cc)}`);
+    if (m.subject.trim() && m.subject !== subject) out.push(`- subject: ${m.subject.trim()}`);
+    const atts = m.attachments.filter((a) => !a.inline).map((a) => a.filename);
+    if (atts.length) out.push(`- attachments: ${atts.join(', ')}`);
+    if (m.invite) out.push(`- calendar invitation: ${m.invite.title}`);
+    if (m.flags.draft) out.push('- draft, not sent');
+    if (m.body_pending) out.push('- body not downloaded yet; this is only a preview');
+    let body = (m.body_pending ? m.snippet : m.text_body).trim();
+    if (trimQuotes) body = splitQuote(body)[0] || body;
+    out.push('', fenced(body), '');
+  }
+  return out.join('\n');
+}
+
+/** `s` in a code fence longer than any run of backticks inside it. */
+function fenced(s: string): string {
+  const longest = Math.max(0, ...(s.match(/`+/g) ?? []).map((r) => r.length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return `${fence}text\n${s}\n${fence}`;
+}

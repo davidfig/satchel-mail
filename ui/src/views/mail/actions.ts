@@ -5,7 +5,8 @@ import { h } from '../../lib/dom';
 import { shortName } from '../../lib/format';
 import { folderDialog } from '../../lib/folders';
 import { favoriteItem, openPerson } from '../../lib/person';
-import { confirmDialog, errorToast, popupMenu, toast } from '../../lib/ui';
+import { confirmDialog, copyText, errorToast, popupMenu, toast } from '../../lib/ui';
+import { threadMarkdown } from '../../lib/thread';
 import type { Command, MenuItem } from '../../lib/ui';
 import { store } from '../../state';
 import type { Mailbox, MessageDetail, Thread, ThreadSummary, UnsubscribeEmail } from '../../types';
@@ -256,6 +257,12 @@ export function moreMenu(view: MailView, anchor: HTMLElement, thread: Thread) {
     { label: 'Forward', icon: 'forward', hint: 'f', run: () => void view.reply('forward') },
     ...(sender ? [favoriteItem([sender])] : []),
     '-',
+    { label: 'Copy for AI', icon: 'copy', hint: 'y', run: () => copyThread(thread) },
     { label: 'View source', icon: 'draft', run: () => void viewSource(lastMsg.id) },
   ]);
+}
+
+/** Copies a conversation as Markdown, to paste into an AI chat. */
+export function copyThread(thread: Thread) {
+  copyText(threadMarkdown(thread.subject, thread.messages), 'Copied the conversation');
 }

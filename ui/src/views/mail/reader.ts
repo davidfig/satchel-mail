@@ -10,7 +10,7 @@ import type { Address, Mailbox, Thread, ThreadSummary } from '../../types';
 import { editDraft, openComposer } from './composer';
 import { Conversation, mineFor } from './conversation';
 import { ReplyBox } from './reply-box';
-import { BLOCK_TIP, isJunk } from './actions';
+import { BLOCK_TIP, copyThread, isJunk } from './actions';
 import type { MailView } from './index';
 
 export function renderEmptyReader(view: MailView) {
@@ -135,6 +135,7 @@ async function renderThread(view: MailView, thread: Thread, seq: number) {
         h('button.icon-btn', { title: 'Archive (e)', 'aria-label': 'Archive', on: { click: () => void view.act('archive') } }, icon('archive')),
         h('button.icon-btn', { title: 'Delete (#)', 'aria-label': 'Delete', on: { click: () => void view.act('trash') } }, icon('trash')),
         h('button.icon-btn', { title: 'Mark unread (u)', 'aria-label': 'Mark unread', on: { click: () => void view.act('unread') } }, icon('mail')),
+        h('button.icon-btn', { title: 'Copy conversation for AI (y)', 'aria-label': 'Copy for AI', on: { click: () => copyThread(thread) } }, icon('copy')),
         h('button.icon-btn', { title: 'Move to… (v)', 'aria-label': 'Move', on: { click: (e: MouseEvent) => view.moveMenu(e.currentTarget as HTMLElement) } }, icon('folder')),
         h('button.icon-btn', { title: 'More', 'aria-label': 'More actions', on: { click: (e: MouseEvent) => view.moreMenu(e.currentTarget as HTMLElement, thread) } }, icon('more'))),
       labels.length > 0 && h('div.labels', labels.map((m) => h('span.label-chip', m.name)))),

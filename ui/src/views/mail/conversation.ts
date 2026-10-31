@@ -4,11 +4,11 @@ import { api } from '../../api';
 import { h, icon, replace } from '../../lib/dom';
 import { domainOf, fullDate, shortName } from '../../lib/format';
 import { avatarLink, openPerson, personLink } from '../../lib/person';
-import { contextMenu, errorToast, popupMenu } from '../../lib/ui';
+import { contextMenu, copyText, errorToast, popupMenu } from '../../lib/ui';
 import type { MenuItem } from '../../lib/ui';
 import { store } from '../../state';
 import type { Address, MessageDetail, ReplyMode, Thread } from '../../types';
-import { looksDesigned, planFold, stripHtmlQuotes } from '../../lib/thread';
+import { looksDesigned, planFold, stripHtmlQuotes, threadMarkdown } from '../../lib/thread';
 import { attachments } from './attachments';
 import { draftBanner, htmlFrame, inviteCard, textBody, viewSource, warnings } from './message-body';
 
@@ -134,6 +134,7 @@ export class Conversation {
       { label: 'Forward', icon: 'forward', run: () => this.onReply('forward', m.id) },
       '-',
       ...(swap ? [{ label: 'Show original formatting', icon: 'image', run: swap }] : []),
+      { label: 'Copy for AI', icon: 'copy', run: () => copyText(threadMarkdown(this.thread.subject, [m]), 'Copied the message') },
       { label: 'View source', icon: 'draft', run: () => void viewSource(m.id) },
       ...(this.canUnsubscribe(m) ? [{ label: 'Unsubscribe', icon: 'close', run: () => this.opts.onUnsubscribe!(m) }] : []),
       ...(m.from && !this.mine(m.from) ? ['-' as const, { label: `All mail with ${shortName(m.from)}`, icon: 'user', run: () => openPerson(m.from!) }] : []),

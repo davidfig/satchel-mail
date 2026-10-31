@@ -86,10 +86,14 @@ export function errorToast(e: unknown) {
   toast(e instanceof Error ? e.message : String(e), { kind: 'error', ms: 7000 });
 }
 
+/** Puts `text` on the clipboard and says so (`done` is the toast). */
+export function copyText(text: string, done = 'Copied') {
+  void navigator.clipboard.writeText(text).then(() => toast(done, { quiet: true }), errorToast);
+}
+
 /** Text to paste elsewhere (a token, a command, a prompt) with a Copy button beside it. */
 export function copyBlock(text: string, tag = 'pre.snippet'): HTMLElement {
-  const copy = () => void navigator.clipboard.writeText(text).then(() => toast('Copied', { quiet: true }), errorToast);
-  return h('div.copy-row', h(tag, text), h('button', { title: 'Copy to clipboard', on: { click: copy } }, icon('copy', 16), 'Copy'));
+  return h('div.copy-row', h(tag, text), h('button', { title: 'Copy to clipboard', on: { click: () => copyText(text) } }, icon('copy', 16), 'Copy'));
 }
 
 // ---------------------------------------------------------------- modal
