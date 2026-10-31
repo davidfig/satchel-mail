@@ -88,11 +88,13 @@ installer and CLI. A build without keys says it's unsigned and moves on.
 
 ## The website
 
-`site/` is plain HTML with no build. Cloudflare serves it straight from this
-repository: Workers & Pages → Create → Import a repository → this repo, with
-no build command, the root directory `site`, and production branch `main`.
-Every push to `main` deploys, and other branches get preview URLs. Attach
-`satchel.email` (and `www`) as custom domains on the project.
+`site/` is plain HTML with no build. Cloudflare Pages serves it straight from
+this repository: Workers & Pages → Create → **Pages** → Connect to Git → this
+repo, with framework preset None, no build command, build output directory
+`site`, and production branch `main`. Every push to `main` deploys, and other
+branches get preview URLs. Attach `satchel.email` and `www.satchel.email` as
+custom domains on the project; the zone is in the same Cloudflare account, so
+Cloudflare adds the web records and certificate itself.
 
 Cloudflare reads two files from the folder: `_headers` (the security headers,
 including the hash of the inline theme script in every page; its comment says
