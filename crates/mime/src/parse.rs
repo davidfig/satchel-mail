@@ -24,6 +24,10 @@ pub struct Parsed {
     /// The topmost Authentication-Results header (added by the receiving server).
     pub auth_results: Option<String>,
     pub unsubscribe: Option<Unsubscribe>,
+    /// Headers mark it as list or machine-sent mail (see `bulk_headers()`).
+    pub bulk_headers: bool,
+    /// The body has a helpdesk "reply above this line" marker (see `reply_marker()`).
+    pub reply_marker: bool,
 }
 
 impl Parsed {
@@ -144,6 +148,7 @@ pub fn parse(raw: &[u8]) -> Option<Parsed> {
         let from_domain = from.as_ref().map(|f| base_domain(&email_domain(&f.email))).unwrap_or_default();
         e.other_domain = base_domain(&email_domain(&e.to)) != from_domain;
     }
+    let reply_marker = reply_marker(&text);
     Some(Parsed {
         subject: msg.subject().unwrap_or("").trim().to_string(),
         from,
@@ -161,8 +166,34 @@ pub fn parse(raw: &[u8]) -> Option<Parsed> {
         calendar_parts,
         snippet,
         auth_results: header("Authentication-Results"),
+        bulk_headers: bulk_headers(&header),
+        reply_marker,
         unsubscribe,
     })
+}
+
+/// Helpdesks (Zendesk, Jira, GovQA, …) start each message with a line like
+/// "##- Please type your reply above this line -##" so they can cut the
+/// quote off your answer. It means the sender expects a reply, even though
+/// the mail is machine-sent.
+pub(crate) fn reply_marker(text: &str) -> bool {
+    text.lines().take(200).any(|line| {
+        let line = line.to_lowercase();
+        let Some(at) = line.find("above this line") else { return false };
+        let before = &line[..at];
+        let says_reply = ["reply", "respond", "type", "write"].iter().any(|w| before.contains(w));
+        says_reply && !before.contains("not ") && !before.contains("n't ")
+    })
+}
+
+/// Standard headers that mark mail as sent to a list or by a machine rather
+/// than written by a person: any List-* header (RFC 2369/2919), Precedence
+/// bulk/list/junk, or Auto-Submitted other than "no" (RFC 3834).
+pub(crate) fn bulk_headers(header: &dyn Fn(&str) -> Option<String>) -> bool {
+    let list = ["List-Id", "List-Unsubscribe", "List-Help", "List-Post", "List-Owner", "List-Archive"].iter().any(|h| header(h).is_some());
+    let precedence = header("Precedence").is_some_and(|p| matches!(p.trim().to_ascii_lowercase().as_str(), "bulk" | "list" | "junk"));
+    let auto = header("Auto-Submitted").is_some_and(|a| !a.trim().eq_ignore_ascii_case("no"));
+    list || precedence || auto
 }
 
 pub(crate) fn default_filename(mime: &str, i: usize) -> String {

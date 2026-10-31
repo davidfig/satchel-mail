@@ -4,7 +4,7 @@ import { api } from '../../api';
 import { h, icon } from '../../lib/dom';
 import { displayName, shortName } from '../../lib/format';
 import { errorToast, toast } from '../../lib/ui';
-import type { Address, Draft, Proposal, ReplyMode, Thread } from '../../types';
+import type { Draft, Proposal, ReplyMode, Thread } from '../../types';
 import { splitQuote } from '../../lib/thread';
 import { openComposer, sendWithUndo } from './composer';
 import { type Mine, mineFor } from './conversation';
@@ -13,22 +13,12 @@ import { warnings } from './message-body';
 /** Unsent inline replies by thread, so switching threads doesn't lose them. */
 const pendingText = new Map<string, string>();
 
-/** no-reply@, noreply@, do-not-reply@, donotreply@, notifications-noreply@ and the like. */
-const NO_REPLY = /(^|[._+-])(no|do[._-]?not)[._-]?reply([._+-]|$)/i;
-
-function isNoReply(a: Address | null | undefined): boolean {
-  return !!a && NO_REPLY.test(a.email.split('@')[0]);
-}
-
 /** Mail nobody expects an answer to, in a thread you've never written in: the
- *  latest message from someone else has a List-Unsubscribe header, or replies
- *  to it would go to a no-reply address. */
+ *  core marks the latest message from someone else as list or machine mail. */
 function isBulk(thread: Thread, mine: Mine): boolean {
   const theirs = thread.messages.filter((m) => !mine(m.from));
   const last = theirs[theirs.length - 1];
-  if (!last || theirs.length !== thread.messages.length) return false;
-  const replyTo = last.reply_to.length ? last.reply_to : [last.from];
-  return !!last.unsubscribe || replyTo.every(isNoReply);
+  return !!last && theirs.length === thread.messages.length && !!last.bulk;
 }
 
 /** Reply box under a conversation, open unless it's list or no-reply mail; shows an agent's pending draft when there is one. */

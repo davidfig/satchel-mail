@@ -231,6 +231,30 @@ fn mailto_domain_check() {
 }
 
 #[test]
+fn bulk_headers_mark_list_and_machine_mail() {
+    let bulk = |extra: &str| parse(format!("From: a@x.test\r\n{extra}Subject: x\r\n\r\nhi\r\n").as_bytes()).unwrap().bulk_headers;
+    assert!(!bulk(""));
+    assert!(bulk("List-Help: <https://x.test/help>\r\n"));
+    assert!(bulk("List-Id: <team.x.test>\r\n"));
+    assert!(bulk("Precedence: Bulk\r\n"));
+    assert!(!bulk("Precedence: first-class\r\n"));
+    assert!(bulk("Auto-Submitted: auto-generated\r\n"));
+    assert!(!bulk("Auto-Submitted: no\r\n"));
+}
+
+#[test]
+fn helpdesk_reply_marker() {
+    let marked = |body: &str| parse(format!("From: a@x.test\r\nSubject: x\r\n\r\n{body}\r\n").as_bytes()).unwrap().reply_marker;
+    assert!(marked("##- Please type your reply above this line -##\r\n\r\nHi David,"));
+    assert!(marked("--- Please respond above this line ---"));
+    assert!(marked("\u{2014}-\u{2014}-\u{2014} Reply above this line."));
+    assert!(!marked("Please do not reply above this line"));
+    assert!(!marked("Your statement is available. Do not reply to this email."));
+    let html = "From: a@x.test\r\nContent-Type: text/html\r\nSubject: x\r\n\r\n<p><span>##- Please type your reply above this line -##</span></p><p>Hi</p>\r\n";
+    assert!(parse(html.as_bytes()).unwrap().reply_marker);
+}
+
+#[test]
 fn many_links_convert_in_linear_time() {
     let one = |n: usize| -> String {
         (0..n).map(|i| format!(r#"<a href="https://x.test/{i}">https://x.test/{i}</a> <a href="https://y.test/{i}">y</a> "#)).collect()

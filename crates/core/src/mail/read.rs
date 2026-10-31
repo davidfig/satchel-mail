@@ -153,12 +153,14 @@ impl Engine {
         let mut invite = None;
         let mut warnings = vec![];
         let mut unsubscribe = None;
+        let (mut bulk_headers, mut reply_marker) = (false, false);
         let (text, html, blocked, attachments) = match &raw {
             Some(r) => {
                 let p = satchel_mime::parse(r).unwrap_or_default();
                 invite = self.invite_from(&m.summary.account_id, &p);
                 warnings = self.message_warnings(&m, &p, invite.as_ref());
                 unsubscribe = p.unsubscribe.clone();
+                (bulk_headers, reply_marker) = (p.bulk_headers, p.reply_marker);
                 // Anyone can put a trusted sender's address in From, so the
                 // sender's allowance only counts for mail that isn't forged.
                 allow_remote = force_remote || load_all || (sender_allowed && self.sender_verified(&m.summary.account_id, &p));
@@ -175,6 +177,8 @@ impl Engine {
             }
             None => (m.summary.snippet.clone(), None, false, recheck(&m.attachments)),
         };
+        let reply_target = if m.reply_to.is_empty() { m.summary.from.iter().collect::<Vec<_>>() } else { m.reply_to.iter().collect() };
+        let bulk = !reply_marker && (bulk_headers || (!reply_target.is_empty() && reply_target.iter().all(|a| crate::contacts::is_machine_address(&a.email))));
         Ok(MessageDetail {
             summary: m.summary,
             cc: m.cc,
@@ -192,6 +196,7 @@ impl Engine {
             invite,
             warnings,
             unsubscribe,
+            bulk,
             sender_verdict,
         })
     }

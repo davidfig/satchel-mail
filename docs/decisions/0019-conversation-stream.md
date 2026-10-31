@@ -26,6 +26,12 @@ The reader renders a thread as a stream (`ui/src/views/conversation.ts`):
   external agent has a pending draft proposal for the thread, the box shows it
   for editing; sending approves the proposal. Satchel itself has no AI
   features (see 0006, 0007).
+- Later amendment: in a thread you haven't written in, the box starts as a
+  "Reply" button when the core marks the latest message `bulk`: List-*,
+  `Precedence: bulk|list|junk` or `Auto-Submitted` headers, or a machine
+  reply address (no-reply, tokenized `reply-…@`). A helpdesk "reply above
+  this line" marker in the body overrides all of these, since the sender is
+  asking for an answer (Zendesk sets `Auto-Submitted` on ticket replies).
 - The HTML sanitizer keeps `div id` and `blockquote type` so Outlook and Apple
   Mail quote markers survive for folding.
 

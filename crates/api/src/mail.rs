@@ -169,6 +169,11 @@ pub struct MessageDetail {
     /// How to unsubscribe, from the List-Unsubscribe header.
     #[serde(default)]
     pub unsubscribe: Option<Unsubscribe>,
+    /// List or machine-sent mail nobody expects a reply to: its headers say
+    /// so, or replies would go to a no-reply or tokenized machine address —
+    /// unless the body has a helpdesk "reply above this line" marker.
+    #[serde(default)]
+    pub bulk: bool,
     /// The user's standing verdict on the sender, if any.
     #[serde(default)]
     pub sender_verdict: Option<SenderVerdict>,

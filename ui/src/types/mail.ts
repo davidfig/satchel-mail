@@ -110,6 +110,8 @@ export interface MessageDetail {
   invite?: Invite | null;
   warnings?: MessageWarning[];
   unsubscribe?: Unsubscribe | null;
+  /** List or machine-sent mail nobody expects a reply to (headers or a no-reply/tokenized reply address), unless it has a helpdesk "reply above this line" marker. */
+  bulk?: boolean;
   sender_verdict?: SenderVerdict | null;
 }
 
