@@ -88,7 +88,7 @@ added.
 ## Checking a build
 
 Each build job ends with **Check signatures**: `codesign`, `stapler` and
-`spctl` on the Mac app and CLI, and `Get-AuthenticodeSignature` on the Windows
+`spctl` on the Mac DMG, the app inside it and the CLI, and `Get-AuthenticodeSignature` on the Windows
 installer and CLI. A build without keys says it's unsigned and moves on.
 
 ## The website

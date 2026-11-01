@@ -171,8 +171,10 @@ jobs:
         shell: bash
         run: scripts/release.sh
 
-      # Tauri signed the copy of satchel inside the app; the standalone one is signed here.
-      - name: Sign the standalone CLI
+      # Tauri signed the copy of satchel inside the app; the standalone one is signed here. Tauri notarizes the app but
+      # only signs the DMG around it, so the DMG is notarized and stapled here too, letting Gatekeeper check the
+      # download itself, offline as well.
+      - name: Sign the standalone CLI, notarize the DMG
         shell: bash
         run: |
           r="target/$TARGET/release"
@@ -183,6 +185,9 @@ jobs:
               if [[ -n "$APPLE_API_KEY_PATH" ]]; then auth=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
               else auth=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"); fi
               xcrun notarytool submit "$RUNNER_TEMP/satchel.zip" "${auth[@]}" --wait
+              dmg="$(ls "$r"/bundle/dmg/*.dmg)"
+              xcrun notarytool submit "$dmg" "${auth[@]}" --wait
+              xcrun stapler staple "$dmg"
             fi
           elif [[ "$RUNNER_OS" == Windows && -n "$WINDOWS_SIGNED" ]]; then
             artifact-signing-cli -e "$SIGN_ENDPOINT" -d "satchel CLI" "$r/satchel.exe"
@@ -197,10 +202,21 @@ jobs:
           case "$RUNNER_OS" in
             macOS)
               [[ -z "$APPLE_SIGNING_IDENTITY" ]] && { echo "unsigned"; exit 0; }
-              app="$(ls -d "$r"/bundle/macos/*.app)"
+              # Tauri deletes bundle/macos/*.app once the DMG is built, so check the app inside the DMG we ship.
+              dmg="$(ls "$r"/bundle/dmg/*.dmg)"
+              mnt="$(mktemp -d)"
+              hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg" > /dev/null
+              trap 'hdiutil detach "$mnt" > /dev/null' EXIT
+              app="$(ls -d "$mnt"/*.app)"
               codesign --verify --deep --strict --verbose=2 "$app"
+              codesign --verify --strict --verbose=2 "$dmg"
               codesign --verify --strict --verbose=2 "$r/satchel"
-              if [[ -n "$APPLE_API_KEY_PATH$APPLE_ID" ]]; then xcrun stapler validate "$app"; spctl -a -vv -t exec "$app"; fi ;;
+              if [[ -n "$APPLE_API_KEY_PATH$APPLE_ID" ]]; then
+                xcrun stapler validate "$app"
+                xcrun stapler validate "$dmg"
+                spctl -a -vv -t exec "$app"
+                spctl -a -vv -t open --context context:primary-signature "$dmg"
+              fi ;;
             Windows)
               [[ -z "$WINDOWS_SIGNED" ]] && { echo "unsigned"; exit 0; }
               # The app inside the installer is signed by the same signCommand before it's packed.

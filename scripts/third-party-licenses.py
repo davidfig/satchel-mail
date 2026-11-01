@@ -102,7 +102,7 @@ FULL_TEXTS = {
 
 
 def host_triple():
-    out = subprocess.run(['rustc', '-vV'], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(['rustc', '-vV'], capture_output=True, text=True, encoding='utf-8', check=True).stdout
     return re.search(r'^host: (.+)$', out, re.M).group(1)
 
 
@@ -110,7 +110,7 @@ def crates(triple):
     """(name, version, license, authors, dir) for every third-party crate the roots link, for triple."""
     meta = json.loads(subprocess.run(
         ['cargo', 'metadata', '--format-version', '1', '--locked', '--filter-platform', triple],
-        cwd=ROOT, capture_output=True, text=True, check=True).stdout)
+        cwd=ROOT, capture_output=True, text=True, encoding='utf-8', check=True).stdout)
     packages = {p['id']: p for p in meta['packages']}
     nodes = {n['id']: n for n in meta['resolve']['nodes']}
     todo = [pid for pid, p in packages.items() if p['name'] in ROOTS]
@@ -132,9 +132,9 @@ def crates(triple):
 
 def npm_packages():
     ui = ROOT / 'ui'
-    for name in sorted(json.loads((ui / 'package.json').read_text()).get('dependencies', {})):
+    for name in sorted(json.loads((ui / 'package.json').read_text(encoding='utf-8')).get('dependencies', {})):
         pkg = ui / 'node_modules' / name
-        manifest = json.loads((pkg / 'package.json').read_text())
+        manifest = json.loads((pkg / 'package.json').read_text(encoding='utf-8'))
         author = manifest.get('author') or f'the {name} authors'
         if isinstance(author, dict):
             author = author.get('name', name)
@@ -168,7 +168,7 @@ def main():
         if not files:
             unfiled.append((line, license, authors))
         for f in files:
-            add(texts, f.read_text(errors='replace').strip(), f'{line}: {f.name}')
+            add(texts, f.read_text(encoding='utf-8', errors='replace').strip(), f'{line}: {f.name}')
 
     missing = []
     for line, license, authors in unfiled:
@@ -183,7 +183,7 @@ def main():
             missing.append(line)
 
     rule = '=' * 78
-    with open(args.out, 'w') as out:
+    with open(args.out, 'w', encoding='utf-8') as out:
         out.write('satchel.email is licensed under the GNU Affero General Public License v3.0\n'
                   '(see LICENSE in the source). It includes the following third-party\n'
                   f'software, each under its own license. {count} packages, built for {triple}.\n')

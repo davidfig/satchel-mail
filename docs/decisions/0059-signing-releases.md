@@ -18,7 +18,8 @@ from this repository.
 - **Mac:** a Developer ID Application certificate (Apple Developer Program),
   imported into a keychain the workflow owns. Tauri signs the app and its
   bundled `satchel` with hardened runtime and notarizes it; the workflow signs
-  and notarizes the standalone CLI the same way. Notarization prefers an App
+  and notarizes the standalone CLI the same way, and notarizes and staples the
+  DMG around the app. Notarization prefers an App
   Store Connect API key over an Apple ID, so CI doesn't hold your password.
 - **Windows:** Azure Artifact Signing (formerly Trusted Signing): Microsoft
   verifies the publisher and holds the key, and it costs a fraction of an OV
