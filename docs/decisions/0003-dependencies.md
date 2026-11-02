@@ -34,6 +34,7 @@ Current third-party dependencies and why:
 | lettre | SMTP submission |
 | reqwest, rustls, tokio-rustls, rustls-native-certs, url | HTTP/TLS for JMAP, CalDAV, Gmail, Graph, OAuth, and place lookups (0050) |
 | quick-xml | WebDAV/CalDAV XML |
+| mail-auth (aws-lc-rs only), hickory-resolver | DKIM verification and the DNS lookups it needs, for accounts whose server's Authentication-Results can't be trusted (0061). Security-critical crypto and a wire protocol; uses our mail-parser and aws-lc-rs |
 | libc (unix core, macOS desktop) | `openat`/`renameat`/`unlinkat` so the AI folder can't be tricked by symlinks swapped in mid-walk, and `setxattr` to quarantine saved attachments (0040) |
 | windows-sys (Windows core; `Win32_Foundation`, `Win32_Storage_FileSystem` only) | the Windows side of the same AI-folder safety: link counts, a handle's final path, and renaming and deleting by handle, none of which stable std exposes. Already in the tree through tokio and others, so it adds no new code |
 | objc2, objc2-foundation, objc2-map-kit (macOS only; `MKLocalSearchCompleter` and the Foundation types it uses) | Apple Maps place suggestions in the Mac app (0050). objc2 and objc2-foundation are already in the tree through Tauri, at the same versions; objc2-map-kit is the generated MapKit binding from the same project |

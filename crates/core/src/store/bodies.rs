@@ -150,4 +150,21 @@ impl Store {
             Ok(())
         })
     }
+
+    /// The domains whose DKIM signatures Satchel verified on a message;
+    /// None if it hasn't been checked.
+    pub fn dkim_pass(&self, message_id: &str) -> Result<Option<Vec<String>>> {
+        self.r(|c| {
+            let v: Option<Option<String>> = c.query_row("SELECT dkim_pass FROM messages WHERE id=?", [message_id], |r| r.get(0)).optional()?;
+            Ok(v.flatten().map(|s| s.split_whitespace().map(String::from).collect()))
+        })
+    }
+
+    /// Record the domains whose DKIM signatures verified (empty for none).
+    pub fn set_dkim_pass(&self, message_id: &str, domains: &[String]) -> Result<()> {
+        self.w(|c| {
+            c.execute("UPDATE messages SET dkim_pass=? WHERE id=?", params![domains.join(" "), message_id])?;
+            Ok(())
+        })
+    }
 }

@@ -34,6 +34,8 @@ pub struct Fake {
     pub moved_ids: Mutex<Vec<Vec<String>>>,
     /// Give moved messages a new remote id, like IMAP.
     pub rekey_moves: std::sync::atomic::AtomicBool,
+    /// How many times the host was asked to check DKIM signatures.
+    pub dkim_checks: std::sync::atomic::AtomicUsize,
     /// Raw messages handed to the server to send.
     pub sent: Mutex<Vec<Vec<u8>>>,
     /// Make sends fail as if the connection dropped before the server confirmed.
@@ -211,12 +213,22 @@ impl CalendarProvider for SharedCal {
     }
 }
 
+#[async_trait]
 impl ProviderFactory for FakeFactory {
     fn create(&self, _account: &Account, _creds: CredentialHandle) -> Result<Providers> {
         Ok(Providers { mail: Some(Arc::new(Shared(self.0.clone()))), calendar: Some(Arc::new(SharedCal(self.0.clone()))), contacts: None })
     }
     fn places(&self) -> Option<Arc<dyn PlaceSearch>> {
         Some(Arc::new(FakePlaces(self.0.clone())))
+    }
+    /// Signing domains named in an `X-Test-Dkim-Pass:` header "verify";
+    /// `X-Test-Dkim-Pass: offline` can't be checked.
+    async fn dkim_pass(&self, raw: &[u8]) -> Option<Vec<String>> {
+        self.0.dkim_checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let text = String::from_utf8_lossy(raw);
+        let head = text.split("\r\n\r\n").next().unwrap_or("");
+        let v = head.lines().find_map(|l| l.strip_prefix("X-Test-Dkim-Pass:")).map(str::trim).unwrap_or("");
+        (v != "offline").then(|| v.split_whitespace().map(String::from).collect())
     }
 }
 

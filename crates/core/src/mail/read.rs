@@ -158,12 +158,13 @@ impl Engine {
             Some(r) => {
                 let p = satchel_mime::parse(r).unwrap_or_default();
                 invite = self.invite_from(&m.summary.account_id, &p);
+                self.check_dkim(&m.summary.id, &m.summary.account_id, r).await;
                 warnings = self.message_warnings(&m, &p, invite.as_ref());
                 unsubscribe = p.unsubscribe.clone();
                 (bulk_headers, reply_marker) = (p.bulk_headers, p.reply_marker);
                 // Anyone can put a trusted sender's address in From, so the
                 // sender's allowance only counts for mail that isn't forged.
-                allow_remote = force_remote || load_all || (sender_allowed && self.sender_verified(&m.summary.account_id, &p));
+                allow_remote = force_remote || load_all || (sender_allowed && self.sender_verified(&m.summary.id, &m.summary.account_id, &p));
                 let (html, blocked) = match &p.html {
                     Some(h) => {
                         let inline = satchel_mime::inline_data_urls(r);

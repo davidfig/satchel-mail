@@ -2,9 +2,11 @@
 //! write that header into a message, so a pass only counts from the user's
 //! own server, named by the authserv-id on the topmost header (RFC 8601).
 //! Known providers have built-in ids; for other accounts the id is learned
-//! from the account's recent mail. Until then no sender counts as verified.
+//! from the account's recent mail. Until then, and for servers that write
+//! no such header, Satchel checks DKIM signatures itself (0061).
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use satchel_api::{Account, AccountConfig};
 use satchel_mime::AuthServers;
@@ -16,6 +18,8 @@ const LEARN_WINDOW: u32 = 200;
 /// Messages that must carry the same authserv-id before it is trusted. It
 /// must also be on more than half the recent messages read.
 const LEARN_MIN: usize = 20;
+/// How long opening a message waits for its own DKIM check (DNS lookups).
+const DKIM_TIMEOUT: Duration = Duration::from_secs(3);
 
 const GOOGLE: &[&str] = &["mx.google.com"];
 /// Microsoft 365 and Outlook.com mostly write no authserv-id at all.
@@ -74,10 +78,40 @@ pub(crate) fn sender_verified_by(p: &satchel_mime::Parsed, trusted: &AuthServers
     p.auth_results.as_deref().is_some_and(|a| satchel_mime::auth_verified(a, &domain, trusted))
 }
 
+/// Whether any server's Authentication-Results count for the account.
+fn any_trusted(servers: &AuthServers) -> bool {
+    !servers.ids.is_empty() || servers.no_id
+}
+
 impl Engine {
-    /// Whether the account's own server verified this message's From domain.
-    pub(crate) fn sender_verified(&self, account_id: &str, p: &satchel_mime::Parsed) -> bool {
-        p.auth_results.is_some() && sender_verified_by(p, &self.auth_servers(account_id))
+    /// Whether this message's From domain is verified: by the account's own
+    /// server or, for an account with none trusted, by a DKIM signature
+    /// Satchel checked itself (see [`Self::check_dkim`]).
+    pub(crate) fn sender_verified(&self, message_id: &str, account_id: &str, p: &satchel_mime::Parsed) -> bool {
+        let trusted = self.auth_servers(account_id);
+        (p.auth_results.is_some() && sender_verified_by(p, &trusted)) || (!any_trusted(&trusted) && self.dkim_verified(message_id, p))
+    }
+
+    /// Whether a DKIM signature Satchel verified on this message vouches for its From domain.
+    pub(crate) fn dkim_verified(&self, message_id: &str, p: &satchel_mime::Parsed) -> bool {
+        let from = p.from.as_ref().map(|f| satchel_mime::email_domain(&f.email)).unwrap_or_default();
+        let domains = self.store.dkim_pass(message_id).ok().flatten().unwrap_or_default();
+        domains.iter().any(|d| satchel_mime::dkim_aligned(d, &from))
+    }
+
+    /// For an account with no trusted server, check a message's DKIM
+    /// signatures once and keep the result: signing keys get rotated, so a
+    /// later check could fail. Unchecked (offline, slow DNS) means unverified,
+    /// and it is tried again the next time the message is opened.
+    pub(crate) async fn check_dkim(&self, message_id: &str, account_id: &str, raw: &[u8]) {
+        if any_trusted(&self.auth_servers(account_id)) || !matches!(self.store.dkim_pass(message_id), Ok(None)) {
+            return;
+        }
+        if let Ok(Some(domains)) = tokio::time::timeout(DKIM_TIMEOUT, self.factory.dkim_pass(raw)).await
+            && let Err(e) = self.store.set_dkim_pass(message_id, &domains)
+        {
+            tracing::debug!("recording DKIM result failed: {e:#}");
+        }
     }
 
     /// The servers whose Authentication-Results count for this account:

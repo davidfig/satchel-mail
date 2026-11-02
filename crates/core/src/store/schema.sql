@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS messages (
     -- authserv-id of the topmost Authentication-Results header, for learning
     -- which server to trust: NULL not read yet, '' none or unusable.
     auth_serv        TEXT,
+    -- Space-separated domains whose DKIM signatures Satchel verified itself,
+    -- for accounts with no trusted server: NULL not checked yet, '' none.
+    dkim_pass        TEXT,
     -- Local version, bumped on every change (used for proposal staleness).
     version          INTEGER NOT NULL DEFAULT 1,
     indexed          INTEGER NOT NULL DEFAULT 0,

@@ -178,6 +178,14 @@ pub fn auth_failure(auth_results: &str) -> Option<String> {
     }
 }
 
+/// Whether a DKIM signing domain vouches for a From domain: it is the From
+/// domain or a parent of it.
+pub fn dkim_aligned(signing_domain: &str, from_domain: &str) -> bool {
+    let d = signing_domain.trim().trim_start_matches('@').trim_end_matches('.').to_ascii_lowercase();
+    let from = from_domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    !d.is_empty() && !from.is_empty() && (from == d || from.ends_with(&format!(".{d}")))
+}
+
 /// Whether a trusted receiving server positively verified that the From
 /// domain sent this message: the header's authserv-id is one of `trusted`,
 /// and it says `dmarc=pass` (for this From domain, when it names one) or
@@ -193,10 +201,7 @@ pub fn auth_verified(auth_results: &str, from_domain: &str, trusted: &AuthServer
     if from.is_empty() {
         return false;
     }
-    let aligned = |d: &str| {
-        let d = d.trim().trim_start_matches('@').trim_end_matches('.');
-        !d.is_empty() && (from == d || from.ends_with(&format!(".{d}")))
-    };
+    let aligned = |d: &str| dkim_aligned(d, &from);
     let results = parse_auth_results(auth_results);
     if results.iter().any(|r| r.method == "dmarc" && r.result == "fail") {
         return false;

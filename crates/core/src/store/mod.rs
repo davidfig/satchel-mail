@@ -241,7 +241,7 @@ fn open_conn(path: &Path) -> Result<Connection> {
 /// The schema version `schema.sql` creates. To change the schema, edit
 /// `schema.sql` to the new shape, bump this, and append to [`MIGRATIONS`] the
 /// SQL that takes a database from the previous version to this one.
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` database to version `i + 2`.
 const MIGRATIONS: &[&str] = &[
@@ -267,6 +267,8 @@ const MIGRATIONS: &[&str] = &[
          state TEXT NOT NULL,
          UNIQUE (event_id, occurrence, minutes_before)
      );",
+    // 8: domains whose DKIM signatures Satchel verified itself, read lazily.
+    "ALTER TABLE messages ADD COLUMN dkim_pass TEXT;",
 ];
 
 /// Create or upgrade the schema, tracked in `PRAGMA user_version`.

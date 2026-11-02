@@ -162,11 +162,13 @@ impl Engine {
     }
 
     /// Whether a trusted server verified a downloaded message's From
-    /// domain (see `sender_verified_by`).
+    /// domain (see `sender_verified_by`), or, with no trusted server, a
+    /// DKIM signature Satchel checked when the message was opened.
     fn authentic(&self, id: &str, trusted: &satchel_mime::AuthServers) -> bool {
         let Ok(Some(m)) = self.store.message_row(id) else { return false };
         let Some(raw) = m.blob_hash.as_ref().and_then(|h| self.blobs.get(h).ok().flatten()) else { return false };
-        satchel_mime::parse(&raw).is_some_and(|p| crate::mail::trust::sender_verified_by(&p, trusted))
+        let none_trusted = trusted.ids.is_empty() && !trusted.no_id;
+        satchel_mime::parse(&raw).is_some_and(|p| crate::mail::trust::sender_verified_by(&p, trusted) || (none_trusted && self.dkim_verified(id, &p)))
     }
 
     /// Take events that spam invitations put on the calendar back off it,
@@ -298,7 +300,7 @@ impl Engine {
             // for its own link (a second brand domain, its click tracker),
             // not someone borrowing the brand.
             let own = |shown: &str| satchel_mime::base_domain(shown) == satchel_mime::base_domain(&from_domain);
-            let verified = !from_domain.is_empty() && self.sender_verified(&m.summary.account_id, p);
+            let verified = !from_domain.is_empty() && self.sender_verified(&m.summary.id, &m.summary.account_id, p);
             let links = satchel_mime::deceptive_links(h).into_iter().filter(|(shown, _)| !(verified && own(shown)));
             for (shown, actual) in links.take(2) {
                 warn(&mut out, WarningKind::DeceptiveLink, format!("A link shows {shown} but goes to {actual}."));
