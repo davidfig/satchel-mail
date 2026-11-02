@@ -21,6 +21,9 @@ sent, moved or scheduled until you approve it in AI Proposals.
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture and
 [docs/decisions/](docs/decisions/README.md) for the decisions behind it.
 
+satchel.email is free, with no ads and no subscription. If it's useful to you,
+you can [sponsor it on GitHub](https://github.com/sponsors/davidfig).
+
 ## Status: not released yet
 
 The code is open and builds today ([Quick start](#quick-start-development)),

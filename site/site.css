@@ -230,7 +230,7 @@ p { margin: 0 0 14px; }
 .cmd code { padding: 0; background: none; }
 
 .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; max-width: 64rem; margin: 0 auto; padding-block: 0 40px; color: var(--text-3); font-size: 14px; }
-.foot-links { display: flex; gap: 18px; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 8px 18px; }
 .foot a { color: var(--text-2); text-decoration: none; }
 .foot a:hover { color: var(--accent); }
 
@@ -324,6 +324,9 @@ p { margin: 0 0 14px; }
 .lic { width: 100%; margin: 4px 0 14px; border-collapse: collapse; font-size: 15px; }
 .lic th, .lic td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .lic th { color: var(--text-3); font-weight: 600; font-size: 13px; }
+.lic .num { text-align: right; white-space: nowrap; }
+.costs b { font-weight: 600; }
+.costs small { display: block; margin-top: 2px; color: var(--text-2); font-size: 14px; }
 
 .more { margin-top: 14px; font-weight: 600; }
 .more a { text-decoration: none; }
