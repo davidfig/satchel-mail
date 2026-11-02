@@ -64,8 +64,16 @@ export function renderRows(view: MailView) {
           style: { height: `${ROW_H}px` },
           dataset: { idx: String(idx) },
           on: {
+            // Shift+click selects rows, not the text between two clicks.
+            mousedown: (e: MouseEvent) => { if (e.shiftKey) e.preventDefault(); },
             click: (e: MouseEvent) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey) {
+              if (e.shiftKey) {
+                void view.extendTo(idx);
+                return;
+              }
+              if (e.metaKey || e.ctrlKey) {
+                // A later Shift+click ranges from here.
+                view.cursor = idx;
                 view.toggleSelect(t);
                 return;
               }

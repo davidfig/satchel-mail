@@ -264,7 +264,7 @@ export function commandSource(fn: CommandSource, scope = 'global') {
 }
 
 /** Keys that move around a list or close things; not worth a palette entry. */
-const NOT_COMMANDS = new Set(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Backspace', 'Delete', 'j', 'k', 'o', 'x', 'mod+k']);
+const NOT_COMMANDS = new Set(['ArrowDown', 'ArrowUp', 'shift+ArrowDown', 'shift+ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Backspace', 'Delete', 'j', 'k', 'o', 'x', 'mod+k']);
 
 /** What the palette offers now: the current view's shortcuts and commands,
  *  then the global ones. A shortcut's command shows its key. */
@@ -306,7 +306,7 @@ function keyName(e: KeyboardEvent): string {
   if (e.metaKey || e.ctrlKey) mods.push('mod');
   if (e.altKey) mods.push('alt');
   let k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  if (e.shiftKey && e.key.length === 1 && /[a-z]/i.test(e.key)) mods.push('shift');
+  if (e.shiftKey && ((e.key.length === 1 && /[a-z]/i.test(e.key)) || e.key.startsWith('Arrow'))) mods.push('shift');
   if (k === ' ') k = 'space';
   return [...mods, k].join('+');
 }

@@ -34,6 +34,8 @@ export class MailView {
   cursor = -1;
   /** Selected threads by id (kept even if their page is evicted). */
   selected = new Map<string, ThreadSummary>();
+  /** Where a Shift+Arrow range starts, and the selection from before it. */
+  private range: { anchor: number; base: Map<string, ThreadSummary> } | null = null;
   openThread: Thread | null = null;
   /** The list row of the open conversation, kept when a refresh drops it
    *  from the list (unflagged in Flagged, read under `is:unread`). */
@@ -172,6 +174,7 @@ export class MailView {
     ++this.generation;
     this.cursor = -1;
     this.selected.clear();
+    this.range = null;
     this.scroller.scrollTop = 0;
     this.renderHeader();
     await this.list.reset();
@@ -220,6 +223,7 @@ export class MailView {
   }
 
   toggleSelect(t: ThreadSummary) {
+    this.range = null;
     if (this.selected.has(t.thread_id)) this.selected.delete(t.thread_id);
     else this.selected.set(t.thread_id, t);
     this.renderHeader();
@@ -228,18 +232,51 @@ export class MailView {
 
   private async move(delta: number) {
     if (!this.list.total) return;
-    this.cursor = Math.max(0, Math.min(this.list.total - 1, this.cursor + delta));
-    const y = this.cursor * ROW_H;
-    const top = this.logicalTop();
-    if (y < top) this.scrollToIndex(this.cursor);
-    else if (y + ROW_H > top + this.scroller.clientHeight) this.scrollToIndex(this.cursor, ROW_H - this.scroller.clientHeight);
-    this.renderRows();
+    this.range = null;
+    this.moveCursor(this.cursor + delta);
     if (store.state.selectedThread) {
       const cursor = this.cursor;
       const t = await this.list.get(cursor);
       // A later keypress may have moved on while this row was fetched.
       if (t && cursor === this.cursor) void this.showThread(t.thread_id);
     }
+  }
+
+  /** Shift+Arrow or Shift+click: move the cursor to row `to` and select every
+   *  conversation from where the range started to it, on top of whatever was
+   *  selected before the range. */
+  async extendTo(to: number) {
+    if (!this.list.total) return;
+    // A cleared selection (Clear, or an action that took the rows away) starts afresh.
+    if (!this.range || !this.selected.size) {
+      if (this.cursor < 0) this.cursor = this.clamp(to);
+      this.range = { anchor: this.cursor, base: new Map(this.selected) };
+    }
+    this.moveCursor(to);
+    const { anchor, base } = this.range;
+    const cursor = this.cursor;
+    const [lo, hi] = anchor < cursor ? [anchor, cursor] : [cursor, anchor];
+    const rows = await Promise.all(Array.from({ length: hi - lo + 1 }, (_, i) => this.list.get(lo + i)));
+    // A later keypress may have moved on while rows were fetched.
+    if (cursor !== this.cursor || this.range?.base !== base) return;
+    this.selected = new Map(base);
+    for (const t of rows) if (t) this.selected.set(t.thread_id, t);
+    this.renderHeader();
+    this.renderRows();
+  }
+
+  private clamp(i: number) {
+    return Math.max(0, Math.min(this.list.total - 1, i));
+  }
+
+  /** Put the cursor on row `i`, scrolling it into view. */
+  private moveCursor(i: number) {
+    this.cursor = this.clamp(i);
+    const y = this.cursor * ROW_H;
+    const top = this.logicalTop();
+    if (y < top) this.scrollToIndex(this.cursor);
+    else if (y + ROW_H > top + this.scroller.clientHeight) this.scrollToIndex(this.cursor, ROW_H - this.scroller.clientHeight);
+    this.renderRows();
   }
 
   private async openAtCursor() {
@@ -256,6 +293,8 @@ export class MailView {
     bind('ArrowDown', 'Next conversation', () => void this.move(1), s);
     bind('k', 'Previous conversation', () => void this.move(-1), s);
     bind('ArrowUp', 'Previous conversation', () => void this.move(-1), s);
+    bind('shift+ArrowDown', 'Select next conversation too', () => void this.extendTo(this.cursor + 1), s);
+    bind('shift+ArrowUp', 'Select previous conversation too', () => void this.extendTo(this.cursor - 1), s);
     bind('Enter', 'Open conversation', () => void this.openAtCursor(), s);
     bind('o', 'Open conversation', () => void this.openAtCursor(), s);
     bind('x', 'Select conversation', () => { const t = this.list.at(this.cursor); if (t) this.toggleSelect(t); }, s);
