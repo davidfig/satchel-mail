@@ -44,7 +44,11 @@ message is read, so the UI, CLI and agents all see the same signals:
   through a known newsletter click tracker (SendGrid, Mailchimp, …;
   `crates/mime/src/trackers.rs`) don't count: the tracker hides the
   destination rather than naming a wrong one, and flagging them put the
-  warning on nearly every newsletter.
+  warning on nearly every newsletter. Nor do links whose text shows the
+  sender's own domain when the user's server verified the sender (DMARC,
+  or aligned DKIM): companies link through second brand domains and their
+  own trackers (`fidelity.com` → `click.fidelityinvestments.com`), and a
+  phisher can't pass verification for the brand they imitate.
 - an attachment can run code or imitate a sign-in page (HTML, executables,
   macro documents, disk images).
 - an invitation comes from an organizer the user has never written to.

@@ -294,7 +294,13 @@ impl Engine {
             warn(&mut out, WarningKind::AuthFailed, format!("This message {why}, so it may not really be from {domain}."));
         }
         if let Some(h) = &p.html {
-            for (shown, actual) in satchel_mime::deceptive_links(h).into_iter().take(2) {
+            // A verified sender naming its own domain is the brand vouching
+            // for its own link (a second brand domain, its click tracker),
+            // not someone borrowing the brand.
+            let own = |shown: &str| satchel_mime::base_domain(shown) == satchel_mime::base_domain(&from_domain);
+            let verified = !from_domain.is_empty() && self.sender_verified(&m.summary.account_id, p);
+            let links = satchel_mime::deceptive_links(h).into_iter().filter(|(shown, _)| !(verified && own(shown)));
+            for (shown, actual) in links.take(2) {
                 warn(&mut out, WarningKind::DeceptiveLink, format!("A link shows {shown} but goes to {actual}."));
             }
         }

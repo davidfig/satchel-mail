@@ -78,8 +78,19 @@ async fn warns_about_impersonation_and_deceptive_links() {
         List-Unsubscribe: <https://bank-secure.test/u>\r\nList-Unsubscribe-Post: List-Unsubscribe=One-Click\r\nContent-Type: text/html\r\n\r\n\
         <p><a href=\"https://bank-secure.test/login\">https://www.bank.com/login</a></p>\r\n";
     deliver(&fake, "s3", html.as_bytes().to_vec(), "INBOX");
+    // A verified sender linking its own domain through a second brand
+    // domain is fine; naming someone else's domain still warns.
+    let brand = |id: &str, shown: &str, auth: &str| {
+        format!("Authentication-Results: mx.google.com; {auth}\r\nFrom: Brand <news@mail.brand.test>\r\nTo: me@x.test\r\nSubject: News\r\n\
+            Message-ID: <{id}@x.test>\r\nDate: Tue, 20 Oct 2026 10:00:00 +0000\r\nContent-Type: text/html\r\n\r\n\
+            <p><a href=\"https://click.brandinvestments.test/x\">{shown}</a></p>\r\n").into_bytes()
+    };
+    let pass = "spf=pass smtp.mailfrom=mail.brand.test; dkim=pass header.d=brand.test; dmarc=pass header.from=mail.brand.test";
+    deliver(&fake, "s4", brand("s4", "brand.test", pass), "INBOX");
+    deliver(&fake, "s5", brand("s5", "brand.test", "spf=none; dkim=none; dmarc=none"), "INBOX");
+    deliver(&fake, "s6", brand("s6", "bank.com", pass), "INBOX");
     engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
-    wait_for(|| engine.store().message_id_by_remote(&account, "s3").ok().flatten().is_some()).await;
+    wait_for(|| engine.store().message_id_by_remote(&account, "s6").ok().flatten().is_some()).await;
 
     let get = |rid: &str| {
         let id = engine.store().message_id_by_remote(&account, rid).unwrap().unwrap();
@@ -95,6 +106,11 @@ async fn warns_about_impersonation_and_deceptive_links() {
     assert_eq!(m.warnings.len(), 1);
     assert_eq!(m.warnings[0].kind, WarningKind::DeceptiveLink);
     assert!(m.unsubscribe.as_ref().is_some_and(|u| u.one_click));
+
+    let link_warnings = |m: &MessageDetail| m.warnings.iter().filter(|w| w.kind == WarningKind::DeceptiveLink).count();
+    assert_eq!(link_warnings(&get("s4").await), 0, "a verified sender's own domain");
+    assert_eq!(link_warnings(&get("s5").await), 1, "unverified");
+    assert_eq!(link_warnings(&get("s6").await), 1, "another brand's domain");
 
     // Bob himself gets no warnings.
     assert!(get("r1").await.warnings.is_empty());
