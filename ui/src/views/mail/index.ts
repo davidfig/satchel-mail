@@ -46,6 +46,8 @@ export class MailView {
   /** Settles when the reader has shown `readerThread`. */
   readerLoad: Promise<void> = Promise.resolve();
   generation = 0;
+  /** Where clearing the search box goes back to. */
+  beforeSearch: MailSource = store.state.source.kind === 'search' ? { kind: 'role', role: 'inbox', label: 'Inbox' } : store.state.source;
 
   constructor() {
     this.spacer.appendChild(this.rows);
@@ -66,12 +68,16 @@ export class MailView {
       if (e.key === 'Enter') {
         const q = this.searchInput.value.trim();
         if (q) store.set({ source: { kind: 'search', query: q, label: `Search: ${q}` }, selectedThread: null });
-        else store.set({ source: { kind: 'role', role: 'inbox', label: 'Inbox' } });
+        else this.clearSearch();
         this.scroller.focus();
       } else if (e.key === 'Escape') {
         this.searchInput.blur();
         this.scroller.focus();
       }
+    });
+    // Emptying the box (its clear button, or deleting the text) ends the search.
+    this.searchInput.addEventListener('input', () => {
+      if (!this.searchInput.value.trim()) this.clearSearch();
     });
     let images = imageSettings();
     store.subscribe((_, changed) => {
@@ -80,6 +86,7 @@ export class MailView {
         images = imageSettings();
         if (this.readerThread) void this.showThread(this.readerThread, false, true);
       }
+      if (changed.has('source') && store.state.source.kind !== 'search') this.beforeSearch = store.state.source;
       if (changed.has('source')) void this.reload();
       // A folder renamed here or elsewhere keeps its title current, and
       // Empty Spam/Trash knows when there's nothing left.
@@ -101,6 +108,10 @@ export class MailView {
     const sel = store.state.selectedThread;
     if (sel) void this.showThread(sel, false);
     this.scroller.focus({ preventScroll: true });
+  }
+
+  private clearSearch() {
+    if (store.state.source.kind === 'search') store.set({ source: this.beforeSearch, selectedThread: null });
   }
 
   private query(): ThreadQuery {
