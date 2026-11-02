@@ -64,3 +64,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0057 | [Calendar alerts scheduled with macOS](0057-calendar-alerts-in-macos.md) | Accepted |
 | 0058 | [Licensing: AGPL app, MIT/Apache libraries, a CLA](0058-licensing.md) | Accepted |
 | 0059 | [Signed releases from CI: Developer ID, Artifact Signing, attestations](0059-signing-releases.md) | Accepted |
+| 0060 | [Full Google verification, with a yearly CASA assessment](0060-google-verification-and-casa.md) | Accepted |
