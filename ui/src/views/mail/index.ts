@@ -230,6 +230,17 @@ export class MailView {
     this.renderRows();
   }
 
+  /** Select every conversation in the list, including ones not loaded yet. */
+  async selectAll() {
+    const gen = this.generation;
+    const rows = await this.list.all();
+    if (!rows || gen !== this.generation) return;
+    this.range = null;
+    this.selected = new Map(rows.map((t) => [t.thread_id, t]));
+    this.renderHeader();
+    this.renderRows();
+  }
+
   private async move(delta: number) {
     if (!this.list.total) return;
     this.range = null;
@@ -295,6 +306,7 @@ export class MailView {
     bind('ArrowUp', 'Previous conversation', () => void this.move(-1), s);
     bind('shift+ArrowDown', 'Select next conversation too', () => void this.extendTo(this.cursor + 1), s);
     bind('shift+ArrowUp', 'Select previous conversation too', () => void this.extendTo(this.cursor - 1), s);
+    bind('mod+a', 'Select all conversations', () => void this.selectAll(), s, () => this.list.total > 0);
     bind('Enter', 'Open conversation', () => void this.openAtCursor(), s);
     bind('o', 'Open conversation', () => void this.openAtCursor(), s);
     bind('x', 'Select conversation', () => { const t = this.list.at(this.cursor); if (t) this.toggleSelect(t); }, s);

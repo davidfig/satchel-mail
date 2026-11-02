@@ -101,6 +101,16 @@ export class ThreadWindow {
     }
   }
 
+  /** Every row in the list, for Select all. Pages outside the cache are read
+   *  without caching them, so a long list doesn't evict the visible window.
+   *  Null if the list changed (new folder or search) meanwhile. */
+  async all(): Promise<ThreadSummary[] | null> {
+    const g = this.gen;
+    const pages = await Promise.all(Array.from({ length: Math.ceil(this.total / PAGE) }, (_, n) =>
+      this.pages.get(n) ?? api.listThreads({ ...this.base(), limit: PAGE, offset: n * PAGE })));
+    return g === this.gen ? pages.flat() : null;
+  }
+
   indexOf(threadId: string): number {
     for (const [n, rows] of this.pages) {
       const i = rows.findIndex((t) => t.thread_id === threadId);

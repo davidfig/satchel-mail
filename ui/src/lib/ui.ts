@@ -329,6 +329,8 @@ export function installShortcuts() {
     const typing = t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName);
     const k = keyName(e);
     if (typing && !k.startsWith('mod+') && k !== 'Escape') return;
+    // Select all in a text field selects its text.
+    if (typing && k === 'mod+a') return;
     if (document.querySelector('.modal-backdrop') && !k.startsWith('mod+')) return;
     const full = pendingPrefix ? `${pendingPrefix} ${k}` : k;
     const run = (key: string) => {
