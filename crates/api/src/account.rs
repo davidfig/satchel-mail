@@ -156,4 +156,7 @@ pub enum SyncState {
     Syncing,
     Error,
     Offline,
+    /// The provider refused the saved sign-in (expired or revoked); syncing
+    /// waits until the user signs in again.
+    SignIn,
 }

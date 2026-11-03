@@ -81,7 +81,7 @@ export class Shell {
       ...(account
         ? [
             { label: `Compose from ${account.email}`, icon: 'compose', run: () => openComposer({ account_id: account.id }) },
-            { label: 'Account settings', icon: 'settings', run: () => this.go('settings') },
+            { label: 'Account settings', icon: 'settings', run: () => store.set({ view: 'settings', settingsSection: 'accounts' }) },
           ]
         : []),
     ]);
@@ -177,7 +177,7 @@ export class Shell {
     const unread = (role: MailboxRole) => mailboxes.filter((m) => m.role === role).reduce((n, m) => n + (role === 'drafts' ? m.total : m.unread), 0);
     const syncing = accounts.filter((a) => a.sync.state === 'syncing');
     const collapsed = this.app.classList.contains('collapsed');
-    const errors = accounts.filter((a) => a.sync.state === 'error' || a.sync.state === 'offline');
+    const errors = accounts.filter((a) => a.sync.state === 'error' || a.sync.state === 'offline' || a.sync.state === 'sign_in');
     const combined = store.state.view === 'mail' && !collapsed && accounts.length > 1;
     const inboxUnread = unread('inbox');
     // Shown once there's a favorite (and while it's open, so removing the
@@ -219,7 +219,7 @@ export class Shell {
       store.state.view !== 'mail' && !collapsed && this.view(store.state.view).side,
       h('div.sidebar-foot',
         errors.length
-          ? h('button.sync-status.error', { title: errors.map((a) => `${a.email}: ${a.sync.error}`).join('\n'), on: { click: () => this.go('settings') } }, icon('warning', 14), `${errors.length} account${errors.length > 1 ? 's' : ''} need attention`)
+          ? h('button.sync-status.error', { title: errors.map((a) => `${a.email}: ${a.sync.error}`).join('\n'), on: { click: () => store.set({ view: 'settings', settingsSection: 'accounts' }) } }, icon('warning', 14), `${errors.length} account${errors.length > 1 ? 's' : ''} need attention`)
           : syncing.length
             // One row per syncing account, marked with its color.
             ? syncing.map((a) => h('div.sync-status', { title: `${a.email}: ${a.sync.detail ?? 'Syncing…'}` },
@@ -247,14 +247,14 @@ export class Shell {
   }
 
   private accountSection(a: Account, boxes: Mailbox[]) {
-    const err = a.sync.state === 'error' || a.sync.state === 'offline';
+    const err = a.sync.state === 'error' || a.sync.state === 'offline' || a.sync.state === 'sign_in';
     const open = this.openSections.has(a.id);
     const labels = boxes.some((m) => m.is_label);
     return h('div.account-section',
       h('div.mb-section-row',
         this.sectionHeader(a.id, h(`span.acct-dot${a.sync.state === 'syncing' ? '.busy' : ''}`, { style: { background: a.color } }), h('span.acct-email', a.email),
           h('span.acct-synced', { title: a.sync.last_success ? `Last synced ${fullDate(a.sync.last_success)}` : 'Not synced yet' }, relativeShort(a.sync.last_success)),
-          err ? h('span.state-dot.err', { title: a.sync.state === 'offline' ? 'Offline' : 'Sync error' }) : null),
+          err ? h('span.state-dot.err', { title: a.sync.state === 'offline' ? 'Offline' : a.sync.state === 'sign_in' ? 'Sign in again' : 'Sync error' }) : null),
         h('button.icon-btn.mb-add', { title: labels ? 'New label' : 'New folder', on: { click: () => void this.newFolder(a.id, null) } }, icon('plus', 14))),
       open && BUILT_IN.flatMap(({ role, icon: ic }) => boxes.filter((m) => m.role === role).map((m) =>
         this.sourceItem({ kind: 'mailbox', mailbox_id: m.id, label: m.name }, ic, role === 'drafts' ? m.total : role === 'all' || role === 'sent' || role === 'trash' ? 0 : m.unread))),

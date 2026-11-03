@@ -229,7 +229,7 @@ async fn main() -> Result<()> {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 let accounts = engine.store().list_accounts()?;
-                let done = accounts.iter().all(|a| (a.sync.last_success.is_some_and(|t| t > start) && a.sync.state != SyncState::Syncing) || a.sync.state == SyncState::Error);
+                let done = accounts.iter().all(|a| (a.sync.last_success.is_some_and(|t| t > start) && a.sync.state != SyncState::Syncing) || matches!(a.sync.state, SyncState::Error | SyncState::SignIn));
                 if done && engine.store().unindexed(1)?.is_empty() {
                     for a in &accounts {
                         println!("{}\t{:?}\t{}", a.email, a.sync.state, a.sync.error.clone().unwrap_or_default());

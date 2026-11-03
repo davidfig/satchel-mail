@@ -135,6 +135,7 @@ fn sync_state_str(s: SyncState) -> &'static str {
         SyncState::Syncing => "syncing",
         SyncState::Error => "error",
         SyncState::Offline => "offline",
+        SyncState::SignIn => "sign_in",
     }
 }
 
@@ -143,6 +144,7 @@ fn parse_sync_state(s: &str) -> SyncState {
         "syncing" => SyncState::Syncing,
         "error" => SyncState::Error,
         "offline" => SyncState::Offline,
+        "sign_in" => SyncState::SignIn,
         _ => SyncState::Idle,
     }
 }

@@ -133,8 +133,15 @@ impl Engine {
                 }
                 Err(e) => {
                     failures += 1;
-                    let api = crate::error::to_api(anyhow::anyhow!("{e:#}"));
-                    let state = if api.code == ErrorCode::Network { SyncState::Offline } else { SyncState::Error };
+                    // The provider's own code if it gave one ("access was
+                    // revoked" says nothing the string sniffing would catch).
+                    let code = e.chain().find_map(|c| c.downcast_ref::<satchel_api::ApiError>()).map(|a| a.code)
+                        .unwrap_or_else(|| crate::error::to_api(anyhow::anyhow!("{e:#}")).code);
+                    let state = match code {
+                        ErrorCode::Network => SyncState::Offline,
+                        ErrorCode::Auth => SyncState::SignIn,
+                        _ => SyncState::Error,
+                    };
                     warn!(account = %ctx.account.email, "sync failed: {e:#}");
                     engine.set_status(&account_id, SyncStatus { state, last_success: ctx.account.sync.last_success, error: Some(format!("{e:#}")), detail: None });
                 }

@@ -40,8 +40,11 @@ export function accounts(el: HTMLElement) {
         h('div.grow',
           h('div', h('strong', a.display_name || a.email), h('span.muted', ` ${a.email}`)),
           h('div.small.muted', `${kindLabel(a.kind)} · ${a.sync.state === 'syncing' ? a.sync.detail ?? 'Syncing…' : `Last synced ${relative(a.sync.last_success)}`}`),
-          a.sync.error && h('div.small.error', a.sync.error),
-          a.contacts_need_reconnect && h('div.small.muted', 'Contacts don’t sync yet: this sign-in predates contacts access. ',
+          a.sync.state === 'sign_in' && isOAuth(a)
+            ? h('div.small.error', `${a.kind === 'gmail' ? 'Google' : 'Microsoft'} signed Satchel out of this account, so it can’t sync. `,
+              h('button.link', { title: 'Sign in again in your browser to resume syncing', on: { click: () => void reconnect(a) } }, 'Sign in again'))
+            : a.sync.error && h('div.small.error', a.sync.error),
+          a.contacts_need_reconnect && a.sync.state !== 'sign_in' && h('div.small.muted', 'Contacts don’t sync yet: this sign-in predates contacts access. ',
             h('button.link', { title: 'Sign in again to allow Satchel to sync your contacts', on: { click: () => void reconnect(a) } }, 'Reconnect to sync contacts'))),
         h('button', { title: 'Check this account for new mail now', on: { click: () => void api.syncNow(a.id).then(() => toast('Syncing…', { quiet: true })) } }, 'Sync now'),
         h('button.danger', {
@@ -157,19 +160,23 @@ export async function oauth(p: Preset) {
   }
 }
 
-/** Sign in again to an OAuth account (e.g. to grant contacts access). */
+/** Sign in again to an OAuth account: its sign-in was revoked, or it lacks contacts access. */
 export async function reconnect(a: Account) {
+  const revoked = a.sync.state === 'sign_in';
   try {
     const { auth_url } = await api.startOAuth(a.kind);
     openExternal(auth_url);
     const m = modal(`Reconnect ${a.email}`, h('div',
-      h('p', 'Sign in again in your browser and allow access to contacts. This window updates when you’re done.'),
+      h('p', revoked
+        ? `Sign in again in your browser as ${a.email}. This window updates when you’re done.`
+        : 'Sign in again in your browser and allow access to contacts. This window updates when you’re done.'),
       h('p.small.muted', h('a', { href: auth_url, on: { click: (e: MouseEvent) => { e.preventDefault(); openExternal(auth_url); } } }, 'Open the sign-in page again'))));
     const off = store.subscribe((s, changed) => {
-      if (changed.has('accounts') && !s.accounts.find((x) => x.id === a.id)?.contacts_need_reconnect) {
+      const now = s.accounts.find((x) => x.id === a.id);
+      if (changed.has('accounts') && now && now.sync.state !== 'sign_in' && !now.contacts_need_reconnect) {
         off();
         m.close();
-        toast('Reconnected. Contacts will sync shortly.', { kind: 'success' });
+        toast(revoked ? 'Reconnected. Syncing…' : 'Reconnected. Contacts will sync shortly.', { kind: 'success' });
       }
     });
   } catch (e) {
@@ -179,6 +186,10 @@ export async function reconnect(a: Account) {
 
 function secSelect(v: Security) {
   return h('select', [['tls', 'SSL/TLS'], ['start_tls', 'STARTTLS'], ['none', 'None']].map(([val, l]) => h('option', { value: val, selected: v === val }, l)));
+}
+
+function isOAuth(a: Account) {
+  return a.kind === 'gmail' || a.kind === 'graph';
 }
 
 function kindLabel(k: ProviderKind) {

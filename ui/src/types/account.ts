@@ -27,7 +27,8 @@ export type Credential =
   | { type: 'password'; password: string }
   | { type: 'o_auth'; access_token: string; refresh_token?: string | null; expires_at?: number | null };
 
-export type SyncState = 'idle' | 'syncing' | 'error' | 'offline';
+/** `sign_in`: the provider refused the saved sign-in; the user must sign in again. */
+export type SyncState = 'idle' | 'syncing' | 'error' | 'offline' | 'sign_in';
 export interface SyncStatus {
   state: SyncState;
   last_success: ISODate | null;
