@@ -44,6 +44,5 @@ from this repository.
 - Artifact Signing's identity check has had country limits for individuals;
   if it isn't available, an OV certificate in a cloud HSM drops into the same
   `signCommand`.
-- Not covered yet: GPG-signing the AppImage or an apt repository, and the
-  Tauri updater's own update signature (`TAURI_SIGNING_PRIVATE_KEY`, already
-  supported by `scripts/release.sh`).
+- Not covered yet: GPG-signing the AppImage or an apt repository. The Tauri
+  updater's own update signature is in 0063.

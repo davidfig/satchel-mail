@@ -8,6 +8,8 @@ interface ToastOpts {
   kind?: 'info' | 'error' | 'success';
   action?: { label: string; run: () => void };
   ms?: number;
+  /** Stays until it's dismissed or its action runs, in a slot of its own that other toasts don't replace. */
+  sticky?: boolean;
   /** Only confirms what the screen already shows: flashes briefly and never replaces an error. */
   quiet?: boolean;
 }
@@ -23,11 +25,12 @@ interface Slot {
 
 // At most two toasts show: one with an action (Undo and the like), which only another action
 // toast replaces, and one plain toast, which any new plain toast replaces. Repeats of the same
-// message count up instead of stacking.
+// message count up instead of stacking. A sticky toast (an update waiting) has a third slot of its own.
 let toastHost: HTMLElement | null = null;
-const slots: { action: Slot | null; plain: Slot | null } = { action: null, plain: null };
+type SlotKey = 'action' | 'plain' | 'sticky';
+const slots: Record<SlotKey, Slot | null> = { action: null, plain: null, sticky: null };
 
-function clearSlot(key: 'action' | 'plain') {
+function clearSlot(key: SlotKey) {
   const s = slots[key];
   if (!s) return;
   s.timers.forEach(clearTimeout);
@@ -37,7 +40,7 @@ function clearSlot(key: 'action' | 'plain') {
 
 export function toast(message: string, opts: ToastOpts = {}) {
   const kind = opts.kind ?? 'info';
-  const key = opts.action ? 'action' : 'plain';
+  const key: SlotKey = opts.sticky ? 'sticky' : opts.action ? 'action' : 'plain';
   const ms = opts.ms ?? (opts.quiet ? 1800 : 4500);
   const cur = slots[key];
   if (key === 'plain' && opts.quiet && cur?.kind === 'error') return;
@@ -45,6 +48,7 @@ export function toast(message: string, opts: ToastOpts = {}) {
   const arm = (s: Slot) => {
     s.timers.forEach(clearTimeout);
     s.el.classList.remove('leaving');
+    if (opts.sticky) return void (s.timers = []);
     s.timers = [window.setTimeout(() => s.el.classList.add('leaving'), ms - 300), window.setTimeout(() => clearSlot(key), ms)];
   };
 
@@ -76,8 +80,9 @@ export function toast(message: string, opts: ToastOpts = {}) {
   );
   const slot: Slot = { el, message, kind, count: 1, label, timers: [] };
   slots[key] = slot;
-  // The action toast sits below the plain one, nearest the edge.
-  if (key === 'action') toastHost.appendChild(el);
+  // The action toast sits below the plain one, nearest the edge; a sticky one below both.
+  if (key === 'sticky') toastHost.appendChild(el);
+  else if (key === 'action') toastHost.insertBefore(el, slots.sticky?.el ?? null);
   else toastHost.insertBefore(el, toastHost.firstChild);
   arm(slot);
 }

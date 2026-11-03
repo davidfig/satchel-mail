@@ -5,6 +5,10 @@
 # Files get stable names (satchel.email-mac-arm64.dmg, …) so the site can link to
 # releases/latest/download/<name>.
 #
+# Updates (decision 0063): builds include the update feed's address and public key, and sign an update bundle for
+# each platform (the Mac .app.tar.gz, the Windows installer, the AppImage). The release gets a latest.json listing
+# them; installed apps read releases/latest/download/latest.json, so publishing the draft is what ships an update.
+#
 # Signing (docs/RELEASING.md, decision 0059): Mac builds are signed with a Developer ID and notarized, Windows builds
 # are signed with Azure Artifact Signing, and every file in a release gets a SHA256SUMS line and, once the repository
 # is public, a GitHub build attestation. Branch builds sign whatever they have keys for; a tag fails unless both Mac
@@ -16,7 +20,9 @@
 #   or APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID                              notarization
 #   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET                                  Artifact Signing app
 #   SATCHEL_GOOGLE_CLIENT_ID, SATCHEL_GOOGLE_CLIENT_SECRET, SATCHEL_MS_CLIENT_ID           sign-in (docs/OAUTH.md)
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD                          update signatures
 # Repository variables:
+#   SATCHEL_UPDATE_PUBKEY                                                                   the update key's public half
 #   AZURE_ARTIFACT_SIGNING_ENDPOINT (e.g. https://eus.codesigning.azure.net), AZURE_ARTIFACT_SIGNING_ACCOUNT,
 #   AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE
 
@@ -46,8 +52,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: mac-arm64, os: macos-latest, target: aarch64-apple-darwin, bundles: dmg }
-          - { name: mac-x64, os: macos-latest, target: x86_64-apple-darwin, bundles: dmg }
+          - { name: mac-arm64, os: macos-latest, target: aarch64-apple-darwin, bundles: 'app,dmg' }
+          - { name: mac-x64, os: macos-latest, target: x86_64-apple-darwin, bundles: 'app,dmg' }
           - { name: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, bundles: nsis }
           - { name: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bundles: 'deb,appimage' }
     env:
@@ -98,6 +104,33 @@ jobs:
           for k in SATCHEL_GOOGLE_CLIENT_ID SATCHEL_GOOGLE_CLIENT_SECRET SATCHEL_MS_CLIENT_ID; do
             if [[ -n "${!k}" ]]; then echo "$k=${!k}" >> "$GITHUB_ENV"; else echo "::warning::$k not set: that sign-in won't work in this build"; fi
           done
+
+      # The app has to match the tag, or the feed would offer it an update to itself forever.
+      - name: Version matches the tag
+        if: env.RELEASE == 'true'
+        shell: bash
+        run: |
+          v="$(python3 -c 'import json; print(json.load(open("apps/desktop/tauri.conf.json"))["version"])')"
+          [[ "v$v" == "$GITHUB_REF_NAME" ]] || { echo "::error::tauri.conf.json says $v but the tag is $GITHUB_REF_NAME"; exit 1; }
+
+      # release.sh turns on the updater when SATCHEL_UPDATE_URL is set (0063).
+      - name: Update signing
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          SATCHEL_UPDATE_PUBKEY: ${{ vars.SATCHEL_UPDATE_PUBKEY }}
+        run: |
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" || -z "$SATCHEL_UPDATE_PUBKEY" ]]; then
+            if [[ "$RELEASE" == true ]]; then echo "::error::A release needs the update signing key (docs/RELEASING.md)"; exit 1; fi
+            echo "::warning::No update key: this build won't update itself"; exit 0
+          fi
+          {
+            echo "SATCHEL_UPDATE_URL=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
+            echo "SATCHEL_UPDATE_PUBKEY=$SATCHEL_UPDATE_PUBKEY"
+            echo "TAURI_SIGNING_PRIVATE_KEY<<EOF_KEY"; echo "$TAURI_SIGNING_PRIVATE_KEY"; echo "EOF_KEY"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
 
       # The Developer ID goes into a keychain of our own (not Tauri's, which it removes after the build) so the
       # standalone CLI can be signed with it afterwards. Tauri then signs the app, and the satchel inside it, by name.
@@ -217,12 +250,18 @@ jobs:
           name="${{ matrix.name }}"
           mkdir -p out
           case "$TARGET" in
-            *apple-darwin) cp "$r"/bundle/dmg/*.dmg "out/satchel.email-$name.dmg" ;;
-            *windows*) cp "$r"/bundle/nsis/*-setup.exe "out/satchel.email-$name-setup.exe" ;;
+            *apple-darwin)
+              cp "$r"/bundle/dmg/*.dmg "out/satchel.email-$name.dmg"
+              upd="$r/bundle/macos/satchel.email.app.tar.gz"; dst="out/satchel.email-$name.app.tar.gz" ;;
+            *windows*)
+              upd="$(ls "$r"/bundle/nsis/*-setup.exe)"; dst="out/satchel.email-$name-setup.exe" ;;
             *linux*)
-              cp "$r"/bundle/appimage/*.AppImage "out/satchel.email-$name.AppImage"
-              cp "$r"/bundle/deb/*.deb "out/satchel.email-$name.deb" ;;
+              cp "$r"/bundle/deb/*.deb "out/satchel.email-$name.deb"
+              upd="$(ls "$r"/bundle/appimage/*.AppImage)"; dst="out/satchel.email-$name.AppImage" ;;
           esac
+          cp "$upd" "$dst"
+          # The update bundle's signature, when this build has the update key; latest.json is made from these.
+          if [[ -n "${SATCHEL_UPDATE_URL:-}" ]]; then cp "$upd.sig" "$dst.sig"; fi
           # The CLI on its own, with its licenses, for servers and agents.
           cli="satchel-cli-$name"
           mkdir "$cli"
@@ -252,6 +291,40 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      # The update feed: one entry per platform, pointing at this tag's files. Installed apps read it from
+      # releases/latest/download/latest.json, so it goes live when the draft is published.
+      - name: Update feed
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'EOF'
+          import datetime, json, os, pathlib
+          tag = os.environ["GITHUB_REF_NAME"]
+          dist = pathlib.Path("dist")
+          files = {
+              "darwin-aarch64": "satchel.email-mac-arm64.app.tar.gz",
+              "darwin-x86_64": "satchel.email-mac-x64.app.tar.gz",
+              "windows-x86_64": "satchel.email-windows-x64-setup.exe",
+              # Only the AppImage updates itself; .deb installs update through their package manager.
+              "linux-x86_64-appimage": "satchel.email-linux-x64.AppImage",
+          }
+          platforms = {}
+          for key, name in files.items():
+              sig = dist / f"{name}.sig"
+              if not sig.exists():
+                  raise SystemExit(f"{sig} is missing")
+              url = f"https://github.com/{os.environ['REPO']}/releases/download/{tag}/{name}"
+              platforms[key] = {"signature": sig.read_text().strip(), "url": url}
+          feed = {
+              "version": tag.removeprefix("v"),
+              "notes": f"https://github.com/{os.environ['REPO']}/releases/tag/{tag}",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms,
+          }
+          (dist / "latest.json").write_text(json.dumps(feed, indent=2) + "\n")
+          print((dist / "latest.json").read_text())
+          EOF
 
       - name: Checksums
         run: (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)

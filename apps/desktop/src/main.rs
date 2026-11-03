@@ -9,6 +9,7 @@ mod mac_alerts;
 #[cfg(target_os = "macos")]
 mod menu;
 mod notify;
+mod update;
 
 use std::sync::Arc;
 
@@ -321,6 +322,7 @@ fn main() {
                 })
                 .build()?;
             save_window_state_on_change(&window);
+            update::start(app.handle());
             #[cfg(target_os = "macos")]
             window.on_window_event(|e| {
                 if let tauri::WindowEvent::Focused(f) = e {
@@ -339,7 +341,9 @@ fn main() {
             notify::os_alerts,
             notify::can_notify,
             notify::notify,
-            notify::take_open_request
+            notify::take_open_request,
+            update::update_ready,
+            update::install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running satchel.email");

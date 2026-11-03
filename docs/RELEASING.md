@@ -22,14 +22,18 @@ release. Why it's signed this way: [0059](decisions/0059-signing-releases.md).
 4. When the workflow finishes, open the draft under Releases, check the notes
    and files, and publish it. The site's download buttons point at
    `releases/latest/download/<file>`, so they follow the newest published
-   release.
+   release, and so do installed apps: within six hours they download it and
+   offer "Restart to update" ([0063](decisions/0063-automatic-updates.md)).
+   To pull a bad release, set it back to a draft and ship a fix with a higher
+   version; apps never go back a version.
 5. **First release only:** the site hides its downloads until there is
    something behind them. In `site/index.html`, remove `data-unreleased` from
    `<section id="get">` and delete the "Not released yet" notice, and take the
    "Status: not released yet" section out of the README. Trim the "Early
    release" notice as Google and Microsoft finish their reviews.
 
-A tag fails unless the Mac and Windows signing keys below are set. To test the
+A tag fails unless the Mac and Windows signing keys and the update key below
+are set, or if its version doesn't match `tauri.conf.json`. To test the
 workflow without releasing, push a change to the workflow file on a branch, or
 run it from the Actions tab.
 
@@ -77,6 +81,25 @@ Actions.
 If Artifact Signing isn't available to you, an OV certificate in a cloud HSM
 (SSL.com eSigner, DigiCert KeyLocker) works too: change the `signCommand` the
 workflow writes to that provider's signing tool.
+
+### Updates
+
+Installed apps only accept updates signed with this key
+([0063](decisions/0063-automatic-updates.md)). Make it once:
+
+```bash
+ui/node_modules/.bin/tauri signer generate -w ~/.tauri/satchel-update.key
+```
+
+Pick a password when it asks. Then add:
+
+- secret `TAURI_SIGNING_PRIVATE_KEY`: the contents of `~/.tauri/satchel-update.key`
+- secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password
+- variable `SATCHEL_UPDATE_PUBKEY`: the contents of `~/.tauri/satchel-update.key.pub`
+
+Keep the key and password in your password manager too. If they're lost,
+every installed copy is stuck on its version until people download a new one
+by hand.
 
 ### Linux
 

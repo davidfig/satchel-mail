@@ -300,4 +300,4 @@ Each decision, including these, has its own record in [docs/decisions/](decision
 - **Proposal de-duplication** and **email-invite RSVP** (`RespondToEmailInvite`) were added.
 - **Large lists:** the thread list is a windowed cache addressed by offset, sized by `CountThreads`, holding at most 30 pages of 100; the scrollbar is compressed above 8M px so million-thread folders scroll. Refreshes re-read only the visible window and keep the top visible thread anchored. Agents page with keyset (`before` + `before_thread_id`).
 - **Search:** SQLite FTS5 instead of a tantivy index, so text search, filters, counts and paging are one query with no result cap; headers are searchable before bodies download.
-- **Updater:** behind the `updater` feature; `scripts/release.sh` enables it when an update URL and signing key are provided.
+- **Updater:** behind the `updater` feature; `scripts/release.sh` enables it when an update URL and signing key are provided. Release builds read `latest.json` from the newest GitHub release and offer the update with a toast (0063).
