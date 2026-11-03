@@ -6,14 +6,24 @@ release. Why it's signed this way: [0059](decisions/0059-signing-releases.md).
 
 ## Making a release
 
-1. Bump `version` in `apps/desktop/tauri.conf.json` (and the workspace
+1. **Review the document viewer's pin.** Compare the golemdocs commit Satchel
+   ships (`GOLEMDOCS_COMMIT` in `ui/src/lib/golemdocs.ts`) with golemdocs'
+   `main`: in a golemdocs checkout,
+   `git log <pin>..origin/main -- client/src/viewer client/src/formats client/src/layout docx pdf odt`,
+   or GitHub's compare view. If there are viewer or format fixes worth
+   shipping, run `scripts/vendor-golemdocs main` (or a specific commit), check
+   a DOCX, an HTML and an SVG attachment in the app, Escape, ←/→ and `f`
+   included, and commit the new `ui/public/golemdocs/<build>/` folder (the
+   script removes the old one). Otherwise leave the pin alone: updates are
+   deliberate, never automatic ([0062](decisions/0062-golemdocs-viewer.md)).
+2. Bump `version` in `apps/desktop/tauri.conf.json` (and the workspace
    `Cargo.toml`).
-2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
-3. When the workflow finishes, open the draft under Releases, check the notes
+3. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
+4. When the workflow finishes, open the draft under Releases, check the notes
    and files, and publish it. The site's download buttons point at
    `releases/latest/download/<file>`, so they follow the newest published
    release.
-4. **First release only:** the site hides its downloads until there is
+5. **First release only:** the site hides its downloads until there is
    something behind them. In `site/index.html`, remove `data-unreleased` from
    `<section id="get">` and delete the "Not released yet" notice, and take the
    "Status: not released yet" section out of the README. Trim the "Early

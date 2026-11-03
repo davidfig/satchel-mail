@@ -25,6 +25,9 @@ export interface Transport {
   osAlerts(): Promise<boolean>;
   /** Events an alert's notification asked to open (the Mac app). The web has none. */
   onOpenEvent(fn: (e: { id: string; start: string }) => void): void;
+  /** Where the host serves the vendored document viewer (`ui/public/golemdocs/`, 0062):
+   *  the desktop's own `golemdocs:` scheme, or this server. */
+  docViewerBase(): string;
   readonly kind: 'tauri' | 'http';
 }
 
@@ -68,6 +71,12 @@ class TauriTransport implements Transport {
       );
     }
     return () => this.listeners.delete(fn);
+  }
+
+  docViewerBase() {
+    // How Tauri names a custom scheme's origin: Windows' WebView2 can't use
+    // custom schemes, so they are served as http://<scheme>.localhost there.
+    return navigator.userAgent.includes('Windows') ? 'http://golemdocs.localhost/' : 'golemdocs://localhost/';
   }
 
   onOpenLink(fn: (url: string) => void) {
@@ -147,6 +156,10 @@ class HttpTransport implements Transport {
 
   host<T>(cmd: string): Promise<T> {
     return Promise.reject(new Error(`${cmd} is only available in the desktop app`));
+  }
+
+  docViewerBase() {
+    return `${location.origin}/golemdocs/`;
   }
 
   onOpenLink() {

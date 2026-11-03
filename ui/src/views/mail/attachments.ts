@@ -1,13 +1,16 @@
-// Attachments: the chips under a message, and a viewer that shows the kinds of
-// file the webview can draw itself (images, PDFs, audio and video, text) in
-// the reading pane, with Open (in its default app, desktop only) and Save beside it (0054).
+// Attachments: the chips under a message, and a viewer that shows them in the
+// reading pane: what the webview draws itself (images, PDFs, audio and video,
+// text) and, through golemdocs' sandboxed viewer, documents and web pages,
+// with Open (in its default app, desktop only) and Save beside it (0054, 0062).
 
 import { api } from '../../api';
 import { h, icon, patch } from '../../lib/dom';
 import { humanSize } from '../../lib/format';
 import { confirmDialog, contextMenu, errorToast, toast, type MenuItem } from '../../lib/ui';
-import { blobType, parseCsv, previewKind } from '../../lib/files';
+import { blobType, documentName, parseCsv, previewKind } from '../../lib/files';
+import { docViewer } from '../../lib/docviewer';
 import { transport } from '../../transport';
+import { followLink } from './message-body';
 import type { Attachment, MessageDetail } from '../../types';
 
 /** Larger text is cut short; the whole file is a Save away. */
@@ -94,6 +97,7 @@ export function openViewer(m: MessageDetail, start: Attachment, from?: Element |
   const list = m.attachments.filter((a) => !a.inline);
   let index = Math.max(0, list.findIndex((a) => a.id === start.id));
   let url: string | null = null;
+  let doc: { destroy(): void } | null = null;
   let seq = 0;
   const cache = new Map<string, Promise<string>>();
   const current = () => list[index];
@@ -134,6 +138,8 @@ export function openViewer(m: MessageDetail, start: Attachment, from?: Element |
     closeOpen = null;
     document.removeEventListener('keydown', onKey, true);
     if (url) URL.revokeObjectURL(url);
+    doc?.destroy();
+    doc = null;
     // Gone already if the pane moved on to another conversation.
     const shown = root.isConnected;
     root.remove();
@@ -144,7 +150,7 @@ export function openViewer(m: MessageDetail, start: Attachment, from?: Element |
   // mail view; a new conversation replaces the pane, viewer and all.
   const onKey = (e: KeyboardEvent) => {
     if (!root.isConnected) return close();
-    if (document.querySelector('.modal-backdrop, .menu') || (e.target as HTMLElement).closest?.('input, textarea, [contenteditable="true"]')) return;
+    if (document.querySelector('.modal-backdrop, .menu') || (e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable="true"]')) return;
     const keys: Record<string, () => void> = { Escape: close, ArrowLeft: () => go(-1), ArrowRight: () => go(1), f: toggleExpand };
     const fn = !e.metaKey && !e.ctrlKey && !e.altKey ? keys[e.key] : undefined;
     if (!fn) return;
@@ -168,6 +174,8 @@ export function openViewer(m: MessageDetail, start: Attachment, from?: Element |
     if (count) count.textContent = `${index + 1} of ${list.length}`;
     if (url) URL.revokeObjectURL(url);
     url = null;
+    doc?.destroy();
+    doc = null;
     const kind = previewKind(a);
     if (!kind) return patch(body, noPreview(m, a));
     patch(body, h('p.muted.viewer-loading', 'Loading…'));
@@ -188,6 +196,28 @@ export function openViewer(m: MessageDetail, start: Attachment, from?: Element |
       const text = new TextDecoder().decode(cut ? data.subarray(0, TEXT_LIMIT) : data);
       const note = cut && h('p.muted.small', `Showing the first ${humanSize(TEXT_LIMIT)}. Save the file to see all of it.`);
       return patch(body, note, kind === 'csv' ? csvTable(text, a.filename.toLowerCase().endsWith('.tsv') ? '\t' : ',') : h('pre.viewer-text', text));
+    }
+    if (kind === 'document') {
+      const viewer = docViewer({
+        bytes: data,
+        name: documentName(a),
+        title: a.filename,
+        // Keys the document doesn't use come back to the viewer's own keys
+        // (Escape, ←/→, f), never to the app's mail shortcuts.
+        onKey,
+        // Links in documents are a favourite of phishing, so always say where one goes first.
+        onLink: (link) => {
+          if (!followLink(link, true)) toast('Satchel doesn’t open this kind of link.');
+        },
+        onError: (message) => {
+          if (mine !== seq) return;
+          viewer.destroy();
+          doc = null;
+          patch(body, noPreview(m, a, `Satchel can’t show this file here${message ? ` (${message.replace(/\.$/, '')})` : ''}.`));
+        },
+      });
+      doc = viewer;
+      return patch(body, viewer.el);
     }
     url = URL.createObjectURL(new Blob([data], { type: blobType(kind, a) }));
     const failed = () => {

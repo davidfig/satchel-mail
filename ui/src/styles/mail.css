@@ -184,3 +184,5 @@ pre.source { max-height: 70vh; overflow: auto; white-space: pre-wrap; font-size:
 /* The full unsubscribe email, wrapped and scrollable (on top of .draft-text). */
 pre.sent-preview { max-height: 40vh; overflow: auto; overflow-wrap: anywhere; margin: 8px 0; }
 .sent-preview-subject { overflow-wrap: anywhere; }
+/* The document viewer draws its own desk around the pages (0062). */
+.viewer-frame.doc-frame { background: transparent; }

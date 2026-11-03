@@ -55,6 +55,7 @@ for the layout and `docs/` for design and decisions.
 scripts/dev-servers reset                 # local Stalwart (IMAP/SMTP/JMAP/CalDAV) + fixtures
 scripts/run [web] [--test]                # build + run the app (also `pnpm app|web|web:test`)
 scripts/dev-sign --sign-only BIN          # sign with the Apple Development cert so keychain "Always Allow" sticks
+scripts/vendor-golemdocs [REF]            # rebuild (or re-pin) the vendored document viewer (0062)
 cargo test --workspace                    # unit + engine integration tests
 cargo clippy --workspace                  # keep at zero warnings
 (cd ui && npx tsc --noEmit && npm test && npm run build)
