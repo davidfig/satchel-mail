@@ -32,8 +32,11 @@ release. Why it's signed this way: [0059](decisions/0059-signing-releases.md).
    "Status: not released yet" section out of the README. Trim the "Early
    release" notice as Google and Microsoft finish their reviews.
 
-A tag fails unless the Mac and Windows signing keys and the update key below
-are set, or if its version doesn't match `tauri.conf.json`. To test the
+A tag fails unless the Mac signing keys and the update key below are set, or if
+its version doesn't match `tauri.conf.json`. Windows sits out of the release
+until its signing is ready ([0064](decisions/0064-mac-and-linux-first.md)):
+without the `AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE` variable, a tag skips
+the Windows build. Once that's set, a tag fails unless Windows is signed too. To test the
 workflow without releasing, push a change to the workflow file on a branch, or
 run it from the Actions tab.
 
@@ -77,6 +80,11 @@ Actions.
      `https://eus.codesigning.azure.net`
    - `AZURE_ARTIFACT_SIGNING_ACCOUNT`: the account name
    - `AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE`: the profile name
+
+When the identity validation shows **Completed**, turn Windows on: create the
+certificate profile, add the secrets and variables above, and run a test build
+from the Actions tab. Then, on the site, put back the Windows download in
+`site/index.html` in place of the "coming soon" line.
 
 If Artifact Signing isn't available to you, an OV certificate in a cloud HSM
 (SSL.com eSigner, DigiCert KeyLocker) works too: change the `signCommand` the

@@ -11,8 +11,9 @@
 #
 # Signing (docs/RELEASING.md, decision 0059): Mac builds are signed with a Developer ID and notarized, Windows builds
 # are signed with Azure Artifact Signing, and every file in a release gets a SHA256SUMS line and, once the repository
-# is public, a GitHub build attestation. Branch builds sign whatever they have keys for; a tag fails unless both Mac
-# and Windows are signed, so nothing unsigned is released by accident.
+# is public, a GitHub build attestation. Branch builds sign whatever they have keys for; a tag fails unless Mac is
+# signed, so nothing unsigned is released by accident. Windows sits out of a tag's release until the
+# AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE variable is set; once it is, Windows has to be signed too (decision 0064).
 #
 # Repository secrets (all optional for branch builds):
 #   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY   Developer ID
@@ -60,6 +61,8 @@ jobs:
       TARGET: ${{ matrix.target }}
       BUNDLES: ${{ matrix.bundles }}
       RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      # A release leaves Windows out, rather than shipping it unsigned, until its signing is set up (0064).
+      HOLD_WINDOWS: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.name == 'windows-x64' && vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE == '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -178,7 +181,7 @@ jobs:
       # Tauri reads tauri.windows.conf.json on its own and runs signCommand on the app, the satchel inside it and the
       # installer. The account and profile come from the environment.
       - name: Windows signing
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.HOLD_WINDOWS != 'true'
         shell: bash
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -201,11 +204,13 @@ jobs:
           printf '{ "bundle": { "windows": { "signCommand": "artifact-signing-cli -e %s -d satchel.email %%1" } } }\n' "$ENDPOINT" > apps/desktop/tauri.windows.conf.json
 
       - name: Build
+        if: env.HOLD_WINDOWS != 'true'
         shell: bash
         run: scripts/release.sh
 
       # Tauri signed the copy of satchel inside the app; the standalone one is signed here.
       - name: Sign the standalone CLI
+        if: env.HOLD_WINDOWS != 'true'
         shell: bash
         run: |
           r="target/$TARGET/release"
@@ -224,6 +229,7 @@ jobs:
           fi
 
       - name: Check signatures
+        if: env.HOLD_WINDOWS != 'true'
         shell: bash
         run: |
           r="target/$TARGET/release"
@@ -244,6 +250,7 @@ jobs:
           esac
 
       - name: Collect files
+        if: env.HOLD_WINDOWS != 'true'
         shell: bash
         run: |
           r="target/$TARGET/release"
@@ -272,6 +279,7 @@ jobs:
           ls -l out
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.HOLD_WINDOWS != 'true'
         with:
           name: ${{ matrix.name }}
           path: out/*
@@ -305,17 +313,22 @@ jobs:
           files = {
               "darwin-aarch64": "satchel.email-mac-arm64.app.tar.gz",
               "darwin-x86_64": "satchel.email-mac-x64.app.tar.gz",
-              "windows-x86_64": "satchel.email-windows-x64-setup.exe",
               # Only the AppImage updates itself; .deb installs update through their package manager.
               "linux-x86_64-appimage": "satchel.email-linux-x64.AppImage",
           }
+          def entry(name, sig):
+              url = f"https://github.com/{os.environ['REPO']}/releases/download/{tag}/{name}"
+              return {"signature": sig.read_text().strip(), "url": url}
           platforms = {}
           for key, name in files.items():
               sig = dist / f"{name}.sig"
               if not sig.exists():
                   raise SystemExit(f"{sig} is missing")
-              url = f"https://github.com/{os.environ['REPO']}/releases/download/{tag}/{name}"
-              platforms[key] = {"signature": sig.read_text().strip(), "url": url}
+              platforms[key] = entry(name, sig)
+          # Windows sits out until its signing is set up (0064).
+          windows = "satchel.email-windows-x64-setup.exe"
+          if (dist / f"{windows}.sig").exists():
+              platforms["windows-x86_64"] = entry(windows, dist / f"{windows}.sig")
           feed = {
               "version": tag.removeprefix("v"),
               "notes": f"https://github.com/{os.environ['REPO']}/releases/tag/{tag}",

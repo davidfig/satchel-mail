@@ -29,7 +29,7 @@ from this repository.
   attestation (`gh attestation verify`) once the repository is public. Linux
   relies on these.
 - **No unsigned releases:** a `v*` tag fails unless the Mac and Windows keys
-  are set. Branch builds sign with whatever keys exist and warn about the rest.
+  are set (until Windows signing is ready, a tag leaves Windows out: 0064). Branch builds sign with whatever keys exist and warn about the rest.
 - Keys are repository secrets; names that aren't secret (the Artifact Signing
   endpoint, account and profile) are repository variables. Setup steps are in
   `docs/RELEASING.md`.

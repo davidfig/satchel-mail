@@ -19,7 +19,7 @@ could turn it on, but nothing built a feed or used it.
   so a release reaches installed apps when its draft is **published**, never
   before. We host nothing and keep no server.
 - **What updates:** the Mac app (an `.app.tar.gz` per architecture), the
-  Windows installer and the AppImage. `.deb` installs aren't in the feed; they
+  Windows installer (once Windows is released, 0064) and the AppImage. `.deb` installs aren't in the feed; they
   update through the package manager or a new download.
 - **Signatures:** every update bundle is signed with the Tauri update key
   (minisign), on top of the platform signing in 0059. The public half is
