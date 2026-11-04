@@ -116,7 +116,15 @@ async function renderThread(view: MailView, thread: Thread, seq: number) {
   const labels = [...new Set(thread.messages.flatMap((m) => m.mailbox_ids))].map((id) => store.mailbox(id)).filter((m): m is Mailbox => !!m && m.role !== 'inbox');
   const mine = mineFor(thread);
   const people = new Map<string, Address>();
-  for (const m of thread.messages) for (const a of [m.from, ...m.to, ...m.cc]) if (a && !mine(a)) people.set(a.email.toLowerCase(), a);
+  const myAddrs = new Set<string>();
+  for (const m of thread.messages) for (const a of [m.from, ...m.to, ...m.cc]) {
+    if (!a) continue;
+    if (mine(a)) myAddrs.add(a.email.toLowerCase());
+    else people.set(a.email.toLowerCase(), a);
+  }
+  // Name which of your addresses this thread reached, for people with several.
+  const ownEmail = store.state.accounts.find((a) => a.id === thread.account_id)?.email.toLowerCase();
+  const you = myAddrs.size ? [...myAddrs].join(', ') : ownEmail;
   const spam = isJunk(thread.messages.flatMap((m) => m.mailbox_ids));
   const convo = new Conversation(thread, (mode, id) => void view.reply(mode, id), { spam, onUnsubscribe: (m) => void view.unsubscribe(m, spam) });
   const blocked = thread.messages.find((m) => m.sender_verdict === 'spam' && m.from);
@@ -125,7 +133,7 @@ async function renderThread(view: MailView, thread: Thread, seq: number) {
     h('header.reader-head',
       h('div.reader-title',
         h('h2.reader-subject', thread.subject || '(no subject)'),
-        h('div.muted.small.reader-people', [...people.values()].map((a) => [personLink(a, shortName(a)), ', ']), 'you')),
+        h('div.muted.small.reader-people', [...people.values()].map((a) => [personLink(a, shortName(a)), ', ']), you ? `you (${you})` : 'you')),
       h('div.reader-actions',
         spam
           ? [
