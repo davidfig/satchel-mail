@@ -66,8 +66,18 @@ pub fn strip_quotes(text: &str) -> String {
 pub fn make_snippet(text: &str) -> String {
     let stripped = strip_quotes(text);
     let source = if stripped.trim().is_empty() { text } else { &stripped };
-    let collapsed = source.split_whitespace().collect::<Vec<_>>().join(" ");
-    truncate_chars(&collapsed, 200)
+    truncate_chars(&preview_text(source), 200)
+}
+
+/// One line of readable text for a preview. Plain-text parts and server
+/// previews can hold literal HTML character references (`&zwnj;`, `&#847;`),
+/// so they're decoded with the full HTML table, invisible padding is dropped
+/// and whitespace collapsed. `<` is kept as text: this isn't markup.
+pub fn preview_text(text: &str) -> String {
+    /// A preview needs only the start, even of a very long message.
+    const MAX_SCANNED: usize = 64 * 1024;
+    let start = &text[..text.floor_char_boundary(MAX_SCANNED)];
+    html_to_text(&start.replace('<', "&lt;")).split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub fn truncate_chars(s: &str, n: usize) -> String {

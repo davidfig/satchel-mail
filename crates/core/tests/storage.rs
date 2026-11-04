@@ -40,6 +40,23 @@ async fn attachments_download_only_when_asked_for() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn old_snippets_are_rebuilt_without_html_entities() {
+    let (engine, fake, account, _dir) = setup().await;
+    deliver(&fake, "plan", dated("plan", "Plan", 1, "&zwnj;&#847;Welcome &ndash; your plan"), "INBOX");
+    sync(&engine, &account, "plan").await;
+    let id = engine.store().message_id_by_remote(&account, "plan").unwrap().unwrap();
+    let row = || engine.store().message_row(&id).unwrap().unwrap();
+    wait_for(|| row().blob_hash.is_some()).await;
+    assert_eq!(row().summary.snippet, "Welcome – your plan");
+
+    // As an older version stored it, cut off inside the padding.
+    engine.store().set_snippet(&id, "&zwnj;&zwnj;&z…").unwrap();
+    assert_eq!(engine.repair_snippets().unwrap(), 1);
+    assert_eq!(row().summary.snippet, "Welcome – your plan");
+    assert_eq!(engine.repair_snippets().unwrap(), 0, "nothing left to change");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn storage_limit_keeps_the_newest_mail() {
     let (engine, fake, account, _dir) = setup().await;
     let mut s = engine.settings();

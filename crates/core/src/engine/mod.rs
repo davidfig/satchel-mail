@@ -214,6 +214,7 @@ impl Engine {
         w.push(tokio::spawn(Self::contacts_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::blob_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::alerts_worker(Arc::downgrade(self))));
+        w.push(tokio::spawn(Self::snippet_repair_worker(Arc::downgrade(self))));
     }
 
     pub fn shutdown(&self) {

@@ -16,6 +16,18 @@ fn parse_basic() {
 }
 
 #[test]
+fn snippets_decode_entities_and_drop_padding() {
+    let padding = "&zwnj;&#847;&#8203;&nbsp;".repeat(60);
+    assert_eq!(make_snippet(&format!("{padding}Welcome\r\n&ndash; to your plan&reg;")), "Welcome – to your plan®");
+    assert_eq!(make_snippet("Sale\u{200C}\u{034F} now"), "Sale now");
+    // Only text: nothing here is treated as a tag.
+    assert_eq!(make_snippet("Bob <bob@x.test> said a<b &amp; AT&T; &unknown;"), "Bob <bob@x.test> said a<b & AT&T; &unknown;");
+    assert_eq!(make_snippet(&padding), "");
+    // The limit counts what shows, and a long message cuts cleanly.
+    assert_eq!(make_snippet(&format!("{padding}{}", "é".repeat(100_000))).chars().count(), 201);
+}
+
+#[test]
 fn html_only_mail_keeps_paragraphs_and_links() {
     let raw = b"From: Carol <carol@x.test>\r\nSubject: Notes\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<div>Hi Alice,</div><div><br></div><div>Here is <b>bold</b> and <a href=\"https://x.test/notes\">the notes</a>.</div><div><br></div><div>Thanks,<br>Carol</div>";
     let p = parse(raw).unwrap();
