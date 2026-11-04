@@ -67,3 +67,5 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0060 | [Full Google verification, with a yearly CASA assessment](0060-google-verification-and-casa.md) | Accepted |
 | 0061 | [Check DKIM ourselves when no server is trusted](0061-checking-dkim-ourselves.md) | Accepted |
 | 0062 | [Documents and web pages through golemdocs' sandboxed viewer](0062-golemdocs-viewer.md) | Accepted |
+| 0063 | [Automatic updates from GitHub Releases, offered with a toast](0063-automatic-updates.md) | Accepted |
+| 0064 | [Release Mac and Linux first; Windows joins when it's signed](0064-mac-and-linux-first.md) | Accepted |
