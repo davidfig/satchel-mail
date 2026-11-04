@@ -102,7 +102,7 @@ FULL_TEXTS = {
 
 
 def host_triple():
-    out = subprocess.run(['rustc', '-vV'], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(['rustc', '-vV'], capture_output=True, text=True, encoding='utf-8', check=True).stdout
     return re.search(r'^host: (.+)$', out, re.M).group(1)
 
 
