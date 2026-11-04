@@ -20,7 +20,9 @@ impl Store {
     }
 
     /// Insert or update a message and its mailbox memberships. Returns
-    /// (local id, inserted?).
+    /// (local id, inserted?). A message with a change still queued for the
+    /// server keeps its local flags and mailboxes ([`Store::change_pending`]),
+    /// and one being deleted isn't stored again: its id is "".
     pub fn upsert_message(&self, account_id: &str, rec: &MessageRecord, mailboxes: &[(String, Option<u32>)]) -> Result<(String, bool)> {
         let (id, inserted, threads) = self.w(|c| {
             let tx = c.transaction()?;
@@ -29,20 +31,26 @@ impl Store {
                     Ok((r.get(0)?, r.get(1)?, r.get(2)?))
                 })
                 .optional()?;
+            let held = Self::change_pending_tx(&tx, account_id, existing.as_ref().map(|e| e.0.as_str()), Some(&rec.remote_id))?;
+            if existing.is_none() && held {
+                return Ok((String::new(), false, vec![]));
+            }
+            let flag = |v: bool| (!held).then_some(v);
             let mut affected_threads: Vec<String> = vec![];
             let (id, inserted) = if let Some((id, thread_id, old_blob)) = existing {
                 if rec.blob_hash.is_some() && old_blob != rec.blob_hash {
                     self.blobs_freed(old_blob);
                 }
                 tx.execute(
-                    "UPDATE messages SET seen=?, flagged=?, answered=?, draft=?, remote_thread_id=COALESCE(?, remote_thread_id),
+                    "UPDATE messages SET seen=COALESCE(?, seen), flagged=COALESCE(?, flagged), answered=COALESCE(?, answered),
+                       draft=COALESCE(?, draft), remote_thread_id=COALESCE(?, remote_thread_id),
                        blob_hash=COALESCE(?, blob_hash), snippet=CASE WHEN ?='' THEN snippet ELSE ? END,
                        partial=CASE WHEN ? IS NULL THEN partial ELSE ? END, blob_size=CASE WHEN ? IS NULL THEN blob_size ELSE ? END,
                        attachments_json=CASE WHEN ?='[]' THEN attachments_json ELSE ? END,
                        has_attachments=MAX(has_attachments, ?), version=version+1, mirrored=0
                      WHERE id=?",
                     params![
-                        rec.flags.seen, rec.flags.flagged, rec.flags.answered, rec.flags.draft, rec.remote_thread_id,
+                        flag(rec.flags.seen), flag(rec.flags.flagged), flag(rec.flags.answered), flag(rec.flags.draft), rec.remote_thread_id,
                         rec.blob_hash, rec.snippet, rec.snippet, rec.blob_hash, rec.partial, rec.blob_hash, rec.blob_size as i64,
                         to_json(&rec.attachments), to_json(&rec.attachments),
                         rec.attachments.iter().any(|a| !a.inline), id
@@ -82,7 +90,9 @@ impl Store {
                 affected_threads.push(thread_id);
                 (id, true)
             };
-            Self::set_memberships_tx(&tx, &id, mailboxes)?;
+            if !held {
+                Self::set_memberships_tx(&tx, &id, mailboxes)?;
+            }
             tx.commit()?;
             Ok((id, inserted, affected_threads))
         })?;

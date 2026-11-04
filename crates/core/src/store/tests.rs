@@ -372,3 +372,32 @@ fn data_errors_are_told_apart_from_database_failures() {
     assert!(!is_data_error(&busy));
     assert!(!is_data_error(&anyhow!("store poisoned")));
 }
+
+#[test]
+fn sync_leaves_messages_with_queued_changes_alone() {
+    let s = Store::open_in_memory().unwrap();
+    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+    let junk = s.upsert_mailbox(&acc.id, "SPAM", "Spam", "SPAM", MailboxRole::Junk, false).unwrap();
+    let trash = s.upsert_mailbox(&acc.id, "TRASH", "Trash", "TRASH", MailboxRole::Trash, false).unwrap();
+    let (a, _) = s.upsert_message(&acc.id, &rec("1", "m1", None, "spam", 0), &[(junk.clone(), None)]).unwrap();
+    // Deleted locally; the move hasn't reached the server.
+    s.set_memberships(&a, &[(trash.clone(), None)]).unwrap();
+    let r = s.message_ref(&a).unwrap().unwrap();
+    let op = s.enqueue_op(&acc.id, "labels", &serde_json::json!({ "refs": [r] }), "user").unwrap();
+    // A sync that read the server before the move doesn't put it back in Spam.
+    let mut stale = rec("1", "m1", None, "spam", 0);
+    stale.flags.flagged = true;
+    s.upsert_message(&acc.id, &stale, &[(junk.clone(), None)]).unwrap();
+    assert_eq!(s.memberships(&a).unwrap(), vec![(trash.clone(), None)]);
+    assert!(!s.message_ref(&a).unwrap().unwrap().flags.flagged);
+    // Once the server has it, sync is in charge again.
+    s.op_done(&op).unwrap();
+    s.upsert_message(&acc.id, &stale, &[(junk.clone(), None)]).unwrap();
+    assert_eq!(s.memberships(&a).unwrap(), vec![(junk, None)]);
+    // A message being deleted for good isn't stored again meanwhile.
+    let r = s.message_ref(&a).unwrap().unwrap();
+    s.delete_message(&a).unwrap();
+    s.enqueue_op(&acc.id, "expunge", &serde_json::json!({ "refs": [r] }), "user").unwrap();
+    assert_eq!(s.upsert_message(&acc.id, &stale, &[(trash, None)]).unwrap(), (String::new(), false));
+    assert!(s.message_id_by_remote(&acc.id, "1").unwrap().is_none());
+}

@@ -52,6 +52,25 @@ impl Store {
         })
     }
 
+    /// Whether a queued change to this message (by local or remote id) hasn't
+    /// reached the server yet. Sync leaves such a message as the user left it:
+    /// the server still shows it the old way until the op runs, and copying
+    /// that back would undo the change on screen until the next sync.
+    pub fn change_pending(&self, account_id: &str, id: Option<&str>, remote_id: Option<&str>) -> Result<bool> {
+        self.r(|c| Ok(Self::change_pending_tx(c, account_id, id, remote_id)?))
+    }
+
+    pub(super) fn change_pending_tx(c: &rusqlite::Connection, account_id: &str, id: Option<&str>, remote_id: Option<&str>) -> rusqlite::Result<bool> {
+        c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM ops o WHERE o.account_id=?1 AND o.status IN ('pending','sending') AND (
+               EXISTS(SELECT 1 FROM json_each(o.payload_json, '$.refs') j
+                      WHERE json_extract(j.value, '$.id')=?2 OR json_extract(j.value, '$.remote_id')=?3)
+               OR EXISTS(SELECT 1 FROM json_each(o.payload_json, '$.message_ids') j WHERE j.value=?2)))",
+            params![account_id, id, remote_id],
+            |r| r.get(0),
+        )
+    }
+
     pub fn has_pending_ops(&self, account_id: &str) -> Result<bool> {
         self.r(|c| {
             let n: i64 = c.query_row("SELECT COUNT(*) FROM ops WHERE account_id=? AND status='pending'", [account_id], |r| r.get(0))?;
