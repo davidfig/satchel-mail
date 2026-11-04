@@ -131,6 +131,15 @@ export function textBody(text: string, cautious: boolean): HTMLElement {
   return pre;
 }
 
+/** About ten seconds of frames to wait for a message to parse before leaving it to `load`. */
+const SIZE_POLLS = 600;
+const framesSized = new WeakMap<HTMLIFrameElement, Promise<void>>();
+
+/** Resolves once `frame` (from `htmlFrame`) has its message parsed and is sized to fit. */
+export function frameSized(frame: HTMLIFrameElement): Promise<void> {
+  return framesSized.get(frame) ?? new Promise((r) => frame.addEventListener('load', () => r(), { once: true }));
+}
+
 /** Sanitized HTML (from the core) in a script-less sandboxed iframe with a CSP.
  *  Without `allowRemote` the CSP itself blocks remote images: CSS escapes
  *  and `image-set()` can slip past the sanitizer's checks. */
@@ -150,12 +159,32 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
   const sandbox = transport.kind === 'tauri' ? 'allow-same-origin allow-popups' : 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
   const frame = h('iframe.html-body', { sandbox, referrerpolicy: 'no-referrer', title: 'Message content', dataset: { cautious: String(cautious) } }) as HTMLIFrameElement;
   frame.srcdoc = doc;
-  frame.addEventListener('load', () => {
+  // Size the frame as soon as the message is parsed, not on `load`, which
+  // waits for every remote image; the observer grows it as they arrive.
+  let sized: (() => void) | undefined;
+  framesSized.set(frame, new Promise((r) => (sized = r)));
+  let sizedDoc: Document | null = null;
+  const size = () => {
     const d = frame.contentDocument;
-    if (!d) return;
+    if (sizedDoc || !d?.body || d.URL !== 'about:srcdoc' || d.readyState === 'loading') return false;
+    sizedDoc = d;
     const fit = () => (frame.style.height = `${Math.min(d.documentElement.scrollHeight + 4, 20000)}px`);
     fit();
     new ResizeObserver(fit).observe(d.body);
+    sized!();
+    return true;
+  };
+  // Polled until parsed (the frame's own document can't run our listeners in
+  // WebKit); `load` is the backstop, and ends polling for a frame never shown.
+  let polls = 0;
+  const poll = () => {
+    if (!sizedDoc && !size() && ++polls < SIZE_POLLS) requestAnimationFrame(poll);
+  };
+  requestAnimationFrame(poll);
+  frame.addEventListener('load', () => {
+    size();
+    const d = frame.contentDocument;
+    if (!d) return;
     // Chromium and Firefox run this; WebKit runs no listeners in a script-less
     // sandboxed frame, so there the link opens as a popup: on desktop
     // `catchHostLinks` takes it, on the web it is our `#follow` page.

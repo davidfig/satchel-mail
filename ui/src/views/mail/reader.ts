@@ -9,6 +9,7 @@ import { store } from '../../state';
 import type { Address, Mailbox, Thread, ThreadSummary } from '../../types';
 import { editDraft, openComposer } from './composer';
 import { Conversation, mineFor } from './conversation';
+import { frameSized } from './message-body';
 import { ReplyBox } from './reply-box';
 import { BLOCK_TIP, copyThread, isJunk } from './actions';
 import type { MailView } from './index';
@@ -158,7 +159,7 @@ async function renderThread(view: MailView, thread: Thread, seq: number) {
 
 /** Puts `page` in the reader in one step. HTML messages render in iframes,
  *  which load blank and then grow to fit, so the page is laid out hidden
- *  behind the current one until they've loaded (or `FRAME_WAIT_MS` passes),
+ *  behind the current one until they're sized (or `FRAME_WAIT_MS` passes),
  *  then revealed in place: moving an iframe would reload it. False if a newer
  *  conversation was asked for meanwhile. */
 async function present(view: MailView, page: HTMLElement, seq: number): Promise<boolean> {
@@ -171,7 +172,7 @@ async function present(view: MailView, page: HTMLElement, seq: number): Promise<
   page.classList.add('staging');
   view.reader.append(page);
   await Promise.race([
-    Promise.all(frames.map((f) => new Promise((r) => f.addEventListener('load', r, { once: true })))),
+    Promise.all(frames.map(frameSized)),
     new Promise((r) => setTimeout(r, FRAME_WAIT_MS)),
   ]);
   if (seq !== view.readerSeq) {
