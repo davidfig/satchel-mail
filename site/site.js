@@ -39,8 +39,7 @@
     others.hidden = false;
   };
 
-  const unreleased = document.getElementById('get')?.hasAttribute('data-unreleased');
-  if (os && pick() && !unreleased) {
+  if (os && pick()) {
     if (download) download.textContent = `Download for ${os === 'mac' ? 'Mac' : os === 'windows' ? 'Windows' : 'Linux'}`;
     show(pick(os === 'mac' ? 'arm64' : ''));
     navigator.userAgentData?.getHighEntropyValues?.(['architecture'])

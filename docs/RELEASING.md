@@ -26,11 +26,8 @@ release. Why it's signed this way: [0059](decisions/0059-signing-releases.md).
    offer "Restart to update" ([0063](decisions/0063-automatic-updates.md)).
    To pull a bad release, set it back to a draft and ship a fix with a higher
    version; apps never go back a version.
-5. **First release only:** the site hides its downloads until there is
-   something behind them. In `site/index.html`, remove `data-unreleased` from
-   `<section id="get">` and delete the "Not released yet" notice, and take the
-   "Status: not released yet" section out of the README. Trim the "Early
-   release" notice as Google and Microsoft finish their reviews.
+5. Trim the site's "Early release" notice as Google and Microsoft finish their
+   reviews.
 
 A tag fails unless the Mac signing keys and the update key below are set, or if
 its version doesn't match `tauri.conf.json`. Windows sits out of the release

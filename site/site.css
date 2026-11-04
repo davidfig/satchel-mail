@@ -505,9 +505,6 @@ p { margin: 0 0 14px; }
 .notice li b { color: var(--text); }
 .notice p { margin: 0 0 8px; color: var(--text-2); }
 .notice p:last-child { margin-bottom: 0; }
-/* Before the first release there is nothing to download (index.html, #get). */
-.get[data-unreleased] .get-all, .get[data-unreleased] .get-others, .get[data-unreleased] .get-then, .get[data-unreleased] #early { display: none; }
-
 /* Legal pages: a reading column. */
 .legal { max-width: 46rem; }
 .legal > section { margin-top: 40px; }
