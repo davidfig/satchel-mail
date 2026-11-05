@@ -1,6 +1,6 @@
 # 0034. Sender rules act on the server only for mail they're sure about
 
-- **Status:** Accepted
+- **Status:** Accepted; trust decisions tightened by 0042
 - **Date:** 2026-10-25
 
 ## Context

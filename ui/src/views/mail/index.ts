@@ -2,10 +2,11 @@
 // coordinates; the list, reader, actions and person header live beside it.
 
 import { api } from '../../api';
-import { debounce, h, icon, replace } from '../../lib/dom';
+import { debounce, h, icon, patch } from '../../lib/dom';
+import { emptiable, emptyFolder } from '../../lib/folders';
 import { formatAddress } from '../../lib/format';
 import { smartFolderDialog } from '../../lib/smart-folders';
-import { bind, contextMenu, errorToast, toast } from '../../lib/ui';
+import { bind, commandSource, contextMenu, errorToast, toast } from '../../lib/ui';
 import type { MenuItem } from '../../lib/ui';
 import { store } from '../../state';
 import type { MailSource } from '../../state';
@@ -21,6 +22,12 @@ import * as person from './person';
 import { personQuery } from './person';
 import * as reader from './reader';
 
+/** The open smart folder's search, if one is open. */
+function openSmartQuery(): string | null {
+  const s = store.state.source;
+  return s.kind === 'smart' ? store.smartFolder(s.id)?.query ?? null : null;
+}
+
 export class MailView {
   root = h('div.mail-view');
   listPane = h('section.list-pane', { 'aria-label': 'Conversations' });
@@ -34,12 +41,24 @@ export class MailView {
   cursor = -1;
   /** Selected threads by id (kept even if their page is evicted). */
   selected = new Map<string, ThreadSummary>();
+  /** Where a Shift+Arrow range starts, and the selection from before it. */
+  private range: { anchor: number; base: Map<string, ThreadSummary> } | null = null;
   openThread: Thread | null = null;
   /** The list row of the open conversation, kept when a refresh drops it
    *  from the list (unflagged in Flagged, read under `is:unread`). */
   openSummary: ThreadSummary | null = null;
   replyBox: ReplyBox | null = null;
+  /** The conversation the reader shows or is loading. */
+  readerThread: string | null = null;
+  /** Bumped by every reader change, so a slower earlier load backs off. */
+  readerSeq = 0;
+  /** Settles when the reader has shown `readerThread`. */
+  readerLoad: Promise<void> = Promise.resolve();
   generation = 0;
+  /** Where clearing the search box goes back to. */
+  /** The search of the open smart folder when its list was loaded. */
+  loadedSmartQuery = openSmartQuery();
+  beforeSearch: MailSource = store.state.source.kind === 'search' ? { kind: 'role', role: 'inbox', label: 'Inbox' } : store.state.source;
 
   constructor() {
     this.spacer.appendChild(this.rows);
@@ -60,24 +79,52 @@ export class MailView {
       if (e.key === 'Enter') {
         const q = this.searchInput.value.trim();
         if (q) store.set({ source: { kind: 'search', query: q, label: `Search: ${q}` }, selectedThread: null });
-        else store.set({ source: { kind: 'role', role: 'inbox', label: 'Inbox' } });
+        else this.clearSearch();
         this.scroller.focus();
       } else if (e.key === 'Escape') {
         this.searchInput.blur();
         this.scroller.focus();
       }
     });
+    // Emptying the box (its clear button, or deleting the text) ends the search.
+    this.searchInput.addEventListener('input', () => {
+      if (!this.searchInput.value.trim()) this.clearSearch();
+    });
+    let images = imageSettings();
     store.subscribe((_, changed) => {
-      if (changed.has('source')) void this.reload();
-      // A folder renamed here or elsewhere keeps its title current.
-      else if (changed.has('mailboxes') && store.state.source.kind === 'mailbox') this.renderHeader();
-      else if (changed.has('smartFolders') && store.state.source.kind === 'smart') this.renderHeader();
+      // The open thread was drawn under the old remote image settings.
+      if (changed.has('settings') && imageSettings() !== images) {
+        images = imageSettings();
+        if (this.readerThread) void this.showThread(this.readerThread, false, true);
+      }
+      // The open smart folder was deleted, here or elsewhere.
+      const s = store.state.source;
+      if (s.kind === 'smart' && (changed.has('source') || changed.has('smartFolders')) && !store.smartFolder(s.id)) {
+        store.set({ source: { kind: 'role', role: 'inbox', label: 'Inbox' }, selectedThread: null });
+        return;
+      }
+      if (changed.has('source') && s.kind !== 'search') this.beforeSearch = s;
+      if (changed.has('source')) {
+        this.loadedSmartQuery = openSmartQuery();
+        void this.reload();
+      }
+      // A folder renamed here or elsewhere keeps its title current, and
+      // Empty Spam/Trash knows when there's nothing left.
+      else if (changed.has('mailboxes') && (store.state.source.kind === 'mailbox' || emptiable(store.state.source))) this.renderHeader();
+      else if (changed.has('smartFolders') && s.kind === 'smart') {
+        // Reloading loses the selection and scroll, so only for a new search,
+        // not a rename, a new count or another folder's change.
+        if (this.loadedSmartQuery !== openSmartQuery()) {
+          this.loadedSmartQuery = openSmartQuery();
+          void this.reload();
+        } else this.renderHeader();
+      }
+      else if (changed.has('favorites') && store.state.source.kind === 'person') this.renderHeader();
     });
     const refresh = debounce(() => void this.refresh(), 300);
     store.onEvent((e) => {
-      if (e.event === 'messages_changed' || e.event === 'data_changed') refresh();
-      // An edited smart folder may now match different mail.
-      if (e.event === 'smart_folders_changed' && store.state.source.kind === 'smart') void this.reload();
+      // Rows say whether a favorite wrote them, and `is:favorite` lists them.
+      if (e.event === 'messages_changed' || e.event === 'data_changed' || e.event === 'favorites_changed') refresh();
     });
     this.renderHeader();
     this.renderEmptyReader();
@@ -87,8 +134,12 @@ export class MailView {
 
   show() {
     const sel = store.state.selectedThread;
-    if (sel && this.openThread?.thread_id !== sel) void this.showThread(sel, false);
+    if (sel) void this.showThread(sel, false);
     this.scroller.focus({ preventScroll: true });
+  }
+
+  private clearSearch() {
+    if (store.state.source.kind === 'search') store.set({ source: this.beforeSearch, selectedThread: null });
   }
 
   private query(): ThreadQuery {
@@ -108,7 +159,9 @@ export class MailView {
     if (s.kind === 'search' && this.searchInput.value !== s.query) this.searchInput.value = s.query;
     if (s.kind !== 'search' && document.activeElement !== this.searchInput) this.searchInput.value = '';
     const n = this.selected.size;
-    replace(
+    // Patched: this redraws on sync ticks while Spam, Trash or a folder is
+    // open, and the search box keeps its focus.
+    patch(
       this.header,
       h('div.list-title',
         s.kind === 'person' && h('button.icon-btn', { title: `Back to ${s.back?.label ?? 'Inbox'}`, 'aria-label': 'Back', on: { click: () => store.set({ source: s.back ?? { kind: 'role', role: 'inbox', label: 'Inbox' } }) } }, icon('chevronLeft')),
@@ -116,7 +169,8 @@ export class MailView {
         h('span.spacer'),
         s.kind === 'search' && h('button.icon-btn', { title: 'Save this search as a smart folder', 'aria-label': 'Save as smart folder', on: { click: () => void this.saveSearch(s.query) } }, icon('smartFolder')),
         s.kind === 'smart' && h('button.icon-btn', { title: 'Edit this smart folder', 'aria-label': 'Edit smart folder', on: { click: () => void this.editSmart(s.id) } }, icon('draft')),
-        h('button.icon-btn', { title: 'Refresh (sync now)', 'aria-label': 'Sync now', on: { click: () => void api.syncNow(null).then(() => toast('Syncing…')) } }, icon('refresh')),
+        this.emptyButton(s),
+        h('button.icon-btn', { title: 'Refresh (sync now)', 'aria-label': 'Sync now', on: { click: () => void api.syncNow(null).then(() => toast('Syncing…', { quiet: true })) } }, icon('refresh')),
         h('button.icon-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose'))),
       s.kind === 'person' ? this.personCard(s) : this.searchInput,
       n > 0 &&
@@ -142,8 +196,13 @@ export class MailView {
 
   private async editSmart(id: string) {
     const folder = store.smartFolder(id);
-    const saved = folder && (await smartFolderDialog({ folder }));
-    if (saved) store.set({ source: { kind: 'smart', id, label: saved.name } });
+    if (folder) await smartFolderDialog({ folder });
+  }
+
+  /** "Empty Spam" / "Empty Trash" while one of those is open. */
+  private emptyButton(s: MailSource) {
+    const e = emptiable(s);
+    return e && h('button.icon-btn', { title: `Empty ${e.label}: permanently delete everything in it`, 'aria-label': `Empty ${e.label}`, disabled: e.count === 0, on: { click: () => void emptyFolder(s) } }, icon('trash'));
   }
 
   /** The summary for the person being shown, fetched once per set of addresses. */
@@ -154,13 +213,14 @@ export class MailView {
     ++this.generation;
     this.cursor = -1;
     this.selected.clear();
+    this.range = null;
     this.scroller.scrollTop = 0;
     this.renderHeader();
     await this.list.reset();
     const sel = store.state.selectedThread;
     // A new folder or search: the old conversation mustn't stay on screen,
     // or its buttons would act on whatever the cursor lands on.
-    if (!sel && this.openThread) this.renderEmptyReader();
+    if (!sel && this.readerThread) this.renderEmptyReader();
     if (sel) {
       this.cursor = this.list.indexOf(sel);
       this.renderRows();
@@ -175,15 +235,21 @@ export class MailView {
     const anchorIdx = Math.floor(top / ROW_H);
     const anchorId = this.scroller.scrollTop > 0 ? this.list.at(anchorIdx)?.thread_id : undefined;
     const within = top - anchorIdx * ROW_H;
-    const cursorId = this.list.at(this.cursor)?.thread_id;
+    const cursor = this.cursor;
+    const scrollTop = this.scroller.scrollTop;
+    const cursorId = this.list.at(cursor)?.thread_id;
     const [first, last] = this.visibleRange(20);
     await this.list.refresh(first, last);
     if (gen !== this.generation) return;
-    if (anchorId) {
+    // If the user moved or scrolled while we fetched (arrowing through mail
+    // marks each thread read, which lands here), their position wins over the
+    // one captured before the fetch, or the cursor would jump back.
+    const moved = this.cursor !== cursor || this.scroller.scrollTop !== scrollTop;
+    if (anchorId && !moved) {
       const now = this.list.indexOf(anchorId);
       if (now >= 0 && now !== anchorIdx) this.scrollToIndex(now, within);
     }
-    if (cursorId) {
+    if (cursorId && !moved) {
       const now = this.list.indexOf(cursorId);
       this.cursor = now >= 0 ? now : Math.min(this.cursor, this.list.total - 1);
     }
@@ -191,29 +257,76 @@ export class MailView {
     if (this.openThread) {
       const still = this.list.find(this.openThread.thread_id);
       if (still) this.openSummary = still;
-      if (still && still.message_count !== this.openThread.messages.length) void this.showThread(still.thread_id, false);
+      if (still && still.message_count !== this.openThread.messages.length) void this.showThread(still.thread_id, false, true);
     }
   }
 
   toggleSelect(t: ThreadSummary) {
+    this.range = null;
     if (this.selected.has(t.thread_id)) this.selected.delete(t.thread_id);
     else this.selected.set(t.thread_id, t);
     this.renderHeader();
     this.renderRows();
   }
 
+  /** Select every conversation in the list, including ones not loaded yet. */
+  async selectAll() {
+    const gen = this.generation;
+    const rows = await this.list.all();
+    if (!rows || gen !== this.generation) return;
+    this.range = null;
+    this.selected = new Map(rows.map((t) => [t.thread_id, t]));
+    this.renderHeader();
+    this.renderRows();
+  }
+
   private async move(delta: number) {
     if (!this.list.total) return;
-    this.cursor = Math.max(0, Math.min(this.list.total - 1, this.cursor + delta));
+    this.range = null;
+    this.moveCursor(this.cursor + delta);
+    if (store.state.selectedThread) {
+      const cursor = this.cursor;
+      const t = await this.list.get(cursor);
+      // A later keypress may have moved on while this row was fetched.
+      if (t && cursor === this.cursor) void this.showThread(t.thread_id);
+    }
+  }
+
+  /** Shift+Arrow or Shift+click: move the cursor to row `to` and select every
+   *  conversation from where the range started to it, on top of whatever was
+   *  selected before the range. */
+  async extendTo(to: number) {
+    if (!this.list.total) return;
+    // A cleared selection (Clear, or an action that took the rows away) starts afresh.
+    if (!this.range || !this.selected.size) {
+      if (this.cursor < 0) this.cursor = this.clamp(to);
+      this.range = { anchor: this.cursor, base: new Map(this.selected) };
+    }
+    this.moveCursor(to);
+    const { anchor, base } = this.range;
+    const cursor = this.cursor;
+    const [lo, hi] = anchor < cursor ? [anchor, cursor] : [cursor, anchor];
+    const rows = await Promise.all(Array.from({ length: hi - lo + 1 }, (_, i) => this.list.get(lo + i)));
+    // A later keypress may have moved on while rows were fetched.
+    if (cursor !== this.cursor || this.range?.base !== base) return;
+    this.selected = new Map(base);
+    for (const t of rows) if (t) this.selected.set(t.thread_id, t);
+    this.renderHeader();
+    this.renderRows();
+  }
+
+  private clamp(i: number) {
+    return Math.max(0, Math.min(this.list.total - 1, i));
+  }
+
+  /** Put the cursor on row `i`, scrolling it into view. */
+  private moveCursor(i: number) {
+    this.cursor = this.clamp(i);
     const y = this.cursor * ROW_H;
     const top = this.logicalTop();
     if (y < top) this.scrollToIndex(this.cursor);
     else if (y + ROW_H > top + this.scroller.clientHeight) this.scrollToIndex(this.cursor, ROW_H - this.scroller.clientHeight);
     this.renderRows();
-    if (store.state.selectedThread) {
-      const t = await this.list.get(this.cursor);
-      if (t) void this.showThread(t.thread_id);
-    }
   }
 
   private async openAtCursor() {
@@ -223,26 +336,35 @@ export class MailView {
 
   private bindKeys() {
     const s = 'mail';
+    // For the palette: whether there's a conversation to act on, or one open.
+    const some = () => this.targetThreads().length > 0;
+    const reading = () => !!this.openThread;
     bind('j', 'Next conversation', () => void this.move(1), s);
     bind('ArrowDown', 'Next conversation', () => void this.move(1), s);
     bind('k', 'Previous conversation', () => void this.move(-1), s);
     bind('ArrowUp', 'Previous conversation', () => void this.move(-1), s);
+    bind('shift+ArrowDown', 'Select next conversation too', () => void this.extendTo(this.cursor + 1), s);
+    bind('shift+ArrowUp', 'Select previous conversation too', () => void this.extendTo(this.cursor - 1), s);
+    bind('mod+a', 'Select all conversations', () => void this.selectAll(), s, () => this.list.total > 0);
     bind('Enter', 'Open conversation', () => void this.openAtCursor(), s);
     bind('o', 'Open conversation', () => void this.openAtCursor(), s);
     bind('x', 'Select conversation', () => { const t = this.list.at(this.cursor); if (t) this.toggleSelect(t); }, s);
-    bind('e', 'Archive', () => void this.act('archive'), s);
-    bind('#', 'Delete', () => void this.act('trash'), s);
+    bind('e', 'Archive', () => void this.act('archive'), s, some);
+    bind('#', 'Delete', () => void this.act('trash'), s, some);
     bind('Backspace', 'Delete', () => void this.act('trash'), s);
-    bind('u', 'Mark unread', () => void this.act('unread'), s);
-    bind('shift+i', 'Mark read', () => void this.act('read'), s);
-    bind('!', 'Mark as spam / Not spam', () => void this.act(this.inSpam() ? 'not_spam' : 'spam'), s);
-    bind('s', 'Flag / unflag', () => { const t = this.targetThreads()[0]; if (t) void this.flagThread(t); }, s);
-    bind('r', 'Reply', () => this.replyBox?.focus('reply'), s);
-    bind('a', 'Reply all', () => this.replyBox?.focus('reply_all'), s);
-    bind('f', 'Forward', () => void this.reply('forward'), s);
-    bind('v', 'Move to…', () => { const b = this.reader.querySelector<HTMLElement>('[aria-label="Move"]'); if (b) this.moveMenu(b); }, s);
+    bind('Delete', 'Delete', () => void this.act('trash'), s);
+    bind('u', 'Mark unread', () => void this.act('unread'), s, some);
+    bind('shift+i', 'Mark read', () => void this.act('read'), s, some);
+    bind('!', 'Mark as spam / Not spam', () => void this.act(this.inSpam() ? 'not_spam' : 'spam'), s, some);
+    bind('s', 'Flag / unflag', () => { const t = this.targetThreads()[0]; if (t) void this.flagThread(t); }, s, some);
+    bind('r', 'Reply', () => this.replyBox?.focus('reply'), s, reading);
+    bind('a', 'Reply all', () => this.replyBox?.focus('reply_all'), s, reading);
+    bind('f', 'Forward', () => void this.reply('forward'), s, reading);
+    bind('v', 'Move to…', () => { const b = this.reader.querySelector<HTMLElement>('[aria-label="Move"]'); if (b) this.moveMenu(b); }, s, reading);
+    bind('y', 'Copy conversation for AI', () => { if (this.openThread) actions.copyThread(this.openThread); }, s, reading);
     bind('/', 'Search', () => { this.searchInput.focus(); this.searchInput.select(); }, s);
     bind('Escape', 'Close conversation', () => { store.set({ selectedThread: null }); this.renderEmptyReader(); this.renderRows(); this.scroller.focus(); }, s);
+    commandSource(() => actions.paletteCommands(this), s);
   }
 
   // Helpers in the sibling modules, which take this view as their first argument.
@@ -263,11 +385,16 @@ export class MailView {
   moveMenu(anchor: HTMLElement | { x: number; y: number }, threads?: ThreadSummary[]) { actions.moveMenu(this, anchor, threads); }
   moreMenu(anchor: HTMLElement, thread: Thread) { actions.moreMenu(this, anchor, thread); }
   renderEmptyReader() { reader.renderEmptyReader(this); }
-  showThread(threadId: string, markRead?: boolean) { return reader.showThread(this, threadId, markRead); }
-  renderThread(thread: Thread) { reader.renderThread(this, thread); }
+  showThread(threadId: string, markRead?: boolean, reload?: boolean) { return reader.showThread(this, threadId, markRead, reload); }
   reply(mode: 'reply' | 'reply_all' | 'forward', messageId?: string) { return reader.reply(this, mode, messageId); }
 }
 
 export function addressList(list: { email: string; name?: string | null }[]) {
   return list.map(formatAddress).join(', ');
+}
+
+/** The settings that decide which remote images load, as one comparable value. */
+function imageSettings() {
+  const s = store.state.settings;
+  return s ? `${s.load_remote_images}|${s.remote_image_senders.join(',')}` : '';
 }

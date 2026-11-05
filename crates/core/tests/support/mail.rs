@@ -34,6 +34,8 @@ pub struct Fake {
     pub moved_ids: Mutex<Vec<Vec<String>>>,
     /// Give moved messages a new remote id, like IMAP.
     pub rekey_moves: std::sync::atomic::AtomicBool,
+    /// How many times the host was asked to check DKIM signatures.
+    pub dkim_checks: std::sync::atomic::AtomicUsize,
     /// Raw messages handed to the server to send.
     pub sent: Mutex<Vec<Vec<u8>>>,
     /// Make sends fail as if the connection dropped before the server confirmed.
@@ -44,6 +46,8 @@ pub struct Fake {
     pub slim: Mutex<std::collections::HashMap<String, satchel_mime::Slim>>,
     /// How many times `fetch_raw` ran.
     pub raw_fetches: std::sync::atomic::AtomicUsize,
+    /// Queries sent to the place service.
+    pub place_queries: Mutex<Vec<String>>,
 }
 
 pub fn raw(id: &str, from: &str, subject: &str, irt: Option<&str>) -> Vec<u8> {
@@ -66,6 +70,7 @@ impl MailProvider for Fake {
         ctx.set_mailboxes(&[
             RemoteMailbox { remote_id: "INBOX".into(), name: "Inbox".into(), path: "INBOX".into(), role: MailboxRole::Inbox, is_label: false },
             RemoteMailbox { remote_id: "Archive".into(), name: "Archive".into(), path: "Archive".into(), role: MailboxRole::Archive, is_label: false },
+            RemoteMailbox { remote_id: "Sent".into(), name: "Sent".into(), path: "Sent".into(), role: MailboxRole::Sent, is_label: false },
             RemoteMailbox { remote_id: "Junk".into(), name: "Junk".into(), path: "Junk".into(), role: MailboxRole::Junk, is_label: false },
             RemoteMailbox { remote_id: "Trash".into(), name: "Trash".into(), path: "Trash".into(), role: MailboxRole::Trash, is_label: false },
         ]
@@ -190,7 +195,10 @@ pub struct SharedCal(pub Arc<Fake>);
 #[async_trait]
 impl CalendarProvider for SharedCal {
     async fn sync(&self, ctx: &SyncCtx) -> Result<()> {
-        let map = ctx.set_calendars(&[RemoteCalendar { remote_id: "cal".into(), name: "Calendar".into(), color: None, read_only: false }])?;
+        let map = ctx.set_calendars(&[
+            RemoteCalendar { remote_id: "cal".into(), name: "Calendar".into(), color: None, read_only: false },
+            RemoteCalendar { remote_id: "personal".into(), name: "Personal".into(), color: None, read_only: false },
+        ])?;
         let events: Vec<_> = self.0.events.lock().unwrap().drain(..).collect();
         for (rid, ics) in events {
             ctx.put_event(&map["cal"], &rid, None, &ics)?;
@@ -205,9 +213,36 @@ impl CalendarProvider for SharedCal {
     }
 }
 
+#[async_trait]
 impl ProviderFactory for FakeFactory {
     fn create(&self, _account: &Account, _creds: CredentialHandle) -> Result<Providers> {
         Ok(Providers { mail: Some(Arc::new(Shared(self.0.clone()))), calendar: Some(Arc::new(SharedCal(self.0.clone()))), contacts: None })
+    }
+    fn places(&self) -> Option<Arc<dyn PlaceSearch>> {
+        Some(Arc::new(FakePlaces(self.0.clone())))
+    }
+    /// Signing domains named in an `X-Test-Dkim-Pass:` header "verify";
+    /// `X-Test-Dkim-Pass: offline` can't be checked.
+    async fn dkim_pass(&self, raw: &[u8]) -> Option<Vec<String>> {
+        self.0.dkim_checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let text = String::from_utf8_lossy(raw);
+        let head = text.split("\r\n\r\n").next().unwrap_or("");
+        let v = head.lines().find_map(|l| l.strip_prefix("X-Test-Dkim-Pass:")).map(str::trim).unwrap_or("");
+        (v != "offline").then(|| v.split_whitespace().map(String::from).collect())
+    }
+}
+
+/// A place service that finds "<query> Cafe".
+pub struct FakePlaces(pub Arc<Fake>);
+#[async_trait]
+impl PlaceSearch for FakePlaces {
+    fn name(&self) -> &'static str {
+        "Fake Maps"
+    }
+    async fn suggest(&self, query: &str) -> Result<Vec<PlaceSuggestion>> {
+        self.0.place_queries.lock().unwrap().push(query.to_string());
+        let name = format!("{query} Cafe");
+        Ok(vec![PlaceSuggestion { text: format!("{name}, 1 Main St"), label: name, detail: Some("1 Main St".into()), source: PlaceSource::OpenStreetMap }])
     }
 }
 

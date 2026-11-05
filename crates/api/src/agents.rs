@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Agents, their proposals (changes awaiting the user's review), settings and the audit log.
 
 use super::*;
@@ -17,8 +18,11 @@ pub enum ProposalAction {
     UpdateEvent { event: Event },
     CancelEvent { event_id: Id },
     RespondToInvite { event_id: Id, response: PartStat },
-    /// Create a contact (no id) or change one. Never deletes or merges.
+    /// Create a contact (no id) or change one. Never deletes.
     SaveContact { contact: Contact },
+    /// Merge duplicate people into the first contact (0045). Applied as
+    /// `Command::MergeContacts` only when the user approves.
+    MergeContacts { contact_ids: Vec<Id> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +135,13 @@ pub struct MirrorSettings {
     /// Turn files in `proposals/inbox/` into proposals without an agent token.
     #[serde(default = "yes")]
     pub accept_proposals: bool,
+    /// Write `calendar/` (agenda and .ics files). Also what folder agents may
+    /// see and propose for calendars.
+    #[serde(default = "yes")]
+    pub include_calendar: bool,
+    /// Write `contacts/` (person files) and read edits to them back.
+    #[serde(default = "yes")]
+    pub include_contacts: bool,
 }
 
 impl Default for MirrorSettings {
@@ -143,6 +154,8 @@ impl Default for MirrorSettings {
             include_eml: false,
             include_attachments: false,
             accept_proposals: true,
+            include_calendar: true,
+            include_contacts: true,
         }
     }
 }
@@ -152,6 +165,9 @@ pub struct Settings {
     pub mirror: MirrorSettings,
     /// Senders whose remote images load automatically.
     pub remote_image_senders: Vec<String>,
+    /// Load remote images in all mail except spam.
+    #[serde(default)]
+    pub load_remote_images: bool,
     /// Push AI drafts to the server Drafts folder before approval (still never sent).
     pub sync_ai_drafts_to_server: bool,
     pub theme: String,
@@ -170,6 +186,20 @@ pub struct Settings {
     /// Show a desktop notification when new mail arrives in an inbox.
     #[serde(default = "yes")]
     pub notify_new_mail: bool,
+    /// Send what's typed in an event's location to a place service
+    /// (OpenStreetMap, or Apple Maps in the Mac app) for suggestions.
+    #[serde(default)]
+    pub look_up_places: bool,
+    /// Show calendar alerts (0056).
+    #[serde(default = "yes")]
+    pub calendar_alerts: bool,
+    /// The alert new timed events start with, in minutes before (None: none).
+    #[serde(default = "default_alert")]
+    pub default_alert_minutes: Option<i32>,
+}
+
+fn default_alert() -> Option<i32> {
+    Some(10)
 }
 
 fn yes() -> bool {
@@ -181,6 +211,7 @@ impl Default for Settings {
         Self {
             mirror: MirrorSettings::default(),
             remote_image_senders: vec![],
+            load_remote_images: false,
             sync_ai_drafts_to_server: false,
             theme: "system".into(),
             initial_sync_days: 90,
@@ -188,6 +219,9 @@ impl Default for Settings {
             storage_limit_mb: None,
             poll_interval_secs: 120,
             notify_new_mail: true,
+            look_up_places: false,
+            calendar_alerts: true,
+            default_alert_minutes: default_alert(),
         }
     }
 }

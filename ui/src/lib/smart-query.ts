@@ -12,6 +12,8 @@ export interface QueryFields {
   words: string;
   unread: boolean;
   flagged: boolean;
+  /** `is:favorite`: from a favorite sender. */
+  favorite: boolean;
   attachment: boolean;
   /** A `newer_than:` value from AGES, or ''. */
   age: string;
@@ -24,7 +26,7 @@ export interface QueryFields {
 }
 
 export function emptyFields(): QueryFields {
-  return { from: '', to: '', subject: '', words: '', unread: false, flagged: false, attachment: false, age: '', accounts: [], anywhere: false, other: [] };
+  return { from: '', to: '', subject: '', words: '', unread: false, flagged: false, favorite: false, attachment: false, age: '', accounts: [], anywhere: false, other: [] };
 }
 
 /** Split respecting double quotes (like the core's parser). */
@@ -65,6 +67,7 @@ export function parseFields(query: string, accounts: string[] = []): QueryFields
     else if (k === 'subject' && !f.subject) f.subject = v;
     else if (k === 'is' && lv === 'unread') f.unread = true;
     else if (k === 'is' && (lv === 'flagged' || lv === 'starred')) f.flagged = true;
+    else if (k === 'is' && (lv === 'favorite' || lv === 'favourite')) f.favorite = true;
     else if (k === 'has' && lv === 'attachment') f.attachment = true;
     else if (k === 'newer_than' && !f.age && AGES.some(([a]) => a === lv)) f.age = lv;
     else if (k === 'in' && lv === 'anywhere') f.anywhere = true;
@@ -79,14 +82,15 @@ export function parseFields(query: string, accounts: string[] = []): QueryFields
 export function formatFields(f: QueryFields): string {
   const parts: string[] = [];
   const addrs = (op: string, v: string) => {
-    const l = list(v).map((x) => x.replace(/\s+/g, ''));
-    if (l.length) parts.push(`${op}:${l.join(',')}`);
+    const l = list(v).join(',');
+    if (l) parts.push(`${op}:${quote(l)}`);
   };
   addrs('from', f.from);
   addrs('to', f.to);
   if (f.subject.trim()) parts.push(`subject:${quote(f.subject.trim())}`);
   if (f.unread) parts.push('is:unread');
   if (f.flagged) parts.push('is:flagged');
+  if (f.favorite) parts.push('is:favorite');
   if (f.attachment) parts.push('has:attachment');
   if (f.age) parts.push(`newer_than:${f.age}`);
   if (f.accounts.length) parts.push(`account:${f.accounts.join(',')}`);
@@ -100,6 +104,7 @@ export function formatFields(f: QueryFields): string {
 export const TEMPLATES: { name: string; query: string }[] = [
   { name: 'Unread', query: 'is:unread' },
   { name: 'Flagged', query: 'is:flagged' },
+  { name: 'From favorites', query: 'is:favorite' },
   { name: 'With attachments', query: 'has:attachment' },
   { name: 'This week', query: 'newer_than:7d' },
 ];

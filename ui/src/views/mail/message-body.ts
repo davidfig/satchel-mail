@@ -1,33 +1,19 @@
-// Message bodies: text and HTML rendering, invitations, attachments, links.
+// Message bodies: text and HTML rendering, invitations, links.
 
 import { api } from '../../api';
-import { h, icon, replace } from '../../lib/dom';
-import { humanSize, timeRange } from '../../lib/format';
+import { h, icon, patch } from '../../lib/dom';
+import { timeRange } from '../../lib/format';
 import { confirmDialog, errorToast, modal, toast } from '../../lib/ui';
 import { transport } from '../../transport';
 import type { MessageDetail, PartStat } from '../../types';
-import { isAttribution, trimUrl } from '../../lib/thread';
+import { followTarget, isAttribution, linkScheme, routeLinks, trimUrl } from '../../lib/thread';
 import { editDraft, openComposer } from './composer';
 
-export function attachments(m: MessageDetail): HTMLElement | null {
-  const atts = m.attachments.filter((a) => !a.inline);
-  if (!atts.length) return null;
-  return h('div.attachments',
-    atts.map((a) =>
-      h(`button.attachment${a.risky ? '.risky' : ''}`, {
-        title: a.risky ? `${a.filename} can run code or imitate a sign-in page` : `Download ${a.filename}`,
-        on: {
-          click: async () => {
-            if (a.risky && !(await confirmDialog('Download a risky file?', `${a.filename} can run code or imitate a sign-in page when opened. Only download it if you were expecting it from this sender.`, 'Download anyway', true))) return;
-            void download(m.id, a.id);
-          },
-        },
-      }, icon(a.risky ? 'warning' : 'paperclip', 16), h('span.name', a.filename), h('span.muted.small', humanSize(a.size)))));
-}
-
-/** The core's phishing and safety warnings for one message. */
-export function warnings(m: MessageDetail): HTMLElement | null {
-  const list = m.warnings ?? [];
+/** The core's phishing and safety warnings for one message. A different
+ *  Reply-To only matters when answering, so the reply box shows that one
+ *  (`replyTo: true`) and the message leaves it out. */
+export function warnings(m: MessageDetail, replyTo = false): HTMLElement | null {
+  const list = (m.warnings ?? []).filter((w) => (w.kind === 'reply_to') === replyTo);
   if (!list.length) return null;
   return h('div.banner.warn.msg-warnings', { role: 'note' },
     icon('warning', 16),
@@ -50,7 +36,7 @@ export function inviteCard(m: MessageDetail, inSpam: boolean): HTMLElement {
   }
   const card = h('div.invite');
   const render = (status: PartStat | null) => {
-    replace(card,
+    patch(card,
       icon('calendar', 22),
       h('div.grow',
         h('strong', inv.title),
@@ -79,16 +65,25 @@ export function inviteCard(m: MessageDetail, inSpam: boolean): HTMLElement {
 
 /** Open a link from a message; `cautious` ones show where they really go first. */
 async function openLink(url: string, cautious: boolean) {
-  if (cautious) {
-    let host = url;
-    try {
-      host = new URL(url).host;
-    } catch {
-      /* show the raw link */
-    }
-    if (!(await confirmDialog('Open this link?', `It goes to ${host}. Mail in Spam or with warnings often hides where links lead, so check that's where you meant to go.`, 'Open link'))) return;
+  if (await confirmLink(url, cautious)) openExternal(url);
+}
+
+/** Asks before opening `url` when `cautious` or `always`, saying where it really goes.
+ *  `always` is for a link that came from outside (the `#follow` page): it also
+ *  shows the whole address. */
+export async function confirmLink(url: string, cautious: boolean, always = false): Promise<boolean> {
+  if (!cautious && !always) return true;
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+    /* show the raw link */
   }
-  openExternal(url);
+  const why = cautious
+    ? `It goes to ${host}. Mail in Spam or with warnings often hides where links lead, so check that's where you meant to go.`
+    : `It goes to ${host}. Check that's where you meant to go: any website can send you to this page with a link.`;
+  if (!always) return confirmDialog('Open this link?', why, 'Open link');
+  return confirmDialog('Open this link?', h('div', h('p', why), h('p.link-address', url)), 'Open link');
 }
 
 function linkified(line: string, cautious: boolean): HTMLElement {
@@ -136,6 +131,15 @@ export function textBody(text: string, cautious: boolean): HTMLElement {
   return pre;
 }
 
+/** About ten seconds of frames to wait for a message to parse before leaving it to `load`. */
+const SIZE_POLLS = 600;
+const framesSized = new WeakMap<HTMLIFrameElement, Promise<void>>();
+
+/** Resolves once `frame` (from `htmlFrame`) has its message parsed and is sized to fit. */
+export function frameSized(frame: HTMLIFrameElement): Promise<void> {
+  return framesSized.get(frame) ?? new Promise((r) => frame.addEventListener('load', () => r(), { once: true }));
+}
+
 /** Sanitized HTML (from the core) in a script-less sandboxed iframe with a CSP.
  *  Without `allowRemote` the CSP itself blocks remote images: CSS escapes
  *  and `image-set()` can slip past the sanitizer's checks. */
@@ -144,60 +148,102 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
   const csp = `default-src 'none'; img-src ${img}; style-src 'unsafe-inline'; font-src data:`;
   const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>
     html,body{margin:0;padding:0;background:transparent;color:#1d1d1f;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere}
-    img{max-width:100%;height:auto} table{max-width:100%} blockquote{border-left:3px solid #ccc;margin:0 0 0 .5em;padding-left:.75em;color:#555}
+    img{max-width:100%} img[width]{height:auto} table{max-width:100%} blockquote{border-left:3px solid #ccc;margin:0 0 0 .5em;padding-left:.75em;color:#555}
     a{color:#2a62d9}
-  </style></head><body>${html}</body></html>`;
-  const frame = h('iframe.html-body', { sandbox: 'allow-same-origin allow-popups allow-popups-to-escape-sandbox', referrerpolicy: 'no-referrer', title: 'Message content' }) as HTMLIFrameElement;
+  </style></head><body>${transport.kind === 'http' ? routeLinks(html, location.origin, cautious) : html}</body></html>`;
+  // `allow-popups` stays: on desktop a link reaches the host as a popup, which
+  // it refuses and hands to `catchHostLinks`. On the web every link points at
+  // our own `#follow` page (`routeLinks`); WebKit runs no listeners here, so the
+  // click opens that page as a popup, which must escape the sandbox to run
+  // scripts and ask before going on.
+  const sandbox = transport.kind === 'tauri' ? 'allow-same-origin allow-popups' : 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
+  const frame = h('iframe.html-body', { sandbox, referrerpolicy: 'no-referrer', title: 'Message content', dataset: { cautious: String(cautious) } }) as HTMLIFrameElement;
   frame.srcdoc = doc;
-  frame.addEventListener('load', () => {
+  // Size the frame as soon as the message is parsed, not on `load`, which
+  // waits for every remote image; the observer grows it as they arrive.
+  let sized: (() => void) | undefined;
+  framesSized.set(frame, new Promise((r) => (sized = r)));
+  let sizedDoc: Document | null = null;
+  const size = () => {
     const d = frame.contentDocument;
-    if (!d) return;
+    if (sizedDoc || !d?.body || d.URL !== 'about:srcdoc' || d.readyState === 'loading') return false;
+    sizedDoc = d;
     const fit = () => (frame.style.height = `${Math.min(d.documentElement.scrollHeight + 4, 20000)}px`);
     fit();
     new ResizeObserver(fit).observe(d.body);
-    d.addEventListener('click', (e) => {
+    sized!();
+    return true;
+  };
+  // Polled until parsed (the frame's own document can't run our listeners in
+  // WebKit); `load` is the backstop, and ends polling for a frame never shown.
+  let polls = 0;
+  const poll = () => {
+    if (!sizedDoc && !size() && ++polls < SIZE_POLLS) requestAnimationFrame(poll);
+  };
+  requestAnimationFrame(poll);
+  frame.addEventListener('load', () => {
+    size();
+    const d = frame.contentDocument;
+    if (!d) return;
+    // Chromium and Firefox run this; WebKit runs no listeners in a script-less
+    // sandboxed frame, so there the link opens as a popup: on desktop
+    // `catchHostLinks` takes it, on the web it is our `#follow` page.
+    const onLink = (e: MouseEvent) => {
       const a = (e.target as HTMLElement).closest('a');
-      if (a?.href && /^(https?|mailto):/.test(a.href)) {
-        e.preventDefault();
-        if (a.href.startsWith('mailto:')) {
-          const email = decodeURIComponent(a.href.slice(7).split('?')[0]);
-          openComposer({ to: [{ email }] });
-        } else void openLink(a.href, cautious);
-      }
+      // Anchors within the message scroll as usual. Anything else is stopped
+      // before we look at it, so a malformed link can't slip past by throwing.
+      if (!a?.href || a.href.startsWith('about:srcdoc#')) return;
+      e.preventDefault();
+      // On the web the link was routed through `#follow`; check what it carries.
+      followLink(followTarget(a.href, location.origin)?.url ?? a.href, cautious);
+    };
+    d.addEventListener('click', onLink);
+    // Middle-click opens a tab without a `click`; it gets the same check.
+    d.addEventListener('auxclick', (e) => {
+      if (e.button === 1) onLink(e);
     });
   });
   return h('div.html-wrap', frame);
 }
 
-export function openExternal(url: string) {
-  if (transport.kind === 'tauri') void transport.host('open_url', { url }).catch(() => window.open(url, '_blank', 'noopener'));
-  else window.open(url, '_blank', 'noopener,noreferrer');
+/** Opens a link from a message body; false if it isn't one we follow. */
+export function followLink(href: string, cautious: boolean): boolean {
+  const scheme = linkScheme(href);
+  if (scheme === 'mail') {
+    const email = mailtoAddress(href);
+    if (email) openComposer({ to: [{ email }] });
+    else toast('This email link is malformed, so Satchel didn’t open it.');
+  } else if (scheme === 'web') void openLink(href, cautious);
+  else return false;
+  return true;
 }
 
-async function download(messageId: string, attachmentId: string) {
+/** The address of a mailto: link, or null if it doesn't decode. */
+function mailtoAddress(href: string): string | null {
   try {
-    const a = await api.getAttachment(messageId, attachmentId);
-    await saveBase64(a.filename, a.mime_type, a.data_base64);
-  } catch (e) {
-    errorToast(e);
+    return decodeURIComponent(href.slice(7).split('?')[0]).trim() || null;
+  } catch {
+    return null;
   }
 }
 
-export async function saveBase64(filename: string, mime: string, b64: string) {
-  if (transport.kind === 'tauri') {
-    const path = await transport.host<string | null>('save_file', { filename, data_base64: b64 });
-    if (path) toast(`Saved to ${path}`, { kind: 'success' });
-    return;
-  }
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  const link = h('a', { href: url, download: filename });
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+/** Desktop: a link clicked in a frame reaches us from the host, which caught
+ *  it as a popup (a message iframe) or a navigation (a PDF attachment). The
+ *  click focused that iframe, which says whether to be cautious; if we can't
+ *  tell, we are. Installed once at startup. */
+export function catchHostLinks() {
+  transport.onOpenLink((url) => {
+    const frame = document.activeElement;
+    const cautious = !(frame instanceof HTMLIFrameElement && frame.dataset.cautious === 'false');
+    followLink(url, cautious);
+  });
+}
+
+export function openExternal(url: string) {
+  // No window.open fallback on desktop: the webview can't show it, and the
+  // host would hand it straight back here.
+  if (transport.kind === 'tauri') void transport.host('open_url', { url }).catch(errorToast);
+  else window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 export async function viewSource(messageId: string) {

@@ -1,6 +1,7 @@
 //! Content-addressed storage for raw RFC 822 messages.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Result;
 
@@ -9,6 +10,8 @@ pub trait BlobStore: Send + Sync {
     fn put(&self, data: &[u8]) -> Result<String>;
     fn get(&self, hash: &str) -> Result<Option<Vec<u8>>>;
     fn delete(&self, hash: &str) -> Result<()>;
+    /// Hashes of the stored blobs last written at least `min_age` ago.
+    fn list(&self, min_age: Duration) -> Result<Vec<String>>;
 }
 
 pub struct FsBlobStore {
@@ -52,6 +55,27 @@ impl BlobStore for FsBlobStore {
         let _ = std::fs::remove_file(self.path(hash));
         Ok(())
     }
+
+    fn list(&self, min_age: Duration) -> Result<Vec<String>> {
+        let mut out = vec![];
+        for dir in std::fs::read_dir(&self.root)? {
+            let dir = dir?;
+            let prefix = dir.file_name().to_string_lossy().into_owned();
+            if !dir.file_type()?.is_dir() {
+                continue;
+            }
+            for f in std::fs::read_dir(dir.path())? {
+                let f = f?;
+                let name = f.file_name().to_string_lossy().into_owned();
+                let Some(rest) = name.strip_suffix(".eml") else { continue };
+                let meta = f.metadata()?;
+                if meta.is_file() && meta.modified()?.elapsed().unwrap_or_default() >= min_age {
+                    out.push(format!("{prefix}{rest}"));
+                }
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// In-memory blobs for tests.
@@ -72,5 +96,8 @@ impl BlobStore for MemBlobStore {
     fn delete(&self, hash: &str) -> Result<()> {
         self.map.lock().unwrap().remove(hash);
         Ok(())
+    }
+    fn list(&self, _min_age: Duration) -> Result<Vec<String>> {
+        Ok(self.map.lock().unwrap().keys().cloned().collect())
     }
 }

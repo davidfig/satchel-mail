@@ -45,12 +45,20 @@ impl Store {
                 c.execute("DELETE FROM threads WHERE id=?", [thread_id])?;
                 return Ok(());
             }
-            // Count duplicate copies (same Message-ID in several folders) once.
-            let mut seen_mids = HashSet::new();
-            let unique: Vec<&M> = rows
-                .iter()
-                .filter(|m| m.mid.as_ref().map(|x| seen_mids.insert(x.clone())).unwrap_or(true))
-                .collect();
+            // Count copies of one message (the same Message-ID in several folders) once.
+            let mut seen: HashMap<&str, Vec<&M>> = HashMap::new();
+            let mut unique: Vec<&M> = vec![];
+            for m in &rows {
+                if let Some(mid) = m.mid.as_deref() {
+                    let kept = seen.entry(mid).or_default();
+                    let from = m.from.as_ref().map(|a| a.email.as_str());
+                    if kept.iter().any(|k| super::message_reads::is_copy(k.from.as_ref().map(|a| a.email.as_str()), &k.snippet, from, &m.snippet)) {
+                        continue;
+                    }
+                    kept.push(m);
+                }
+                unique.push(m);
+            }
             let last = rows.last().unwrap();
             let first = &rows[0];
             let mut participants: Vec<Address> = vec![];
@@ -102,79 +110,22 @@ impl Store {
             snippet: r.get("snippet")?,
             mailbox_ids: vec![],
             latest_message_id: r.get("latest_message_id")?,
+            favorite: false,
         })
     }
 
-    /// A message condition matching any of `values` as sender and/or
-    /// recipient (To, Cc, Bcc). Full addresses match exactly; anything else
-    /// matches part of a name or address.
-    fn any_address(values: &[String], sender: bool, recipient: bool, p: &mut Vec<rusqlite::types::Value>) -> String {
-        use rusqlite::types::Value as V;
-        let mut ors = vec![];
-        let like = |s: &str| format!("%{}%", s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
-        for v in values {
-            let v = v.to_lowercase();
-            let exact = crate::mail::search::is_full_address(&v);
-            if sender {
-                if exact {
-                    ors.push("lower(m.from_email)=?");
-                    p.push(V::Text(v.clone()));
-                } else {
-                    ors.push(r"lower(m.from_email) LIKE ? ESCAPE '\' OR lower(m.from_name) LIKE ? ESCAPE '\'");
-                    p.push(V::Text(like(&v)));
-                    p.push(V::Text(like(&v)));
-                }
-            }
-            if recipient {
-                // Addresses are stored as JSON objects; an exact match looks for the whole email value.
-                let needle = if exact { like(&format!("\"email\":{}", serde_json::Value::String(v.clone()))) } else { like(&v) };
-                ors.push(r"lower(m.to_json) LIKE ? ESCAPE '\' OR lower(m.cc_json) LIKE ? ESCAPE '\' OR lower(m.bcc_json) LIKE ? ESCAPE '\'");
-                for _ in 0..3 {
-                    p.push(V::Text(needle.clone()));
-                }
-            }
-        }
-        format!("({})", ors.join(" OR "))
-    }
-
-    /// SQL for one search term on message `m`, appending its params.
-    fn term_sql(term: &MsgTerm, p: &mut Vec<rusqlite::types::Value>) -> String {
-        use rusqlite::types::Value as V;
-        match term {
-            // An empty list (`from:,`) asks for nothing.
-            MsgTerm::From(v) | MsgTerm::To(v) | MsgTerm::With(v) | MsgTerm::InMailbox(v) if v.is_empty() => "1".into(),
-            MsgTerm::From(v) => Self::any_address(v, true, false, p),
-            MsgTerm::To(v) => Self::any_address(v, false, true, p),
-            MsgTerm::With(v) => Self::any_address(v, true, true, p),
-            MsgTerm::Subject(s) => {
-                p.push(V::Text(format!("%{}%", s.to_lowercase())));
-                "lower(m.subject) LIKE ?".into()
-            }
-            MsgTerm::HasAttachment => "m.has_attachments=1".into(),
-            MsgTerm::Unread => "m.seen=0".into(),
-            MsgTerm::Flagged => "m.flagged=1".into(),
-            MsgTerm::Before(d) => {
-                p.push(V::Integer(d.timestamp_millis()));
-                "m.date<?".into()
-            }
-            MsgTerm::After(d) => {
-                p.push(V::Integer(d.timestamp_millis()));
-                "m.date>=?".into()
-            }
-            MsgTerm::InMailbox(names) => {
-                let ph = vec!["?"; names.len()].join(",");
-                for _ in 0..2 {
-                    p.extend(names.iter().map(|n| V::Text(n.to_lowercase())));
-                }
-                format!(
-                    "EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND (lower(mb.name) IN ({ph}) OR mb.role IN ({ph})))"
-                )
-            }
-            MsgTerm::Text(q) => {
-                p.push(V::Text(q.clone()));
-                "m.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH ?)".into()
-            }
-        }
+    /// What the threads table doesn't hold: the thread's mailboxes, and
+    /// whether a favorite sender wrote any of it.
+    fn fill_thread_extras(c: &Connection, t: &mut ThreadSummary) -> Result<()> {
+        let mut ms = c.prepare_cached(
+            "SELECT DISTINCT mm.mailbox_id FROM messages m JOIN message_mailboxes mm ON mm.message_id=m.id WHERE m.thread_id=?",
+        )?;
+        t.mailbox_ids = ms.query_map([&t.thread_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+        let mut fav = c.prepare_cached(
+            "SELECT EXISTS (SELECT 1 FROM messages m JOIN favorite_senders fs ON fs.email=lower(m.from_email) WHERE m.thread_id=?)",
+        )?;
+        t.favorite = fav.query_row([&t.thread_id], |r| r.get(0))?;
+        Ok(())
     }
 
     /// WHERE clause + params for a thread filter (excluding paging). `None`
@@ -218,19 +169,46 @@ impl Store {
             msg_conds.push("NOT EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND mb.role IN ('trash','junk'))".into());
         }
         if let Some(a) = &f.account_ids {
+            // On the thread, not the message: inside the EXISTS, SQLite picks
+            // the account index over messages_thread and scans the account's
+            // whole mailbox once per thread (seconds on a real account).
             let ph = vec!["?"; a.len()].join(",");
-            msg_conds.push(format!("m.account_id IN ({ph})"));
+            pre_where.push(format!("t.account_id IN ({ph})"));
             for x in a {
-                p.push(V::Text(x.clone()));
+                pre_p.push(V::Text(x.clone()));
             }
         }
         if let Some(d) = f.after {
             msg_conds.push("m.date>=?".into());
             p.push(V::Integer(d.timestamp_millis()));
         }
+        // Negated terms and `has_unread` are about the whole thread, but only
+        // the messages this filter may show: nothing outside an agent's date
+        // limit, and no copy in Trash when those are left out.
+        let mut scope = String::new();
+        let mut scope_p: Vec<V> = vec![];
+        if f.exclude_trash_junk {
+            scope.push_str(" AND NOT EXISTS (SELECT 1 FROM message_mailboxes mm JOIN mailboxes mb ON mb.id=mm.mailbox_id WHERE mm.message_id=m.id AND mb.role IN ('trash','junk'))");
+        }
+        if let Some(d) = f.after {
+            scope.push_str(" AND m.date>=?");
+            scope_p.push(V::Integer(d.timestamp_millis()));
+        }
+        let mut thread_where: Vec<String> = vec![];
+        let mut thread_p: Vec<V> = vec![];
+        if f.has_unread {
+            thread_where.push(format!("EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=t.id{scope} AND m.seen=0)"));
+            thread_p.extend(scope_p.iter().cloned());
+        }
         let mut probed = false;
         for cond in &f.conds {
-            if let (MsgTerm::Text(q), false, false) = (&cond.term, cond.negate, probed) {
+            if cond.negate {
+                thread_p.extend(scope_p.iter().cloned());
+                let sql = Self::term_sql(&cond.term, &mut thread_p);
+                thread_where.push(format!("NOT EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=t.id{scope} AND {sql})"));
+                continue;
+            }
+            if let (MsgTerm::Text(q), false) = (&cond.term, probed) {
                 // Selective text (few matches): start from the text index. Broad text:
                 // walk threads newest-first and stop early. Either way the text and the
                 // other filters must hold for the same message.
@@ -248,9 +226,7 @@ impl Store {
                     pre_p.push(V::Text(q.clone()));
                 }
             }
-            let sql = Self::term_sql(&cond.term, &mut p);
-            // A missing value (no sender, say) doesn't match, so negated it does.
-            msg_conds.push(if cond.negate { format!("NOT COALESCE(({sql}),0)") } else { sql });
+            msg_conds.push(Self::term_sql(&cond.term, &mut p));
         }
         if let Some(ids) = &f.message_ids {
             if ids.is_empty() {
@@ -267,6 +243,8 @@ impl Store {
         }
         pre_where.append(&mut where_);
         pre_p.append(&mut p);
+        pre_where.append(&mut thread_where);
+        pre_p.append(&mut thread_p);
         Ok(Some((pre_where, pre_p)))
     }
 
@@ -299,11 +277,8 @@ impl Store {
             p.push(V::Integer(f.offset as i64));
             let mut s = c.prepare(&sql)?;
             let mut rows = s.query_map(params_from_iter(p.iter()), Self::thread_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
-            let mut ms = c.prepare_cached(
-                "SELECT DISTINCT mm.mailbox_id FROM messages m JOIN message_mailboxes mm ON mm.message_id=m.id WHERE m.thread_id=?",
-            )?;
             for t in rows.iter_mut() {
-                t.mailbox_ids = ms.query_map([&t.thread_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+                Self::fill_thread_extras(c, t)?;
             }
             Ok(rows)
         })
@@ -324,10 +299,7 @@ impl Store {
     pub fn get_thread_summary(&self, id: &str) -> Result<Option<ThreadSummary>> {
         self.r(|c| {
             let Some(mut t) = c.query_row("SELECT * FROM threads WHERE id=?", [id], Self::thread_row).optional()? else { return Ok(None) };
-            let mut s = c.prepare_cached(
-                "SELECT DISTINCT mm.mailbox_id FROM messages m JOIN message_mailboxes mm ON mm.message_id=m.id WHERE m.thread_id=?",
-            )?;
-            t.mailbox_ids = s.query_map([id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+            Self::fill_thread_extras(c, &mut t)?;
             Ok(Some(t))
         })
     }

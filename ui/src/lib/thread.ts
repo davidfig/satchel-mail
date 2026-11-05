@@ -97,3 +97,82 @@ export function splitQuote(text: string): [string, string] {
   if (i < 0) return [text.trim(), ''];
   return [lines.slice(0, i).join('\n').trim(), lines.slice(i).join('\n')];
 }
+
+/** Which kind of message link we follow: web pages and email addresses, nothing else. */
+export function linkScheme(url: string): 'web' | 'mail' | null {
+  if (/^https?:/i.test(url)) return 'web';
+  if (/^mailto:/i.test(url)) return 'mail';
+  return null;
+}
+
+/** Our own page that shows a message link and asks before opening it (web mode). */
+export function followHref(origin: string, url: string, cautious: boolean): string {
+  return `${origin}/#follow=${encodeURIComponent(url)}${cautious ? '&cautious=1' : ''}`;
+}
+
+/** The link a `followHref` address carries, or null if `href` isn't one for `origin`. */
+export function followTarget(href: string, origin: string): { url: string; cautious: boolean } | null {
+  let u: URL;
+  try {
+    u = new URL(href);
+  } catch {
+    return null;
+  }
+  if (u.origin !== origin || u.pathname !== '/') return null;
+  const hash = new URLSearchParams(u.hash.slice(1));
+  const url = hash.get('follow');
+  return url ? { url, cautious: hash.get('cautious') === '1' } : null;
+}
+
+/**
+ * Web mode: points every link in (already sanitized) HTML at our own `#follow=` page,
+ * so a click that no listener catches (Safari runs none in the sandboxed frame) still
+ * lands on a page that shows where the link goes and asks. Anchors within the message
+ * and `cid:` parts stay as they are.
+ */
+export function routeLinks(html: string, origin: string, cautious: boolean): string {
+  const doc = new DOMParser().parseFromString(`<!doctype html><html><head></head><body>${html}</body></html>`, 'text/html');
+  let changed = false;
+  for (const a of doc.body.querySelectorAll('a[href], area[href]')) {
+    const href = (a.getAttribute('href') ?? '').trim();
+    if (!href || href.startsWith('#') || /^cid:/i.test(href)) continue;
+    a.setAttribute('href', followHref(origin, href, cautious));
+    a.setAttribute('target', '_blank');
+    a.setAttribute('rel', 'noopener noreferrer');
+    changed = true;
+  }
+  return changed ? doc.body.innerHTML : html;
+}
+
+/**
+ * A conversation as Markdown, for pasting into an AI chat. Each body is fenced
+ * so the sender's text can't pass itself off as another message. With
+ * `trimQuotes`, a reply loses the quoted history the earlier messages already show.
+ */
+export function threadMarkdown(subject: string, msgs: MessageDetail[], trimQuotes = msgs.length > 1): string {
+  const addrs = (list: Address[]) => list.map((a) => (a.name?.trim() ? `${a.name.trim()} <${a.email}>` : a.email)).join(', ');
+  const out = [`# ${subject.trim() || '(no subject)'}`, ''];
+  for (const m of msgs) {
+    out.push(`## ${m.from ? addrs([m.from]) : '(unknown sender)'}`, '');
+    out.push(`- date: ${new Date(m.date).toString()}`);
+    if (m.to.length) out.push(`- to: ${addrs(m.to)}`);
+    if (m.cc.length) out.push(`- cc: ${addrs(m.cc)}`);
+    if (m.subject.trim() && m.subject !== subject) out.push(`- subject: ${m.subject.trim()}`);
+    const atts = m.attachments.filter((a) => !a.inline).map((a) => a.filename);
+    if (atts.length) out.push(`- attachments: ${atts.join(', ')}`);
+    if (m.invite) out.push(`- calendar invitation: ${m.invite.title}`);
+    if (m.flags.draft) out.push('- draft, not sent');
+    if (m.body_pending) out.push('- body not downloaded yet; this is only a preview');
+    let body = (m.body_pending ? m.snippet : m.text_body).trim();
+    if (trimQuotes) body = splitQuote(body)[0] || body;
+    out.push('', fenced(body), '');
+  }
+  return out.join('\n');
+}
+
+/** `s` in a code fence longer than any run of backticks inside it. */
+function fenced(s: string): string {
+  const longest = Math.max(0, ...(s.match(/`+/g) ?? []).map((r) => r.length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return `${fence}text\n${s}\n${fence}`;
+}

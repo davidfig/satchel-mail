@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Commands: everything a client can ask the core to do.
 
 use super::*;
@@ -54,6 +55,9 @@ pub enum Command {
     /// Mark every unread message in one mailbox, or in every mailbox with a
     /// role, as read. Returns {message_ids} (what changed, for undo).
     MarkAllRead { mailbox_id: Option<Id>, role: Option<MailboxRole> },
+    /// Permanently delete everything in a Spam or Trash folder, or in every
+    /// one with that role. Returns {deleted}.
+    EmptyMailbox { mailbox_id: Option<Id>, role: Option<MailboxRole> },
     Move { message_ids: Vec<Id>, mailbox_id: Id },
     Archive { message_ids: Vec<Id> },
     Trash { message_ids: Vec<Id> },
@@ -65,6 +69,12 @@ pub enum Command {
     ListSenderRules,
     /// Set or (with `verdict: null`) remove the rule for one address.
     SetSenderRule { email: String, verdict: Option<SenderVerdict> },
+    /// Favorite sender addresses (lowercase), sorted (0053).
+    ListFavoriteSenders,
+    /// Add addresses to the favorites, or remove them: all of one person's
+    /// addresses at once. Their conversations are highlighted and match
+    /// `is:favorite`.
+    SetFavoriteSenders { emails: Vec<String>, favorite: bool },
     /// Unsubscribe using the message's List-Unsubscribe header. Returns
     /// {via: "one_click" | "email" | "browser", url?}; "browser" means the
     /// client should open `url`.
@@ -106,6 +116,18 @@ pub enum Command {
         day_end_hour: Option<u32>,
         timezone: Option<String>,
     },
+    /// Calendar alerts that have gone off and are still open, oldest first (0056).
+    ListAlerts,
+    /// Alerts that will go off by `until` (at most two weeks ahead), for a
+    /// host to schedule with the OS (0057).
+    ListUpcomingAlerts { until: DateTime<Utc> },
+    /// Show an alert again at `until`. Works on an upcoming alert too.
+    SnoozeAlert { alert_id: Id, until: DateTime<Utc> },
+    /// Dismiss one alert, or (`alert_id: null`) every open one.
+    DismissAlert { alert_id: Option<Id> },
+    /// Places for an event's location: ones you've used, then (if the user
+    /// turned on `look_up_places`) a lookup with the host's place service.
+    SuggestLocations { query: String },
 
     // contacts
     /// Contacts sorted by name, optionally filtered by name, address or organization.

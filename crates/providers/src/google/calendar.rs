@@ -3,6 +3,8 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use std::collections::HashMap;
+
 use chrono::{DateTime, TimeZone, Utc};
 use satchel_api::*;
 use satchel_core::provider::{ApplyOutcome, CalendarOp, CalendarProvider, CredentialHandle, RemoteCalendar, SyncCtx};
@@ -46,8 +48,44 @@ fn partstat_to_google(p: PartStat) -> &'static str {
     }
 }
 
-/// Google event JSON -> a VCALENDAR (single VEVENT; overrides carry RECURRENCE-ID).
-pub fn google_to_ics(item: &Value, calendar_id: &str) -> Option<(String, String)> {
+/// Google reminders as VALARM blocks: popups show, emails stay with Google.
+/// Those from the calendar's `defaults` are marked as such (0056).
+fn reminder_alarms(item: &Value, defaults: &Value) -> Vec<String> {
+    let r = &item["reminders"];
+    let (list, default) = if r["useDefault"] == true { (defaults, true) } else { (&r["overrides"], false) };
+    let mark: &[&str] = if default { &[satchel_ical::DEFAULT_MARK] } else { &[] };
+    list.as_array()
+        .map(|l| {
+            l.iter()
+                .filter_map(|x| {
+                    let minutes = i32::try_from(x["minutes"].as_i64()?).ok()?;
+                    let action = if x["method"] == "email" { "EMAIL" } else { "DISPLAY" };
+                    Some(satchel_ical::valarm(minutes, action, mark))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The master's alarms as Google reminders: the calendar's defaults while
+/// every alarm is still one of them, else up to 5 explicit ones.
+fn google_reminders(m: &satchel_ical::ParsedEvent) -> Value {
+    if !m.alarms.is_empty() && m.alarms.iter().all(|a| a.default) {
+        return json!({ "useDefault": true });
+    }
+    let overrides: Vec<Value> = m
+        .alarms
+        .iter()
+        .filter(|a| a.shows() || a.action == "EMAIL")
+        .filter_map(|a| Some(json!({ "method": if a.shows() { "popup" } else { "email" }, "minutes": m.minutes_before(a)?.clamp(0, 40320) })))
+        .take(5)
+        .collect();
+    json!({ "useDefault": false, "overrides": overrides })
+}
+
+/// Google event JSON -> a VCALENDAR (single VEVENT; overrides carry
+/// RECURRENCE-ID). `defaults` is the calendar's `defaultReminders`.
+pub fn google_to_ics(item: &Value, calendar_id: &str, defaults: &Value) -> Option<(String, String)> {
     // A deleted occurrence of a series comes with only its original start.
     let cancelled_instance = item["status"] == "cancelled" && item["recurringEventId"].is_string();
     let (start, all_day, tz) = gdate(&item["start"]).or_else(|| cancelled_instance.then(|| gdate(&item["originalStartTime"])).flatten())?;
@@ -89,6 +127,7 @@ pub fn google_to_ics(item: &Value, calendar_id: &str) -> Option<(String, String)
         organizer: item["organizer"]["email"].as_str().map(|e| Address { email: e.to_string(), name: item["organizer"]["displayName"].as_str().map(String::from) }),
         status,
         my_status: None,
+        alerts: None,
     };
     let exdates: Vec<DateTime<Utc>> = item["recurrence"]
         .as_array()
@@ -103,7 +142,8 @@ pub fn google_to_ics(item: &Value, calendar_id: &str) -> Option<(String, String)
                 .collect()
         })
         .unwrap_or_default();
-    let mut ics = satchel_ical::serialize(&ev, &satchel_ical::SerializeOpts { sequence: item["sequence"].as_i64().unwrap_or(0), exdates: &exdates, ..Default::default() });
+    let alarms = reminder_alarms(item, defaults);
+    let mut ics = satchel_ical::serialize(&ev, &satchel_ical::SerializeOpts { sequence: item["sequence"].as_i64().unwrap_or(0), exdates: &exdates, alarms: &alarms, ..Default::default() });
     if item["recurringEventId"].is_string()
         && let Some((orig, od, otz)) = gdate(&item["originalStartTime"]) {
             let line = if od {
@@ -149,6 +189,7 @@ pub fn ics_to_google(ics: &str) -> Option<Value> {
         "end": time(&end),
         "attendees": m.attendees.iter().map(|a| json!({ "email": a.email, "displayName": a.name, "responseStatus": partstat_to_google(a.status), "optional": a.optional })).collect::<Vec<_>>(),
         "status": match m.status { EventStatus::Tentative => "tentative", EventStatus::Cancelled => "cancelled", EventStatus::Confirmed => "confirmed" },
+        "reminders": google_reminders(m),
     });
     if !recurrence.is_empty() {
         body["recurrence"] = json!(recurrence);
@@ -164,7 +205,7 @@ impl GoogleCalendarProvider {
         Ok(Self { api: api_client(creds)?, owner })
     }
 
-    async fn sync_calendar(&self, ctx: &SyncCtx, local: &str, cal: &str, token: Option<String>) -> Result<()> {
+    async fn sync_calendar(&self, ctx: &SyncCtx, local: &str, cal: &str, defaults: &Value, token: Option<String>) -> Result<()> {
         let mut page: Option<String> = None;
         let mut next_sync = None;
         loop {
@@ -179,7 +220,7 @@ impl GoogleCalendarProvider {
                 Ok(v) => v,
                 Err(e) if token.is_some() && e.to_string().contains("HTTP 410") => {
                     ctx.store.set_calendar_token(local, None)?;
-                    return Box::pin(self.sync_calendar(ctx, local, cal, None)).await;
+                    return Box::pin(self.sync_calendar(ctx, local, cal, defaults, None)).await;
                 }
                 Err(e) => return Err(e),
             };
@@ -199,7 +240,7 @@ impl GoogleCalendarProvider {
                 {
                     item["iCalUID"] = json!(master.uid);
                 }
-                if let Some((_uid, ics)) = google_to_ics(&item, local) {
+                if let Some((_uid, ics)) = google_to_ics(&item, local, defaults) {
                     ctx.put_event(local, id, item["etag"].as_str(), &ics)?;
                 }
             }
@@ -222,12 +263,10 @@ impl GoogleCalendarProvider {
 impl CalendarProvider for GoogleCalendarProvider {
     async fn sync(&self, ctx: &SyncCtx) -> Result<()> {
         let v = self.api.json(|h, t| h.get(format!("{GCAL}/users/me/calendarList?maxResults=250")).bearer_auth(t), "list calendars").await?;
-        let cals: Vec<RemoteCalendar> = v["items"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|c| c["deleted"] != true)
+        let items: Vec<Value> = v["items"].as_array().cloned().unwrap_or_default().into_iter().filter(|c| c["deleted"] != true).collect();
+        let defaults: HashMap<String, Value> = items.iter().map(|c| (c["id"].as_str().unwrap_or_default().to_string(), c["defaultReminders"].clone())).collect();
+        let cals: Vec<RemoteCalendar> = items
+            .iter()
             .map(|c| RemoteCalendar {
                 remote_id: c["id"].as_str().unwrap_or_default().to_string(),
                 name: c["summaryOverride"].as_str().or(c["summary"].as_str()).unwrap_or("Calendar").to_string(),
@@ -239,7 +278,7 @@ impl CalendarProvider for GoogleCalendarProvider {
         for c in &cals {
             let Some(local) = map.get(&c.remote_id) else { continue };
             let token = ctx.store.get_calendar(local)?.and_then(|s| s.sync_token);
-            self.sync_calendar(ctx, local, &c.remote_id, token).await?;
+            self.sync_calendar(ctx, local, &c.remote_id, defaults.get(&c.remote_id).unwrap_or(&Value::Null), token).await?;
         }
         Ok(())
     }
@@ -328,7 +367,7 @@ mod tests {
             "attendees": [{ "email": "me@x.test", "responseStatus": "needsAction", "self": true }],
             "organizer": { "email": "boss@x.test" }
         });
-        let (uid, ics) = google_to_ics(&item, "cal").unwrap();
+        let (uid, ics) = google_to_ics(&item, "cal", &Value::Null).unwrap();
         assert_eq!(uid, "abc@google.com");
         let p = satchel_ical::parse(&ics);
         assert_eq!(p.events[0].rrule.as_deref(), Some("FREQ=WEEKLY;BYDAY=MO"));
@@ -342,7 +381,7 @@ mod tests {
         let exc = json!({ "id": "abc_20260119T140000Z", "recurringEventId": "abc", "iCalUID": "abc@google.com", "summary": "Standup (moved)",
             "start": { "dateTime": "2026-01-19T11:00:00-05:00" }, "end": { "dateTime": "2026-01-19T11:15:00-05:00" },
             "originalStartTime": { "dateTime": "2026-01-19T09:00:00-05:00", "timeZone": "America/New_York" } });
-        let (_, ics2) = google_to_ics(&exc, "cal").unwrap();
+        let (_, ics2) = google_to_ics(&exc, "cal", &Value::Null).unwrap();
         let p2 = satchel_ical::parse(&ics2);
         assert!(p2.events[0].recurrence_id.is_some());
         assert_eq!(p2.events[0].recurrence_id.as_ref().unwrap().to_utc().to_rfc3339(), "2026-01-19T14:00:00+00:00");
@@ -350,9 +389,31 @@ mod tests {
         // A deleted occurrence has no start of its own; it becomes a cancelled override.
         let gone = json!({ "id": "abc_20260126T140000Z", "recurringEventId": "abc", "iCalUID": "abc@google.com", "status": "cancelled",
             "originalStartTime": { "dateTime": "2026-01-26T09:00:00-05:00", "timeZone": "America/New_York" } });
-        let (_, ics3) = google_to_ics(&gone, "cal").unwrap();
+        let (_, ics3) = google_to_ics(&gone, "cal", &Value::Null).unwrap();
         let p3 = satchel_ical::parse(&ics3);
         assert_eq!(p3.events[0].status, EventStatus::Cancelled);
         assert_eq!(p3.events[0].recurrence_id.as_ref().unwrap().to_utc().to_rfc3339(), "2026-01-26T14:00:00+00:00");
+    }
+
+    #[test]
+    fn reminders_roundtrip() {
+        let item = |reminders: Value| json!({ "id": "r", "iCalUID": "r@google.com", "summary": "Call", "reminders": reminders,
+            "start": { "dateTime": "2026-01-05T09:00:00Z" }, "end": { "dateTime": "2026-01-05T09:30:00Z" } });
+        let defaults = json!([{ "method": "popup", "minutes": 10 }, { "method": "email", "minutes": 30 }]);
+
+        // The calendar's defaults read as alerts and go back as the defaults.
+        let (_, ics) = google_to_ics(&item(json!({ "useDefault": true })), "cal", &defaults).unwrap();
+        let m = &satchel_ical::parse(&ics).events[0];
+        assert_eq!(m.alerts(), [Alert { minutes_before: 10 }]);
+        assert_eq!(ics_to_google(&ics).unwrap()["reminders"], json!({ "useDefault": true }));
+
+        // Explicit ones go back as they came; a changed alert drops the defaults.
+        let explicit = json!({ "useDefault": false, "overrides": [{ "method": "popup", "minutes": 5 }, { "method": "email", "minutes": 60 }] });
+        let (_, ics) = google_to_ics(&item(explicit.clone()), "cal", &defaults).unwrap();
+        assert_eq!(ics_to_google(&ics).unwrap()["reminders"], explicit);
+        let mut ev = satchel_ical::parse(&ics).events[0].to_event("cal", None);
+        ev.alerts = Some(vec![Alert { minutes_before: 15 }]);
+        let changed = satchel_ical::serialize(&ev, &Default::default());
+        assert_eq!(ics_to_google(&changed).unwrap()["reminders"], json!({ "useDefault": false, "overrides": [{ "method": "popup", "minutes": 15 }] }));
     }
 }

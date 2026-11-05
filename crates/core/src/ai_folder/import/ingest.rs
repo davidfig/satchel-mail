@@ -23,7 +23,8 @@ impl Engine {
                 Ok(p) => crate::ai_folder::import::Outcome::Created(p),
                 Err(e) => crate::ai_folder::import::Outcome::Error(e.clone()),
             };
-            crate::ai_folder::import::finish(&settings.mirror, &path, outcome);
+            let file = crate::ai_folder::import::finish(&settings.mirror, &path, outcome);
+            self.record_processed_file(created.as_ref().ok(), file);
         }
         self.ingest_person_files(&settings.mirror).await;
     }
@@ -32,35 +33,56 @@ impl Engine {
     /// contact proposals. The file moves to `proposals/processed/` like an
     /// inbox file, and the person's file is written again from the store.
     pub(crate) async fn ingest_person_files(self: &Arc<Self>, mirror: &MirrorSettings) {
-        let dir = crate::ai_folder::root(mirror).join("contacts/people");
-        let Ok(rd) = std::fs::read_dir(&dir) else { return };
-        let mut paths: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "md")).collect();
+        if !mirror.include_contacts {
+            return;
+        }
+        let root = crate::ai_folder::root(mirror);
+        let Ok(files) = crate::ai_folder::list_files(&root, &root.join("contacts/people")) else { return };
+        let mut paths: Vec<PathBuf> = files.into_iter().filter(|p| p.extension().is_some_and(|x| x == "md")).collect();
         paths.sort();
         for path in paths {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let Ok(text) = crate::ai_folder::read_regular(&crate::ai_folder::root(mirror), &path) else { continue };
-            let last = self.contact_files.lock().unwrap().get(&name).cloned();
-            let created = match crate::ai_folder::import::read_person(&self.store, &text, last.as_deref()) {
-                Ok(None) => continue,
-                Ok(Some(d)) => self.ingest_one(mirror, d).await,
-                Err(e) => Err(format!("{e:#}")),
+            let created = match crate::ai_folder::read_regular(&root, &path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                // A hard link or an oversized file: reported back, not read.
+                Err(e) => Err(format!("couldn't read {name}: {e}")),
+                Ok(text) => {
+                    let last = self.contact_files.lock().unwrap().get(&name).cloned();
+                    match crate::ai_folder::import::read_person(&self.store, &text, last.as_deref()) {
+                        Ok(None) => continue,
+                        Ok(Some(d)) => self.ingest_one(mirror, d).await,
+                        Err(e) => Err(format!("{e:#}")),
+                    }
+                }
             };
             let outcome = match &created {
                 Ok(p) => crate::ai_folder::import::Outcome::Created(p),
                 Err(e) => crate::ai_folder::import::Outcome::Error(e.clone()),
             };
-            crate::ai_folder::import::finish(mirror, &path, outcome);
+            let file = crate::ai_folder::import::finish(mirror, &path, outcome);
+            self.record_processed_file(created.as_ref().ok(), file);
             self.contact_files.lock().unwrap().remove(&name);
             self.contacts_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
             self.mirror_wake.notify_one();
         }
     }
 
+    fn record_processed_file(&self, p: Option<&Proposal>, file: Option<String>) {
+        if let (Some(p), Some(file)) = (p, file)
+            && let Err(e) = self.store.set_proposal_file(&p.id, &file)
+        {
+            tracing::warn!("AI folder: recording the processed file for {}: {e:#}", p.id);
+        }
+    }
+
     pub(crate) async fn ingest_one(self: &Arc<Self>, mirror: &MirrorSettings, d: crate::ai_folder::import::DroppedProposal) -> std::result::Result<Proposal, String> {
-        let agent = match &d.agent_token {
-            Some(t) => self.authenticate_agent(t).ok_or("invalid or revoked agent_token")?,
-            None => self.folder_agent(mirror).map_err(|e| format!("{e:#}"))?,
-        };
+        // Folder files always come from the AI folder agent. A token in one
+        // could be read by anything else with access to the folder before
+        // Satchel picks it up, so it's refused, not quietly ignored.
+        if d.agent_token.is_some() {
+            return Err(crate::ai_folder::import::TOKEN_REFUSED.into());
+        }
+        let agent = self.folder_agent(mirror).map_err(|e| format!("{e:#}"))?;
         let rationale = match d.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
             Some(label) => format!("[{label}] {}", d.rationale),
             None => d.rationale,

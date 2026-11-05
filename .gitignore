@@ -7,3 +7,5 @@ node_modules
 /.claude
 .env
 __pycache__/
+/apps/desktop/licenses
+/apps/desktop/tauri.licenses.json

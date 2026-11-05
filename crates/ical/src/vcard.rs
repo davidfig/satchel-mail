@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! vCard (RFC 6350, and the 3.0 dialect most servers still speak) for the
 //! properties Satchel edits: FN/N, EMAIL, TEL, ORG, TITLE, BDAY, NOTE.
 //!
@@ -283,7 +284,7 @@ pub fn build(original: Option<&str>, uid: &str, fields: &ContactFields) -> Strin
         }
         None => {
             lines.push("VERSION:3.0".into());
-            lines.push("PRODID:-//Satchel Mail//EN".into());
+            lines.push("PRODID:-//satchel.email//EN".into());
             lines.push(format!("UID:{}", escape(uid)));
         }
     }

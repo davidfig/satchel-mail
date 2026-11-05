@@ -49,10 +49,14 @@ impl Engine {
         if !e.attendees.is_empty() && e.organizer.is_none() {
             e.organizer = Some(Address { name: Some(acc.display_name.clone()), email: acc.email.clone() });
         }
+        // Agents and older clients don't say: new timed events get the default alert.
+        if e.alerts.is_none() {
+            e.alerts = Some(self.settings().default_alert_minutes.filter(|_| !e.all_day).map(|m| Alert { minutes_before: m }).into_iter().collect());
+        }
         let ics = satchel_ical::serialize(&e, &Default::default());
         let parsed = satchel_ical::parse(&ics);
         let range = crate::calendar::series_range(&parsed.events);
-        let id = self.store.upsert_event(&cal.cal.id, &acc.id, &format!("local:{}", new_id()), None, e.uid.as_deref().unwrap(), &ics, &e.title, range, e.rrule.is_some(), true)?;
+        let id = self.store.upsert_event(&cal.cal.id, &acc.id, &format!("local:{}", new_id()), None, e.uid.as_deref().unwrap(), &ics, &e.title, e.location.trim(), range, e.rrule.is_some(), true)?;
         self.enqueue(&acc.id, "cal_put", json!({ "event_id": id }), actor)?;
         self.store.audit(actor, "event_created", &json!({ "title": e.title, "start": e.start }))?;
         self.emit(CoreEvent::CalendarChanged { account_id: acc.id.clone() });
@@ -64,22 +68,44 @@ impl Engine {
         let id = e.id.clone().ok_or_else(|| invalid("event id required"))?;
         let stored = self.store.get_event(&id)?.ok_or_else(|| not_found("event"))?;
         if stored.calendar_id != e.calendar_id {
-            return Err(invalid("moving events between calendars is not supported; create a copy instead"));
+            return self.move_event(stored, e, actor);
         }
         self.validate_event(&e)?;
-        let old = satchel_ical::parse(&stored.ics);
-        let master = old.events.iter().find(|x| x.recurrence_id.is_none());
-        let exdates: Vec<chrono::DateTime<Utc>> = master.map(|m| m.exdates.iter().map(|x| x.to_utc()).collect()).unwrap_or_default();
-        let sequence = master.map(|m| m.sequence + 1).unwrap_or(1);
-        e.uid = Some(stored.uid.clone());
-        let overrides = if e.rrule.is_some() { satchel_ical::override_blocks(&stored.ics) } else { vec![] };
-        let ics = satchel_ical::serialize(&e, &satchel_ical::SerializeOpts { sequence, exdates: &exdates, extra_components: &overrides, ..Default::default() });
-        let parsed = satchel_ical::parse(&ics);
-        let range = crate::calendar::series_range(&parsed.events);
-        self.store.update_event_ics(&id, &ics, &e.title, range, e.rrule.is_some())?;
+        let (ics, range) = rewrite_ics(&stored, &mut e);
+        self.store.update_event_ics(&id, &ics, &e.title, e.location.trim(), range, e.rrule.is_some())?;
         self.enqueue(&stored.account_id, "cal_put", json!({ "event_id": id }), actor)?;
         self.store.audit(actor, "event_updated", &json!({ "title": e.title, "start": e.start }))?;
         self.emit(CoreEvent::CalendarChanged { account_id: stored.account_id.clone() });
+        Ok(e)
+    }
+
+    /// Move an event to another calendar, possibly another account: a copy
+    /// with the same UID goes in the new one and the old one is deleted
+    /// silently. Servers treat that as a cancellation plus a new invitation,
+    /// so events with guests can't move (0049).
+    fn move_event(&self, stored: crate::store::StoredEvent, mut e: Event, actor: &str) -> Result<Event> {
+        let to = self.validate_event(&e)?;
+        let from = self.store.get_calendar(&stored.calendar_id)?.ok_or_else(|| not_found("calendar"))?;
+        if from.cal.read_only {
+            return Err(invalid("calendar is read-only"));
+        }
+        let had_guests = satchel_ical::parse(&stored.ics).events.iter().any(|x| !x.attendees.is_empty());
+        if had_guests || !e.attendees.is_empty() {
+            return Err(invalid("events with guests can't move to another calendar: their guests would get a cancellation and a new invitation"));
+        }
+        let (ics, range) = rewrite_ics(&stored, &mut e);
+        let id = self.store.upsert_event(&to.cal.id, &to.cal.account_id, &format!("local:{}", new_id()), None, &stored.uid, &ics, &e.title, e.location.trim(), range, e.rrule.is_some(), true)?;
+        self.store.delete_event(&stored.id)?;
+        // The delete goes first: some servers (iCloud, Google's CalDAV) refuse
+        // a UID that's still in another of the account's calendars.
+        self.enqueue(&stored.account_id, "cal_delete", json!({ "calendar_remote_id": from.remote_id, "remote_id": stored.remote_id, "etag": stored.etag, "notify": false }), actor)?;
+        self.enqueue(&to.cal.account_id, "cal_put", json!({ "event_id": id }), actor)?;
+        self.store.audit(actor, "event_moved", &json!({ "title": e.title, "from": from.cal.name, "to": to.cal.name }))?;
+        self.emit(CoreEvent::CalendarChanged { account_id: stored.account_id.clone() });
+        if to.cal.account_id != stored.account_id {
+            self.emit(CoreEvent::CalendarChanged { account_id: to.cal.account_id.clone() });
+        }
+        e.id = Some(id);
         Ok(e)
     }
 
@@ -107,7 +133,8 @@ impl Engine {
         let reparsed = satchel_ical::parse(&ics);
         let range = crate::calendar::series_range(&reparsed.events);
         let title = reparsed.events.first().map(|e| e.summary.clone()).unwrap_or_default();
-        self.store.update_event_ics(id, &ics, &title, range, reparsed.events.iter().any(|e| e.rrule.is_some()))?;
+        let location = reparsed.events.first().map(|e| e.location.trim().to_string()).unwrap_or_default();
+        self.store.update_event_ics(id, &ics, &title, &location, range, reparsed.events.iter().any(|e| e.rrule.is_some()))?;
         self.enqueue(&acc.id, "cal_put", json!({ "event_id": id }), actor)?;
         self.store.audit(actor, "invite_response", &json!({ "event": title, "response": satchel_ical::partstat_str(response) }))?;
         self.emit(CoreEvent::CalendarChanged { account_id: acc.id });
@@ -130,7 +157,7 @@ impl Engine {
     pub(crate) fn get_event(&self, caller: &Caller, event_id: &str) -> Result<Event> {
         let e = crate::calendar::get_event(&self.store, event_id)?.ok_or_else(|| not_found("event"))?;
         let cal = self.store.get_calendar(&e.calendar_id)?.ok_or_else(|| not_found("calendar"))?;
-        self.check_account(caller, &cal.cal.account_id)?;
+        self.check_account(caller, &cal.cal.account_id, "event")?;
         Ok(e)
     }
 
@@ -145,6 +172,11 @@ impl Engine {
         day_end_hour: Option<u32>,
         timezone: Option<&str>,
     ) -> Result<Vec<FreeSlot>> {
+        // The same bound as `list_events`: expanding years of recurrences
+        // and walking every day of them is slow.
+        if to - from > Duration::days(400) {
+            return Err(invalid("range too large (max 400 days)"));
+        }
         let tz: chrono_tz::Tz = timezone.unwrap_or("UTC").parse().map_err(|_| invalid("unknown timezone"))?;
         let ids = self.visible_calendar_ids(caller, None)?;
         let busy = crate::calendar::occurrences(&self.store, from, to, Some(&ids))?;
@@ -158,4 +190,31 @@ impl Engine {
             tz,
         ))
     }
+}
+
+/// `e` as iCalendar, keeping what the editor doesn't show from the stored
+/// copy: its UID, cancelled dates, changed occurrences and alarms, with the
+/// sequence bumped. Also returns the span the series covers.
+///
+/// Alarms set elsewhere survive the edit untouched (with properties we don't
+/// model) unless `e.alerts` changes them; then new ones replace those that
+/// show, and email alarms stay (0056).
+fn rewrite_ics(stored: &crate::store::StoredEvent, e: &mut Event) -> (String, (DateTime<Utc>, DateTime<Utc>)) {
+    let old = satchel_ical::parse(&stored.ics);
+    let master = old.events.iter().find(|x| x.recurrence_id.is_none());
+    let exdates: Vec<DateTime<Utc>> = master.map(|m| m.exdates.iter().map(|x| x.to_utc()).collect()).unwrap_or_default();
+    let sequence = master.map(|m| m.sequence + 1).unwrap_or(1);
+    e.uid = Some(stored.uid.clone());
+    let overrides = if e.rrule.is_some() { satchel_ical::override_blocks(&stored.ics) } else { vec![] };
+    let old_alerts = master.map(|m| m.alerts()).unwrap_or_default();
+    let unchanged = e.alerts.as_ref().is_none_or(|a| *a == old_alerts);
+    let alarms: Vec<String> = satchel_ical::alarm_blocks(&stored.ics).into_iter().filter(|(_, shows)| unchanged || !shows).map(|(b, _)| b).collect();
+    if unchanged {
+        e.alerts = None;
+    }
+    let ics = satchel_ical::serialize(e, &satchel_ical::SerializeOpts { sequence, exdates: &exdates, extra_components: &overrides, alarms: &alarms, ..Default::default() });
+    let parsed = satchel_ical::parse(&ics);
+    e.alerts = Some(parsed.events.iter().find(|x| x.recurrence_id.is_none()).map(|m| m.alerts()).unwrap_or_default());
+    let range = crate::calendar::series_range(&parsed.events);
+    (ics, range)
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Events the core pushes to clients.
 
 use super::*;
@@ -12,6 +13,8 @@ pub enum CoreEvent {
     CalendarChanged { account_id: Id },
     ContactsChanged,
     SmartFoldersChanged,
+    /// The favorite senders changed (0053).
+    FavoritesChanged,
     ProposalsChanged,
     OutboxChanged,
     /// A queued operation failed permanently.
@@ -21,6 +24,10 @@ pub enum CoreEvent {
     Notice { level: String, message: String },
     /// Unread mail just arrived in an inbox (not on first sync or backfill).
     NewMail { account_id: Id, messages: Vec<NewMail> },
+    /// Calendar alerts changed (0056): `due` went off just now; `closed`
+    /// stopped showing (dismissed, snoozed, or their event changed), so a
+    /// host can take down their notifications.
+    AlertsChanged { due: Vec<CalendarAlert>, closed: Vec<Id> },
 }
 
 /// One arrival, enough for a desktop notification.

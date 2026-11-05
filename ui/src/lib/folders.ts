@@ -1,8 +1,8 @@
 // Folders: the tree shown in the sidebar, and the dialogs to create, rename,
-// move and delete them.
+// move and delete them, and emptying Spam and Trash.
 
 import { api } from '../api';
-import { store } from '../state';
+import { type MailSource, store } from '../state';
 import type { Mailbox } from '../types';
 import { h } from './dom';
 import { confirmDialog, errorToast, modal, toast } from './ui';
@@ -86,5 +86,27 @@ export async function deleteFolder(f: Mailbox): Promise<boolean> {
   } catch (e) {
     errorToast(e);
     return false;
+  }
+}
+
+/** Spam or Trash, when `source` is one of them (all accounts' or one). */
+export function emptiable(source: MailSource): { label: string; count: number } | null {
+  const role = source.kind === 'role' ? source.role : source.kind === 'mailbox' ? store.mailbox(source.mailbox_id)?.role : null;
+  if (role !== 'junk' && role !== 'trash') return null;
+  const boxes = source.kind === 'mailbox' ? store.state.mailboxes.filter((m) => m.id === source.mailbox_id) : store.state.mailboxes.filter((m) => m.role === role);
+  return { label: role === 'junk' ? 'Spam' : 'Trash', count: boxes.reduce((n, m) => n + m.total, 0) };
+}
+
+/** Ask, then permanently delete everything in Spam or Trash. */
+export async function emptyFolder(source: MailSource): Promise<void> {
+  const e = emptiable(source);
+  if (!e || (source.kind !== 'role' && source.kind !== 'mailbox')) return;
+  const what = `${e.count === 1 ? 'The message' : `All ${e.count} messages`} in ${e.label} will be permanently deleted.`;
+  if (!(await confirmDialog(`Empty ${e.label}?`, what, `Empty ${e.label}`, true))) return;
+  try {
+    const r = await api.emptyMailbox(source.kind === 'mailbox' ? source.mailbox_id : null, source.kind === 'role' ? source.role : null);
+    toast(`Deleted ${r.deleted} message${r.deleted === 1 ? '' : 's'}.`);
+  } catch (err) {
+    errorToast(err);
   }
 }

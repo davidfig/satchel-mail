@@ -21,7 +21,10 @@ impl Engine {
             if a.revoked {
                 return Err(ApiError::new(ErrorCode::Auth, "agent revoked"));
             }
-            if !cmd.allowed_for_agent() {
+            // Checked twice on purpose: if `allowed_for_agent` is ever widened by
+            // mistake, `agent_may_run` still refuses anything that isn't a read
+            // or a proposal.
+            if !cmd.allowed_for_agent() || !access::agent_may_run(&cmd) {
                 return Err(ApiError::new(ErrorCode::Forbidden, "this action requires the user; agents can only read and propose"));
             }
         }
@@ -30,13 +33,20 @@ impl Engine {
 
     async fn dispatch(self: &Arc<Self>, caller: &Caller, cmd: Command) -> Result<Value> {
         match cmd {
-            Command::Info => ok(json!({
-                "version": env!("CARGO_PKG_VERSION"),
-                "mode": if self.mode == Mode::Full { "full" } else { "agent" },
-                "data_dir": self.data_dir,
-                "mirror_root": crate::ai_folder::root(&self.settings().mirror),
-                "caller": caller.actor(),
-            })),
+            Command::Info => {
+                let mut info = json!({
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "mode": if self.mode == Mode::Full { "full" } else { "agent" },
+                    "mirror_root": crate::ai_folder::root(&self.settings().mirror),
+                    "caller": caller.actor(),
+                });
+                // Agents use the AI folder; where the database lives is the user's business.
+                if matches!(caller, Caller::User) {
+                    info["data_dir"] = json!(self.data_dir);
+                    info["places_service"] = json!(self.factory.places().map(|p| p.name()));
+                }
+                ok(info)
+            }
 
             // ---------------------------------------------------------- accounts
             Command::ListAccounts => ok(self.list_accounts(caller)?),
@@ -52,6 +62,7 @@ impl Engine {
             }
             Command::RemoveAccount { account_id } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.remove_account(&account_id)?;
                 ok(json!({ "ok": true }))
             }
@@ -74,23 +85,9 @@ impl Engine {
             // ---------------------------------------------------------- mail reads
             Command::ListMailboxes { account_id } => ok(self.list_mailboxes(caller, account_id)?),
             Command::ListSmartFolders => ok(self.list_smart_folders(caller)?),
-            Command::SaveSmartFolder { folder } => {
-                self.require_user(caller)?;
-                self.require_full()?;
-                ok(self.save_smart_folder(folder, &caller.actor())?)
-            }
-            Command::DeleteSmartFolder { id } => {
-                self.require_user(caller)?;
-                self.require_full()?;
-                self.delete_smart_folder(&id, &caller.actor())?;
-                ok(json!({ "ok": true }))
-            }
-            Command::ReorderSmartFolders { ids } => {
-                self.require_user(caller)?;
-                self.require_full()?;
-                self.reorder_smart_folders(&ids)?;
-                ok(json!({ "ok": true }))
-            }
+            Command::SaveSmartFolder { folder } => ok(self.save_smart_folder(caller, folder)?),
+            Command::DeleteSmartFolder { id } => ok(self.delete_smart_folder(caller, &id).map(|_| json!({ "ok": true }))?),
+            Command::ReorderSmartFolders { ids } => ok(self.reorder_smart_folders(caller, &ids).map(|_| json!({ "ok": true }))?),
             Command::ListThreads { query } => ok(self.list_threads(caller, &query)?),
             Command::CountThreads { query } => {
                 let f = self.thread_filter(caller, &query)?;
@@ -141,6 +138,11 @@ impl Engine {
                 self.require_full()?;
                 ok(json!({ "message_ids": self.mark_all_read(mailbox_id.as_deref(), role, &caller.actor())? }))
             }
+            Command::EmptyMailbox { mailbox_id, role } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                ok(json!({ "deleted": self.empty_mailbox(mailbox_id.as_deref(), role, &caller.actor())? }))
+            }
             Command::Move { message_ids, mailbox_id } => {
                 self.require_full()?;
                 self.move_messages(&message_ids, &mailbox_id, &caller.actor())?;
@@ -179,6 +181,16 @@ impl Engine {
                 self.require_user(caller)?;
                 self.require_full()?;
                 self.set_sender_rule(&email, verdict)?;
+                ok(json!({ "ok": true }))
+            }
+            Command::ListFavoriteSenders => {
+                self.require_user(caller)?;
+                ok(self.store.list_favorite_senders()?)
+            }
+            Command::SetFavoriteSenders { emails, favorite } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                self.set_favorite_senders(&emails, favorite)?;
                 ok(json!({ "ok": true }))
             }
             Command::Unsubscribe { message_id } => {
@@ -220,6 +232,8 @@ impl Engine {
                 ok(self.list_calendars(caller)?)
             }
             Command::SetCalendarVisible { calendar_id, visible } => {
+                self.require_user(caller)?;
+                self.require_full()?;
                 self.store.set_calendar_visible(&calendar_id, visible)?;
                 self.emit(CoreEvent::CalendarChanged { account_id: String::new() });
                 ok(json!({ "ok": true }))
@@ -259,6 +273,27 @@ impl Engine {
                 self.check_calendar_access(caller)?;
                 ok(self.find_free_time(caller, from, to, duration_minutes, day_start_hour, day_end_hour, timezone.as_deref())?)
             }
+            Command::ListAlerts => {
+                self.require_user(caller)?;
+                ok(self.list_alerts()?)
+            }
+            Command::ListUpcomingAlerts { until } => {
+                self.require_user(caller)?;
+                ok(self.upcoming_alerts(chrono::Utc::now(), until)?)
+            }
+            Command::SnoozeAlert { alert_id, until } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                self.snooze_alert(&alert_id, until)?;
+                ok(json!({ "ok": true }))
+            }
+            Command::DismissAlert { alert_id } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                self.dismiss_alert(alert_id.as_deref())?;
+                ok(json!({ "ok": true }))
+            }
+            Command::SuggestLocations { query } => ok(self.suggest_locations(&query).await?),
 
             // ---------------------------------------------------------- contacts
             Command::ListContacts { search, limit } => ok(self.list_contacts(caller, search.as_deref(), limit)?),
@@ -297,6 +332,7 @@ impl Engine {
             }
             Command::RejectProposal { proposal_id, note } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.reject_proposal(&proposal_id, note)?;
                 ok(json!({ "ok": true }))
             }
@@ -306,18 +342,24 @@ impl Engine {
                 self.require_user(caller)?;
                 ok(self.store.list_agents()?)
             }
+            // Agent management and settings change what agents may do, so they
+            // need the app's own process: a `satchel call` beside the running
+            // app (agent mode) can't widen a policy or mint a token.
             Command::CreateAgent { name, policy } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 let (agent, token) = self.create_agent(&name, &policy)?;
                 ok(json!({ "agent": agent, "token": token }))
             }
             Command::UpdateAgent { agent_id, name, policy } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.store.update_agent(&agent_id, name.as_deref(), policy.as_ref())?;
                 ok(self.store.get_agent(&agent_id)?)
             }
             Command::RevokeAgent { agent_id } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.store.revoke_agent(&agent_id)?;
                 self.store.audit("user", "agent_revoked", &json!({ "agent": agent_id }))?;
                 ok(json!({ "ok": true }))
@@ -327,6 +369,7 @@ impl Engine {
             Command::GetSettings => ok(self.settings()),
             Command::UpdateSettings { settings } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.save_settings(settings)?;
                 ok(self.settings())
             }
@@ -337,6 +380,7 @@ impl Engine {
             Command::ListOutbox => ok(self.store.list_outbox()?),
             Command::RetryOutbox { id } => {
                 self.require_user(caller)?;
+                self.require_full()?;
                 self.retry_op(&id)?;
                 ok(json!({ "ok": true }))
             }

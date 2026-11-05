@@ -9,11 +9,17 @@ impl Mirror<'_> {
     pub fn write_smart_folders(&self) -> Result<()> {
         let path = self.root().join("smart-folders.md");
         let folders = self.store.list_smart_folders()?;
-        if folders.is_empty() {
-            let _ = std::fs::remove_file(&path);
+        // A folder's name and query can describe any account's mail, so a
+        // folder limited to some accounts leaves them out altogether.
+        let every_account = self.store.list_accounts()?.iter().all(|a| self.account_allowed(&a.id));
+        if folders.is_empty() || !every_account {
+            let _ = remove_file(&self.root(), &path);
             return Ok(());
         }
-        let cutoff = self.settings.since_days.map(|d| Utc::now() - Duration::days(d as i64));
+        let cutoff = self.cutoff();
+        let cell = |s: &str| one_line(s).replace('|', "/");
+        // A thread is often in several folders; its summary is the same in each.
+        let mut visible = HashMap::<String, Option<ThreadSummary>>::new();
         let mut s = String::from(
             "# Smart folders\n\nThe user's saved searches, across every folder of every account. \
              Each query is in the search language of the `search_threads` MCP tool.\n",
@@ -21,24 +27,42 @@ impl Mirror<'_> {
         for f in &folders {
             let mut filter = crate::store::ThreadFilter { account_ids: self.settings.account_ids.clone(), after: cutoff, limit: PER_FOLDER, ..Default::default() };
             crate::mail::read::apply_search(self.store, &mut filter, &f.query)?;
-            let threads = self.store.list_threads(&filter)?;
-            s.push_str(&format!("\n## {}\n\nQuery: `{}`\n\n", f.name.replace('\n', " "), f.query.replace('`', "'")));
+            // Under a date limit each row counts, names and previews only the
+            // messages inside it, and a thread with none there isn't listed.
+            let mut threads = vec![];
+            for t in self.store.list_threads(&filter)? {
+                let id = t.thread_id.clone();
+                let summary = match visible.get(&id) {
+                    Some(s) => s.clone(),
+                    None => {
+                        let s = self.visible_summary(t)?;
+                        visible.insert(id, s.clone());
+                        s
+                    }
+                };
+                threads.extend(summary);
+            }
+            s.push_str(&format!("\n## {}\n\nQuery: `{}`\n\n", one_line(&f.name), one_line(&f.query).replace('`', "'")));
             if threads.is_empty() {
                 s.push_str("No threads.\n");
                 continue;
             }
             s.push_str("| date | from | subject | msgs | unread | thread |\n|---|---|---|---|---|---|\n");
             for t in &threads {
-                let link = self.store.mirror_path(&t.thread_id)?.unwrap_or_default();
+                let id = &t.thread_id[t.thread_id.len().saturating_sub(8)..];
+                // Paths are relative to the folder's root, where this file is.
+                let link = match self.store.mirror_path(&t.thread_id)?.filter(|p| self.root().join(p).join("thread.md").is_file()) {
+                    Some(path) => format!("[{id}]({path}/thread.md)"),
+                    None => format!("{id} (not written yet)"),
+                };
                 let from = t.participants.first().map(|a| a.name.clone().unwrap_or_else(|| a.email.clone())).unwrap_or_default();
                 s.push_str(&format!(
-                    "| {} | {} | {} | {} | {} | [{}]({}/thread.md) |\n",
+                    "| {} | {} | {} | {} | {} | {} |\n",
                     t.last_date.format("%Y-%m-%d"),
-                    from.replace('|', "/"),
-                    t.subject.replace('|', "/"),
+                    cell(&from),
+                    cell(&t.subject),
                     t.message_count,
                     t.unread_count,
-                    &t.thread_id[t.thread_id.len().saturating_sub(8)..],
                     link
                 ));
             }

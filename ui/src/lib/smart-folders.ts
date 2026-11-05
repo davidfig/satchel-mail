@@ -22,6 +22,7 @@ export function smartFolderDialog(opts: { folder?: SmartFolder; query?: string }
     words: text('Anywhere in the message', 'Has the words'),
     unread: check(),
     flagged: check(),
+    favorite: check(),
     attachment: check(),
     age: h('select', { 'aria-label': 'Received' }, AGES.map(([v, l]) => h('option', { value: v }, l))),
     anywhere: check(),
@@ -42,6 +43,7 @@ export function smartFolderDialog(opts: { folder?: SmartFolder; query?: string }
     f.words.value = v.words;
     f.unread.checked = v.unread;
     f.flagged.checked = v.flagged;
+    f.favorite.checked = v.favorite;
     f.attachment.checked = v.attachment;
     f.age.value = v.age;
     f.anywhere.checked = v.anywhere;
@@ -56,6 +58,7 @@ export function smartFolderDialog(opts: { folder?: SmartFolder; query?: string }
     words: f.words.value,
     unread: f.unread.checked,
     flagged: f.flagged.checked,
+    favorite: f.favorite.checked,
     attachment: f.attachment.checked,
     age: f.age.value,
     anywhere: f.anywhere.checked,
@@ -67,7 +70,7 @@ export function smartFolderDialog(opts: { folder?: SmartFolder; query?: string }
   query.addEventListener('input', () => fill(parseFields(query.value, emails)));
   const fromFields = () => { query.value = formatFields(read()); };
   for (const el of [f.from, f.to, f.subject, f.words]) el.addEventListener('input', fromFields);
-  for (const el of [f.unread, f.flagged, f.attachment, f.age, f.anywhere, ...f.accounts.map((a) => a.box)]) el.addEventListener('change', fromFields);
+  for (const el of [f.unread, f.flagged, f.favorite, f.attachment, f.age, f.anywhere, ...f.accounts.map((a) => a.box)]) el.addEventListener('change', fromFields);
 
   return new Promise((resolve) => {
     let done = false;
@@ -82,7 +85,10 @@ export function smartFolderDialog(opts: { folder?: SmartFolder; query?: string }
       if (!query.value.trim()) return query.focus();
       try {
         const folder: SmartFolder = { id: existing?.id ?? '', name: name.value, query: query.value, badge: badge.value as SmartBadge, count: 0 };
-        finish(await api.saveSmartFolder(folder));
+        const saved = await api.saveSmartFolder(folder);
+        // So the caller can open it straight away.
+        await store.refreshSmartFolders().catch(() => {});
+        finish(saved);
       } catch (e) {
         errorToast(e);
       }
@@ -107,7 +113,7 @@ export function smartFolderDialog(opts: { folder?: SmartFolder; query?: string }
       h('div.row', field('From', f.from), field('To', f.to)),
       h('div.row', field('Subject', f.subject), field('Has the words', f.words)),
       h('div.row', field('Received', f.age), field('Badge shows', badge)),
-      h('div.smart-checks', tick('Unread', f.unread), tick('Flagged', f.flagged), tick('Has attachments', f.attachment), tick('Include Trash and Spam', f.anywhere)),
+      h('div.smart-checks', tick('Unread', f.unread), tick('Flagged', f.flagged), tick('From favorites', f.favorite), tick('Has attachments', f.attachment), tick('Include Trash and Spam', f.anywhere)),
       emails.length > 1 && h('div.form-field', h('span.form-label', 'Accounts'),
         h('div.smart-checks', f.accounts.map((a) => tick(a.email, a.box)))),
       field('Search', query),

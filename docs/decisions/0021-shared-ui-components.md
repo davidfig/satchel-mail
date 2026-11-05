@@ -33,3 +33,11 @@ tooltip text also becomes the `aria-label`.
 - One place to change timing, placement and look.
 - Iframes keep their `title`, which is their accessible name, not a tooltip.
 - Reviews should push back on one-off components that duplicate `lib/`.
+
+## Toasts don't stack
+
+`toast()` shows at most two at a time: one plain toast (a new one replaces it)
+and one with an action such as Undo (only another action toast replaces it).
+The same message arriving again counts up (`×3`) instead of adding a copy.
+Pass `quiet: true` for toasts that only confirm what the screen already shows;
+they flash for under two seconds and never replace an error.

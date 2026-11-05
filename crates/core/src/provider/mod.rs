@@ -3,6 +3,7 @@
 //! Providers do protocol work only. They write what they find through
 //! [`SyncCtx`], which owns all persistence, threading, indexing and events.
 
+pub mod priority;
 mod sync_ctx;
 
 pub use sync_ctx::SyncCtx;
@@ -158,8 +159,15 @@ pub enum Download {
 pub trait MailProvider: Send + Sync {
     /// Verify credentials and connectivity.
     async fn test(&self) -> Result<()>;
-    /// Bring the local store up to date (delta when possible).
+    /// Bring recent mail up to date (delta when possible): new messages,
+    /// flags and deletions. Older mail is left to [`Self::backfill`] (0047).
     async fn sync(&self, ctx: &SyncCtx) -> Result<()>;
+    /// Fetch older mail, newest first, until `until` or none is left, and
+    /// call [`SyncCtx::more_to_sync`] if some is. Runs after [`Self::sync`]
+    /// in the same pass. Default: nothing to fetch.
+    async fn backfill(&self, _ctx: &SyncCtx, _until: std::time::Instant) -> Result<()> {
+        Ok(())
+    }
     /// Fetch a full raw message.
     async fn fetch_raw(&self, ctx: &SyncCtx, msg: &MessageRef) -> Result<Vec<u8>>;
     /// Fetch a message for the stored copy, leaving attachment contents on
@@ -231,6 +239,26 @@ pub trait ProviderFactory: Send + Sync {
     async fn one_click_unsubscribe(&self, _url: &str) -> Result<()> {
         anyhow::bail!("unsubscribing is not supported by this host")
     }
+    /// The domains whose DKIM signatures on a raw message verify, for
+    /// accounts with no trusted Authentication-Results. Here because the
+    /// check needs DNS. None when it couldn't be checked (offline, a DNS
+    /// error), so it is tried again later.
+    async fn dkim_pass(&self, _raw: &[u8]) -> Option<Vec<String>> {
+        None
+    }
+    /// The service that looks up places for event locations, if the host has one.
+    fn places(&self) -> Option<Arc<dyn PlaceSearch>> {
+        None
+    }
+}
+
+/// Looks up places as the user types an event's location (0050). The query
+/// leaves the device, so the engine only asks when `look_up_places` is on.
+#[async_trait]
+pub trait PlaceSearch: Send + Sync {
+    /// Shown in settings: "OpenStreetMap", "Apple Maps".
+    fn name(&self) -> &'static str;
+    async fn suggest(&self, query: &str) -> Result<Vec<PlaceSuggestion>>;
 }
 
 /// Completion callback for an OAuth sign-in: the new account's config and credential.

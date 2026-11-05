@@ -1,4 +1,4 @@
--- Satchel Mail local store, schema version 2.
+-- satchel.email local store, schema version 2.
 -- Every account-scoped row carries account_id; accounts carry tenant_id so the
 -- same schema can be multi-tenant in the hosted version.
 
@@ -61,6 +61,12 @@ CREATE TABLE IF NOT EXISTS messages (
     partial          INTEGER NOT NULL DEFAULT 0,
     -- Bytes the stored copy takes on disk (0: unknown, use size).
     blob_size        INTEGER NOT NULL DEFAULT 0,
+    -- authserv-id of the topmost Authentication-Results header, for learning
+    -- which server to trust: NULL not read yet, '' none or unusable.
+    auth_serv        TEXT,
+    -- Space-separated domains whose DKIM signatures Satchel verified itself,
+    -- for accounts with no trusted server: NULL not checked yet, '' none.
+    dkim_pass        TEXT,
     -- Local version, bumped on every change (used for proposal staleness).
     version          INTEGER NOT NULL DEFAULT 1,
     indexed          INTEGER NOT NULL DEFAULT 0,
@@ -164,6 +170,8 @@ CREATE TABLE IF NOT EXISTS events (
     uid          TEXT NOT NULL,
     ics          TEXT NOT NULL,
     title        TEXT NOT NULL,
+    -- The master's LOCATION, for suggesting places (0050).
+    location     TEXT NOT NULL DEFAULT '',
     -- Bounds of the whole series, for range queries.
     range_start  INTEGER NOT NULL,
     range_end    INTEGER NOT NULL,
@@ -175,6 +183,20 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_range ON events(range_start, range_end);
 CREATE INDEX IF NOT EXISTS events_uid ON events(account_id, uid);
+
+-- Calendar alerts that have gone off (0056): one row per event, occurrence
+-- (start, ms) and alert, so each goes off once. `state` is due, snoozed or
+-- dismissed; `due_at` is when it went off, or when a snooze ends.
+CREATE TABLE IF NOT EXISTS calendar_alerts (
+    id             TEXT PRIMARY KEY,
+    event_id       TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    occurrence     INTEGER NOT NULL,
+    occurrence_end INTEGER NOT NULL,
+    minutes_before INTEGER NOT NULL,
+    due_at         INTEGER NOT NULL,
+    state          TEXT NOT NULL,
+    UNIQUE (event_id, occurrence, minutes_before)
+);
 
 -- People. `origin` is auto (generated from mail and untouched by the user),
 -- local (created or edited here) or remote (from a server address book).
@@ -248,7 +270,9 @@ CREATE TABLE IF NOT EXISTS proposals (
     decided_at           INTEGER,
     summary              TEXT NOT NULL,
     -- {target id: version} at proposal time, for staleness checks.
-    versions_json        TEXT NOT NULL DEFAULT '{}'
+    versions_json        TEXT NOT NULL DEFAULT '{}',
+    -- Name of the file in the AI folder's proposals/processed/ written for it.
+    processed_file       TEXT
 );
 CREATE INDEX IF NOT EXISTS proposals_status ON proposals(status, created_at);
 
@@ -268,7 +292,14 @@ CREATE TABLE IF NOT EXISTS sender_rules (
     created_at  INTEGER NOT NULL
 );
 
--- Saved searches shown under Mail in the sidebar (0039). Local only.
+-- Senders the user marked as favorites (stored lowercase), highlighted in
+-- the thread list and found with `is:favorite` (0053). Local only.
+CREATE TABLE IF NOT EXISTS favorite_senders (
+    email       TEXT PRIMARY KEY,
+    created_at  INTEGER NOT NULL
+);
+
+-- Saved searches shown under Mail in the sidebar (0065). Local only.
 CREATE TABLE IF NOT EXISTS smart_folders (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL,

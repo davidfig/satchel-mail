@@ -154,8 +154,11 @@ pub struct ThreadFilter {
     pub role: Option<MailboxRole>,
     pub account_ids: Option<Vec<String>>,
     pub exclude_trash_junk: bool,
-    /// Conditions that must all hold for one message of the thread (from a search).
+    /// From a search. Plain terms must all hold for one message of the thread;
+    /// a negated term must hold for none of them.
     pub conds: Vec<MsgCond>,
+    /// Only threads with an unread message.
+    pub has_unread: bool,
     /// Only messages from this date on (an agent's date range).
     pub after: Option<DateTime<Utc>>,
     pub message_ids: Option<Vec<String>>,
@@ -178,6 +181,8 @@ pub enum MsgTerm {
     HasAttachment,
     Unread,
     Flagged,
+    /// From a favorite sender (0053).
+    Favorite,
     Before(DateTime<Utc>),
     After(DateTime<Utc>),
     /// In a mailbox with one of these names or roles.
@@ -186,7 +191,8 @@ pub enum MsgTerm {
     Text(String),
 }
 
-/// A [`MsgTerm`] that must hold, or with `negate`, must not.
+/// A [`MsgTerm`] that must hold for a message of the thread, or with `negate`,
+/// for none of them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MsgCond {
     pub term: MsgTerm,

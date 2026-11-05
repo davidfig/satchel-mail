@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local test servers for Satchel Mail development.
+# Local test servers for satchel.email development.
 #
 # Runs Stalwart natively (no Docker) on localhost-only ports. Stalwart provides
 # every protocol we test against: IMAP, SMTP submission, JMAP and CalDAV.

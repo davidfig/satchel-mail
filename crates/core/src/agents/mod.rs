@@ -22,12 +22,14 @@ impl Engine {
     /// follows the AI folder settings; its rate limit is the default policy's.
     pub(crate) fn folder_agent(&self, mirror: &MirrorSettings) -> Result<Agent> {
         if !mirror.accept_proposals {
-            anyhow::bail!("proposals from the AI folder are turned off (Settings → AI folder); include an agent_token to use a connected agent");
+            anyhow::bail!("proposals from the AI folder are turned off (Settings → AI folder); connected agents propose over MCP or /api/agent/rpc");
         }
         let mut a = self.store.builtin_agent("ai-folder", "AI folder", &AgentPolicy::default())?;
         a.policy.account_ids = mirror.account_ids.clone();
         a.policy.since_days = mirror.since_days;
         a.policy.allow_attachments = mirror.include_attachments;
+        a.policy.allow_calendar = mirror.include_calendar;
+        a.policy.allow_contacts = mirror.include_contacts;
         let _ = self.store.touch_agent(&a.id);
         Ok(a)
     }

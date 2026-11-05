@@ -27,6 +27,8 @@ button.avatar-link:hover .avatar { box-shadow: 0 0 0 2px var(--accent-soft); }
 .list-rows { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
 .empty-list { padding: 40px 20px; text-align: center; color: var(--text-3); }
 .thread-row { display: flex; gap: 10px; padding: 9px 12px 9px 10px; border-bottom: 1px solid var(--line); cursor: default; align-items: flex-start; overflow: hidden; position: relative; }
+/* From a favorite sender (0053): a tint under hover and selection, and a heart by the name. */
+.thread-row.favorite { background: var(--favorite-soft); }
 .thread-row:hover { background: var(--hover); }
 .thread-row.placeholder { pointer-events: none; }
 .thread-row.placeholder .thread-main { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
@@ -43,6 +45,9 @@ button.avatar-link:hover .avatar { box-shadow: 0 0 0 2px var(--accent-soft); }
 .thread-line1 .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .thread-line1 time { font-size: 12px; color: var(--text-3); flex: none; }
 .thread-line1 .icon { color: var(--text-3); }
+.thread-line1 .fav { display: inline-flex; flex: none; }
+.thread-line1 .fav .icon { color: var(--favorite); fill: var(--favorite); }
+.fav-toggle[aria-pressed=true] .icon { color: var(--favorite); fill: var(--favorite); }
 .count { font-size: 11px; color: var(--text-3); border: 1px solid var(--line-2); border-radius: 8px; padding: 0 5px; line-height: 15px; }
 .thread-subject { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
 .thread-snippet { font-size: 12.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -55,6 +60,11 @@ button.avatar-link:hover .avatar { box-shadow: 0 0 0 2px var(--accent-soft); }
 .reader { overflow-y: auto; min-width: 0; background: var(--panel-2); }
 .reader-empty, .reader-loading { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-3); gap: 6px; }
 .reader { display: flex; flex-direction: column; }
+/* One conversation. The next one is laid out hidden over it (`.staging`)
+   until its message frames load, then shown in place. */
+.reader { position: relative; }
+.reader-page { flex: 1 0 auto; display: flex; flex-direction: column; }
+.reader-page.staging { position: absolute; inset: 0 0 auto 0; visibility: hidden; pointer-events: none; }
 .reader-head { position: sticky; top: 0; z-index: 2; background: var(--panel-2); padding: 12px 24px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .reader-title { flex: 1 1 240px; min-width: 0; }
 .reader-title .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -84,12 +94,35 @@ button.avatar-link:hover .avatar { box-shadow: 0 0 0 2px var(--accent-soft); }
 .attachment .name { overflow: hidden; text-overflow: ellipsis; }
 .attachment.risky { border-color: var(--warn); color: var(--warn); }
 .attachment.risky .icon { color: var(--warn); }
+.reader:has(> .viewer-pane) > :not(.viewer-pane) { display: none; }
+.viewer-pane { flex: 1; height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--panel-2); outline: none; }
+.viewer-pane.expanded { position: fixed; inset: 0; height: auto; z-index: 25; background: var(--panel); }
+.viewer-head { display: flex; align-items: center; gap: 2px; padding: 12px 16px 10px 24px; border-bottom: 1px solid var(--line); }
+.viewer-title { flex: 1; min-width: 0; margin: 0; font-size: 15px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-count { margin: 0 6px 0 10px; white-space: nowrap; }
+.viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px; }
+.viewer-loading { margin: auto; }
+.viewer-frame { flex: 1; width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.viewer-media { flex: 1; min-height: 0; display: grid; place-items: center; }
+.viewer-media img, .viewer-media video { max-width: 100%; max-height: 100%; object-fit: contain; }
+.viewer-media audio { width: min(480px, 100%); }
+.viewer-text { flex: 1; margin: 0; overflow: auto; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.viewer-table { flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.viewer-table table { border-collapse: collapse; font-size: 12.5px; }
+.viewer-table th, .viewer-table td { padding: 4px 10px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); text-align: left; white-space: pre; vertical-align: top; user-select: text; }
+.viewer-table th { position: sticky; top: 0; background: var(--panel); font-weight: 600; }
+.viewer-table > p { padding: 0 10px; }
+.viewer-empty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; max-width: 420px; }
+.viewer-empty > .icon { color: var(--text-2); margin-bottom: 4px; }
+.viewer-empty strong { overflow-wrap: anywhere; }
+.viewer-empty .row { gap: 8px; justify-content: center; }
 .invite.muted-invite { border-left-color: var(--line-2); opacity: .8; }
 .invite.muted-invite .icon { color: var(--text-2); }
 .msg-warnings { align-items: flex-start; font-size: 13px; line-height: 1.45; }
 .msg-warnings .icon { flex: none; margin-top: 2px; }
 .msg-warnings strong { display: block; }
 .bubble .msg-warnings { margin: 4px 0 8px; }
+.reply-box .msg-warnings { margin: 6px 0; }
 .spam-banner { margin: 12px 24px 0; max-width: 812px; align-self: center; width: calc(100% - 48px); }
 .spam-banner .icon { flex: none; }
 .spam-banner .grow { flex: 1; min-width: 200px; }
@@ -109,6 +142,8 @@ button.unsubscribe { height: 28px; padding: 0 10px; font-size: 12.5px; margin-ri
 .convo-row.flash, .convo-card.flash { background: var(--accent-soft); }
 .convo-meta { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--text-2); margin: 8px 0 3px 38px; }
 .convo-row.mine .convo-meta { margin: 8px 36px 3px 0; }
+.domain { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.thread-line1 .domain { flex: 0 1 auto; }
 .convo-meta time { color: var(--text-3); }
 .convo-line { display: flex; align-items: flex-end; gap: 10px; max-width: 100%; }
 .convo-row.mine .convo-line { flex-direction: row-reverse; }
@@ -139,5 +174,15 @@ button.unsubscribe { height: 28px; padding: 0 10px; font-size: 12.5px; margin-ri
 .reply-input:focus-visible { outline: none; }
 .reply-foot { display: flex; align-items: center; gap: 6px; }
 .reply-foot button:not(.icon-btn) { height: 28px; }
+.reply-head .icon-btn { width: 24px; height: 24px; flex-shrink: 0; }
+.reply-reopen { display: none; }
+.reply-box.dismissed { width: fit-content; margin: 0 16px 14px auto; padding: 0; border-radius: 16px; }
+.reply-box.dismissed > :not(.reply-reopen) { display: none; }
+.reply-box.dismissed .reply-reopen { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border: none; border-radius: 16px; background: transparent; }
 
 pre.source { max-height: 70vh; overflow: auto; white-space: pre-wrap; font-size: 12px; }
+/* The full unsubscribe email, wrapped and scrollable (on top of .draft-text). */
+pre.sent-preview { max-height: 40vh; overflow: auto; overflow-wrap: anywhere; margin: 8px 0; }
+.sent-preview-subject { overflow-wrap: anywhere; }
+/* The document viewer draws its own desk around the pages (0062). */
+.viewer-frame.doc-frame { background: transparent; }

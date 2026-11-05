@@ -1,6 +1,6 @@
 # 0022. Files are the main way agents work with Satchel
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by 0042 (folder files can no longer carry an agent token)
 - **Date:** 2026-10-24
 - **Supersedes:** 0007
 

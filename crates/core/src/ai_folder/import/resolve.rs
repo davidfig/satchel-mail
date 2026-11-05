@@ -10,10 +10,10 @@ pub(crate) fn reply(store: &Store, fm: &FrontMatter, threads: &[String], body: S
         Some(m) => m.to_string(),
         None => {
             let t = threads.first().ok_or_else(|| anyhow!("missing `thread:` (a thread_id from thread.md or meta.json)"))?;
-            store.thread_message_ids(t)?.pop().ok_or_else(|| anyhow!("unknown thread {t}"))?
+            thread_messages(store, t)?.pop().ok_or_else(|| anyhow!("unknown thread {t}"))?
         }
     };
-    let m = store.message_row(&message_id)?.ok_or_else(|| anyhow!("unknown message {message_id}"))?;
+    let m = message(store, &message_id)?;
     let own = store.get_account(&m.summary.account_id)?.map(|a| a.email.to_lowercase()).unwrap_or_default();
     let mut to = addresses(fm, "to")?;
     if to.is_empty() {
@@ -50,23 +50,84 @@ pub(crate) fn addresses(fm: &FrontMatter, key: &str) -> Result<Vec<Address>> {
     fm.list(key).iter().map(|s| address(s).with_context(|| key.to_string())).collect()
 }
 
+// Folder files always come from the AI folder agent, so names are resolved
+// within what the folder shares: its accounts and its date limit. Anything
+// outside gets the same "unknown …" error as something that doesn't exist,
+// so a file can't learn what the folder leaves out.
+
+fn mirror_settings(store: &Store) -> MirrorSettings {
+    store.get_setting::<Settings>("settings").ok().flatten().unwrap_or_default().mirror
+}
+
+/// The accounts the AI folder shares (`None`: all).
+fn shared_accounts(store: &Store) -> Option<Vec<String>> {
+    mirror_settings(store).account_ids
+}
+
+/// A message the AI folder shares: in a shared account, within the date limit.
+pub(crate) fn message(store: &Store, id: &str) -> Result<crate::store::StoredMessage> {
+    let since = mirror_settings(store).since_days.map(|d| Utc::now() - chrono::Duration::days(d as i64));
+    let shared = shared_accounts(store);
+    store
+        .message_row(id)?
+        .filter(|m| is_shared(&shared, &m.summary.account_id) && since.is_none_or(|c| m.summary.date >= c))
+        .ok_or_else(|| anyhow!("unknown message {id}"))
+}
+
+/// The thread's messages that the AI folder shares, oldest first.
+pub(crate) fn thread_messages(store: &Store, thread_id: &str) -> Result<Vec<String>> {
+    let mut ids = vec![];
+    for id in store.thread_message_ids(thread_id)? {
+        if message(store, &id).is_ok() {
+            ids.push(id);
+        }
+    }
+    if ids.is_empty() {
+        bail!("unknown thread {thread_id}");
+    }
+    Ok(ids)
+}
+
+/// An event in an account the AI folder shares.
+pub(crate) fn event(store: &Store, id: &str) -> Result<Event> {
+    let shared = shared_accounts(store);
+    if !store.get_event(id)?.is_some_and(|e| is_shared(&shared, &e.account_id)) {
+        bail!("unknown event {id}");
+    }
+    crate::calendar::get_event(store, id)?.ok_or_else(|| anyhow!("unknown event {id}"))
+}
+
+/// A contact saved in an address book of an account the AI folder shares.
+pub(crate) fn contact_by_id(store: &Store, id: &str) -> Result<Option<crate::store::StoredContact>> {
+    let Some(c) = store.get_contact(id)?.filter(|c| !c.deleted) else { return Ok(None) };
+    let Some(shared) = shared_accounts(store) else { return Ok(Some(c)) };
+    let sources = store.contact_sources()?;
+    Ok(sources.get(&c.id).is_some_and(|s| s.iter().any(|s| shared.contains(&s.account_id))).then_some(c))
+}
+
+fn is_shared(shared: &Option<Vec<String>>, account_id: &str) -> bool {
+    shared.as_ref().is_none_or(|ids| ids.iter().any(|x| x == account_id))
+}
+
 /// An account by id or email; may be omitted when there is only one.
 pub(crate) fn account(store: &Store, given: Option<&str>) -> Result<String> {
     let accounts = store.list_accounts()?;
+    let shared = shared_accounts(store);
+    let visible: Vec<&Account> = accounts.iter().filter(|a| is_shared(&shared, &a.id)).collect();
     match given {
-        Some(g) => accounts
+        Some(g) => visible
             .iter()
             .find(|a| a.id == g || a.email.eq_ignore_ascii_case(g))
             .map(|a| a.id.clone())
             .ok_or_else(|| anyhow!("unknown account {g:?}")),
-        None if accounts.len() == 1 => Ok(accounts[0].id.clone()),
-        None => bail!("missing `account:` (one of {})", accounts.iter().map(|a| a.email.as_str()).collect::<Vec<_>>().join(", ")),
+        None if visible.len() == 1 => Ok(visible[0].id.clone()),
+        None => bail!("missing `account:` (one of {})", visible.iter().map(|a| a.email.as_str()).collect::<Vec<_>>().join(", ")),
     }
 }
 
 /// A mailbox in the account of `message_id`, by id, path or name.
 pub(crate) fn mailbox(store: &Store, message_id: &str, given: &str) -> Result<String> {
-    let m = store.message_row(message_id)?.ok_or_else(|| anyhow!("unknown message {message_id}"))?;
+    let m = message(store, message_id)?;
     let mbs = store.list_mailboxes(Some(&m.summary.account_id))?;
     mbs.iter()
         .find(|b| b.id == given)
@@ -79,16 +140,18 @@ pub(crate) fn mailbox(store: &Store, message_id: &str, given: &str) -> Result<St
 /// A writable calendar by id or name; may be omitted when there is only one.
 pub(crate) fn calendar(store: &Store, given: Option<&str>, account: Option<&str>) -> Result<String> {
     let account_id = account.map(|a| self::account(store, Some(a))).transpose()?;
+    let shared = shared_accounts(store);
     let cals: Vec<Calendar> = store.list_calendars(account_id.as_deref())?.into_iter().map(|c| c.cal).filter(|c| !c.read_only).collect();
+    let visible: Vec<&Calendar> = cals.iter().filter(|c| is_shared(&shared, &c.account_id)).collect();
     match given {
-        Some(g) => cals
+        Some(g) => visible
             .iter()
             .find(|c| c.id == g)
-            .or_else(|| cals.iter().find(|c| c.name.eq_ignore_ascii_case(g)))
+            .or_else(|| visible.iter().find(|c| c.name.eq_ignore_ascii_case(g)))
             .map(|c| c.id.clone())
             .ok_or_else(|| anyhow!("unknown calendar {g:?}")),
-        None if cals.len() == 1 => Ok(cals[0].id.clone()),
-        None => bail!("missing `calendar:` (one of {})", cals.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", ")),
+        None if visible.len() == 1 => Ok(visible[0].id.clone()),
+        None => bail!("missing `calendar:` (one of {})", visible.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", ")),
     }
 }
 

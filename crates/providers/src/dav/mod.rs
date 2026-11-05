@@ -181,11 +181,37 @@ pub struct DavClient {
 
 impl DavClient {
     pub fn new(base: String, username: String, allow_invalid: bool, creds: CredentialHandle, label: &'static str) -> Result<Self> {
-        Ok(Self { base, username, creds, http: crate::net::http_client(allow_invalid)?, label })
+        // Redirects carry our credentials, so follow them only within the
+        // account's server; anything else comes back to `propfind` as a 3xx.
+        let root = url::Url::parse(&base)?;
+        let policy = reqwest::redirect::Policy::custom(move |a| {
+            if a.previous().len() >= 5 {
+                a.error("too many redirects")
+            } else if crate::net::credentials_allowed(&root, a.url()) {
+                a.follow()
+            } else {
+                a.stop()
+            }
+        });
+        let http = crate::net::http_builder(allow_invalid).redirect(policy).build()?;
+        Ok(Self { base, username, creds, http, label })
     }
 
+    /// Resolves a server-supplied href against the base URL. It must stay on
+    /// the account's server, since requests to it carry the credentials.
     pub fn url(&self, href: &str) -> Result<String> {
-        Ok(url::Url::parse(&self.base)?.join(href)?.to_string())
+        Ok(self.checked(url::Url::parse(&self.base)?.join(href)?)?.to_string())
+    }
+
+    fn checked(&self, url: url::Url) -> Result<url::Url> {
+        let label = self.label;
+        if !crate::net::credentials_allowed(&url::Url::parse(&self.base)?, &url) {
+            return Err(anyhow::Error::new(ApiError::new(
+                ErrorCode::Forbidden,
+                format!("{label} server pointed to {url}, which isn't the account's server; set that address as the {label} URL if you trust it"),
+            )));
+        }
+        Ok(url)
     }
 
     pub fn auth(&self, rb: reqwest::RequestBuilder) -> Result<reqwest::RequestBuilder> {
@@ -196,7 +222,8 @@ impl DavClient {
     }
 
     pub async fn dav(&self, method: &str, url: &str, depth: Option<&str>, body: Option<String>, extra: &[(&str, &str)]) -> Result<(u16, reqwest::header::HeaderMap, String)> {
-        let mut rb = self.http.request(Method::from_bytes(method.as_bytes())?, url);
+        let url = self.checked(url::Url::parse(url)?)?;
+        let mut rb = self.http.request(Method::from_bytes(method.as_bytes())?, url.clone());
         if let Some(d) = depth {
             rb = rb.header("Depth", d);
         }
@@ -210,7 +237,7 @@ impl DavClient {
         let resp = self.auth(rb)?.send().await.with_context(|| format!("{label} {method} {url}"))?;
         let st = resp.status().as_u16();
         let headers = resp.headers().clone();
-        let text = resp.text().await.unwrap_or_default();
+        let text = crate::net::text_capped(resp, crate::net::DATA_LIMIT).await?;
         Ok((st, headers, text))
     }
 
@@ -222,7 +249,8 @@ impl DavClient {
             let (st, headers, text) = self.dav("PROPFIND", &target, Some(depth), Some(body.clone()), &[]).await?;
             if (300..400).contains(&st) {
                 let loc = headers.get("location").and_then(|v| v.to_str().ok()).context("redirect without location")?;
-                target = url::Url::parse(&target)?.join(loc)?.to_string();
+                // Never send the credentials to another server or over plain http.
+                target = self.checked(url::Url::parse(&target)?.join(loc)?)?.to_string();
                 continue;
             }
             if st == 401 {

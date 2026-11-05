@@ -173,6 +173,12 @@ impl Store {
                 tx.execute("DELETE FROM mailboxes WHERE id=?", [id])?;
             }
             // Messages now without any mailbox are gone from the server.
+            let freed = Self::blob_hashes_tx(
+                &tx,
+                "account_id=? AND NOT EXISTS (SELECT 1 FROM message_mailboxes mm WHERE mm.message_id=messages.id)",
+                [account_id],
+            )?;
+            self.blobs_freed(freed);
             tx.execute(
                 "DELETE FROM messages WHERE account_id=? AND NOT EXISTS (SELECT 1 FROM message_mailboxes mm WHERE mm.message_id=messages.id)",
                 [account_id],

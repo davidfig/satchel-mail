@@ -70,6 +70,11 @@ pub fn graph_to_ics(e: &Value, calendar_id: &str, owner: &str) -> Option<String>
         organizer,
         status: if e["isCancelled"] == true { EventStatus::Cancelled } else if e["showAs"] == "tentative" { EventStatus::Tentative } else { EventStatus::Confirmed },
         my_status: None,
+        // Outlook has one reminder per event.
+        alerts: Some(match (e["isReminderOn"] == true, e["reminderMinutesBeforeStart"].as_i64().and_then(|m| i32::try_from(m).ok())) {
+            (true, Some(m)) => vec![Alert { minutes_before: m }],
+            _ => vec![],
+        }),
     };
     Some(satchel_ical::serialize(&ev, &Default::default()))
 }
@@ -83,7 +88,9 @@ pub fn rrule_to_graph(rule: &str, start: DateTime<Utc>, tz: &str) -> Option<Valu
         }
     }
     let interval: u32 = parts.get("INTERVAL").and_then(|v| v.parse().ok()).unwrap_or(1);
-    let local = tz.parse::<chrono_tz::Tz>().map(|z| start.with_timezone(&z).date_naive()).unwrap_or(start.date_naive());
+    let zone = tz.parse::<chrono_tz::Tz>().ok();
+    let local_date = |t: DateTime<Utc>| zone.map(|z| t.with_timezone(&z).date_naive()).unwrap_or(t.date_naive());
+    let local = local_date(start);
     let days = |v: &str| -> Vec<&'static str> {
         v.split(',')
             .filter_map(|d| match d.trim_start_matches(|c: char| c == '-' || c == '+' || c.is_ascii_digit()) {
@@ -104,7 +111,36 @@ pub fn rrule_to_graph(rule: &str, start: DateTime<Utc>, tz: &str) -> Option<Valu
             let d = parts.get("BYDAY").map(|v| days(v)).unwrap_or_else(|| vec![["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"][local.weekday().num_days_from_monday() as usize]]);
             json!({ "type": "weekly", "interval": interval, "daysOfWeek": d, "firstDayOfWeek": "monday" })
         }
-        "MONTHLY" => json!({ "type": "absoluteMonthly", "interval": interval, "dayOfMonth": local.day() }),
+        // "BYDAY=-1FR" or "BYDAY=FR;BYSETPOS=-1": the last Friday. Graph has
+        // one index for all the days and no fifth, so other rules don't map.
+        "MONTHLY" => match parts.get("BYDAY") {
+            Some(v) => {
+                let ordinals: Vec<&str> = v.split(',').map(|d| d.trim_end_matches(|c: char| c.is_ascii_alphabetic())).collect();
+                let n = match (ordinals[0], parts.get("BYSETPOS")) {
+                    // With several days BYSETPOS picks among them all, which Graph can't say.
+                    ("", Some(pos)) if ordinals.len() == 1 => pos.as_str(),
+                    (o, None) if !o.is_empty() && ordinals.iter().all(|x| x == &o) => o,
+                    _ => return None,
+                };
+                let index = match n.trim_start_matches('+') {
+                    "1" => "first",
+                    "2" => "second",
+                    "3" => "third",
+                    "4" => "fourth",
+                    "-1" => "last",
+                    _ => return None,
+                };
+                let d = days(v);
+                if d.len() != ordinals.len() {
+                    return None;
+                }
+                json!({ "type": "relativeMonthly", "interval": interval, "daysOfWeek": d, "index": index })
+            }
+            None => {
+                let day = parts.get("BYMONTHDAY").and_then(|v| v.parse::<u32>().ok()).unwrap_or(local.day());
+                json!({ "type": "absoluteMonthly", "interval": interval, "dayOfMonth": day })
+            }
+        },
         "YEARLY" => json!({ "type": "absoluteYearly", "interval": interval, "dayOfMonth": local.day(), "month": local.month() }),
         _ => return None,
     };
@@ -112,9 +148,12 @@ pub fn rrule_to_graph(rule: &str, start: DateTime<Utc>, tz: &str) -> Option<Valu
     let range = if let Some(c) = parts.get("COUNT").and_then(|v| v.parse::<u32>().ok()) {
         json!({ "type": "numbered", "startDate": start_date, "numberOfOccurrences": c })
     } else if let Some(u) = parts.get("UNTIL") {
-        let d = &u[..8.min(u.len())];
-        let end = format!("{}-{}-{}", &d[0..4], &d[4..6], &d[6..8]);
-        json!({ "type": "endDate", "startDate": start_date, "endDate": end })
+        // A UTC UNTIL can fall on the next day in UTC; Graph wants the local date.
+        let end = match chrono::NaiveDateTime::parse_from_str(u, "%Y%m%dT%H%M%SZ") {
+            Ok(t) => local_date(t.and_utc()),
+            Err(_) => chrono::NaiveDate::parse_from_str(u.get(..8)?, "%Y%m%d").ok()?,
+        };
+        json!({ "type": "endDate", "startDate": start_date, "endDate": end.format("%Y-%m-%d").to_string() })
     } else {
         json!({ "type": "noEnd", "startDate": start_date })
     };
@@ -144,7 +183,36 @@ fn ics_to_graph(ics: &str) -> Option<(Value, Option<PartStat>, Option<String>)> 
         && let Some(rec) = rrule_to_graph(r, m.start_utc(), &tz) {
             body["recurrence"] = rec;
         }
+    if let Some(o) = body.as_object_mut() {
+        o.extend(reminder(m));
+    }
     Some((body, None, m.organizer.as_ref().map(|o| o.email.clone())))
+}
+
+/// The first alert as Outlook's one reminder (0056).
+fn reminder(m: &satchel_ical::ParsedEvent) -> serde_json::Map<String, Value> {
+    let first = m.alerts().first().map(|a| a.minutes_before.max(0));
+    let mut o = serde_json::Map::new();
+    o.insert("isReminderOn".into(), json!(first.is_some()));
+    if let Some(m) = first {
+        o.insert("reminderMinutesBeforeStart".into(), json!(m));
+    }
+    o
+}
+
+/// The reminder fields of `body` that differ from `server`'s, if any.
+fn changed_reminder(body: &Value, server: &Value) -> Option<Value> {
+    let on = body["isReminderOn"] == true;
+    let same = on == (server["isReminderOn"] == true) && (!on || body["reminderMinutesBeforeStart"] == server["reminderMinutesBeforeStart"]);
+    (!same).then(|| {
+        let mut o = serde_json::Map::new();
+        for k in ["isReminderOn", "reminderMinutesBeforeStart"] {
+            if let Some(v) = body.get(k) {
+                o.insert(k.into(), v.clone());
+            }
+        }
+        Value::Object(o)
+    })
 }
 
 /// The Graph response action for our status in `ics`, if it differs from
@@ -184,6 +252,11 @@ fn trim_unchanged(patch: &mut Value, server: &Value) {
     if people(&o["attendees"]) == people(&server["attendees"]) {
         o.remove("attendees");
     }
+    if changed_reminder(patch, server).is_none()
+        && let Some(o) = patch.as_object_mut() {
+            o.remove("isReminderOn");
+            o.remove("reminderMinutesBeforeStart");
+        }
 }
 
 impl GraphCalendarProvider {
@@ -192,6 +265,7 @@ impl GraphCalendarProvider {
     }
 
     async fn get(&self, url: &str, what: &str) -> Result<Value> {
+        graph_link(url)?;
         self.api.json(|h, t| with_prefs(h.get(url)).bearer_auth(t), what).await
     }
 
@@ -205,7 +279,7 @@ impl GraphCalendarProvider {
             (Some("occurrence"), Some(master)) => master,
             _ => id,
         };
-        self.api.send(|h, t| with_prefs(h.post(format!("{ME}/events/{target}/{action}"))).bearer_auth(t).json(&json!({ "sendResponse": true })), "respond to invite").await?;
+        self.api.send(|h, t| with_prefs(h.post(format!("{ME}/events/{}/{action}", crate::net::enc(target)))).bearer_auth(t).json(&json!({ "sendResponse": true })), "respond to invite").await?;
         Ok(())
     }
 
@@ -213,14 +287,19 @@ impl GraphCalendarProvider {
         let stored = ctx.store.get_calendar(local)?.and_then(|c| c.sync_token);
         let start = (Utc::now() - Duration::days(180)).format("%Y-%m-%dT00:00:00Z");
         let end = (Utc::now() + Duration::days(540)).format("%Y-%m-%dT00:00:00Z");
-        let mut url = stored.unwrap_or_else(|| format!("{ME}/calendars/{cal}/calendarView/delta?startDateTime={start}&endDateTime={end}"));
+        let fresh = format!("{ME}/calendars/{}/calendarView/delta?startDateTime={start}&endDateTime={end}", crate::net::enc(cal));
+        // A saved token that isn't a Graph URL is dropped for a fresh sync.
+        let mut url = stored.filter(|u| is_graph(u)).unwrap_or_else(|| fresh.clone());
         let mut seen: HashSet<String> = HashSet::new();
+        let mut reset = false;
         loop {
             let v = match self.get(&url, "calendar delta").await {
                 Ok(v) => v,
-                Err(e) if e.to_string().contains("HTTP 410") => {
+                // Expired token: start over, but only once a pass.
+                Err(e) if !reset && e.to_string().contains("HTTP 410") => {
                     ctx.store.set_calendar_token(local, None)?;
-                    url = format!("{ME}/calendars/{cal}/calendarView/delta?startDateTime={start}&endDateTime={end}");
+                    url = fresh.clone();
+                    reset = true;
                     continue;
                 }
                 Err(e) => return Err(e),
@@ -232,18 +311,18 @@ impl GraphCalendarProvider {
                     continue;
                 }
                 // Delta pages carry only ids for some changes; fetch the full instance.
-                let full = if e.get("subject").is_none() { self.get(&format!("{ME}/events/{id}"), "get event").await? } else { e };
+                let full = if e.get("subject").is_none() { self.get(&format!("{ME}/events/{}", crate::net::enc(&id)), "get event").await? } else { e };
                 if let Some(ics) = graph_to_ics(&full, local, &self.owner) {
                     ctx.put_event(local, &id, full["changeKey"].as_str(), &ics)?;
                     seen.insert(id);
                 }
             }
             if let Some(n) = v["@odata.nextLink"].as_str() {
-                url = n.to_string();
+                url = graph_link(n)?;
                 continue;
             }
             if let Some(d) = v["@odata.deltaLink"].as_str() {
-                ctx.store.set_calendar_token(local, Some(d))?;
+                ctx.store.set_calendar_token(local, Some(&graph_link(d)?))?;
             }
             break;
         }
@@ -289,18 +368,23 @@ impl CalendarProvider for GraphCalendarProvider {
                         return Err(ApiError::new(ErrorCode::InvalidInput, "Outlook can't add someone else's meeting without inviting its attendees").into());
                     }
                     None => {
-                        let v = self.api.json(|h, t| with_prefs(h.post(format!("{ME}/calendars/{calendar_remote_id}/events"))).bearer_auth(t).json(&body), "create event").await?;
+                        let v = self.api.json(|h, t| with_prefs(h.post(format!("{ME}/calendars/{}/events", crate::net::enc(calendar_remote_id)))).bearer_auth(t).json(&body), "create event").await?;
                         out.event_remote_id = v["id"].as_str().map(String::from);
                         out.event_etag = v["changeKey"].as_str().map(String::from);
                     }
                     Some(id) => {
                         let server = self
-                            .get(&format!("{ME}/events/{id}?$select=bodyPreview,location,attendees,changeKey,isOrganizer,responseStatus,seriesMasterId,type"), "get event")
+                            .get(&format!("{ME}/events/{}?$select=bodyPreview,location,attendees,changeKey,isOrganizer,responseStatus,seriesMasterId,type,isReminderOn,reminderMinutesBeforeStart", crate::net::enc(id)), "get event")
                             .await?;
                         // Outlook knows whose meeting it is; the organizer's address
                         // may be an alias of the account's.
                         if !server["isOrganizer"].as_bool().unwrap_or(i_organize) {
                             self.respond(&server, id, ics).await?;
+                            // The reminder is ours to set, even on someone else's meeting.
+                            if let Some(r) = changed_reminder(&body, &server) {
+                                let v = self.api.json(|h, t| with_prefs(h.patch(format!("{ME}/events/{}", crate::net::enc(id)))).bearer_auth(t).json(&r), "update reminder").await?;
+                                out.event_etag = v["changeKey"].as_str().map(String::from);
+                            }
                             out.event_remote_id = Some(id.clone());
                             return Ok(out);
                         }
@@ -312,7 +396,7 @@ impl CalendarProvider for GraphCalendarProvider {
                         }
                         let mut body = body;
                         trim_unchanged(&mut body, &server);
-                        let v = self.api.json(|h, t| with_prefs(h.patch(format!("{ME}/events/{id}"))).bearer_auth(t).json(&body), "update event").await?;
+                        let v = self.api.json(|h, t| with_prefs(h.patch(format!("{ME}/events/{}", crate::net::enc(id)))).bearer_auth(t).json(&body), "update event").await?;
                         out.event_remote_id = Some(id.clone());
                         out.event_etag = v["changeKey"].as_str().map(String::from);
                     }
@@ -321,7 +405,7 @@ impl CalendarProvider for GraphCalendarProvider {
             // Deleting as an attendee only removes our copy; Graph sends a
             // response only through accept/decline, so `notify` needs nothing here.
             CalendarOp::Delete { event_remote_id, .. } => {
-                match self.api.send(|h, t| with_prefs(h.delete(format!("{ME}/events/{event_remote_id}"))).bearer_auth(t), "delete event").await {
+                match self.api.send(|h, t| with_prefs(h.delete(format!("{ME}/events/{}", crate::net::enc(event_remote_id)))).bearer_auth(t), "delete event").await {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("HTTP 404") => {}
                     Err(e) => return Err(e),
@@ -346,6 +430,27 @@ mod tests {
         let m = rrule_to_graph("FREQ=MONTHLY;UNTIL=20261231T000000Z", start, "UTC").unwrap();
         assert_eq!(m["pattern"]["dayOfMonth"], 5);
         assert_eq!(m["range"]["endDate"], "2026-12-31");
+    }
+
+    #[test]
+    fn monthly_by_weekday_and_local_until() {
+        // 6 PM in Los Angeles is 2 AM UTC the next day.
+        let start = Utc.with_ymd_and_hms(2026, 10, 31, 1, 0, 0).unwrap();
+        let r = rrule_to_graph("FREQ=MONTHLY;BYDAY=-1FR;UNTIL=20270130T010000Z", start, "America/Los_Angeles").unwrap();
+        assert_eq!(r["pattern"]["type"], "relativeMonthly");
+        assert_eq!(r["pattern"]["index"], "last");
+        assert_eq!(r["pattern"]["daysOfWeek"], json!(["friday"]));
+        assert_eq!(r["range"]["startDate"], "2026-10-30");
+        assert_eq!(r["range"]["endDate"], "2027-01-29");
+        assert_eq!(rrule_to_graph("FREQ=MONTHLY;BYDAY=2TU", start, "UTC").unwrap()["pattern"]["index"], "second");
+        // The BYSETPOS form other clients write, and one index for several days.
+        let r = rrule_to_graph("FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1", start, "UTC").unwrap();
+        assert_eq!((r["pattern"]["type"].as_str(), r["pattern"]["index"].as_str()), (Some("relativeMonthly"), Some("last")));
+        assert_eq!(rrule_to_graph("FREQ=MONTHLY;BYDAY=1MO,1WE", start, "UTC").unwrap()["pattern"]["daysOfWeek"], json!(["monday", "wednesday"]));
+        // Rules Graph can't hold aren't turned into a different one.
+        for rule in ["FREQ=MONTHLY;BYDAY=1MO,3MO", "FREQ=MONTHLY;BYDAY=FR", "FREQ=MONTHLY;BYDAY=5FR", "FREQ=MONTHLY;BYDAY=MO,TU;BYSETPOS=1"] {
+            assert!(rrule_to_graph(rule, start, "UTC").is_none(), "{rule}");
+        }
     }
 
     #[test]
@@ -387,5 +492,20 @@ mod tests {
         let mut changed = json!({ "body": { "content": "New agenda" }, "location": { "displayName": "Room 5" }, "attendees": [] });
         trim_unchanged(&mut changed, &server);
         assert!(changed.get("body").is_some() && changed.get("location").is_some() && changed.get("attendees").is_some());
+    }
+
+    #[test]
+    fn one_reminder_each_way() {
+        let e = json!({ "id": "E1", "subject": "1:1", "start": { "dateTime": "2026-03-01T15:00:00", "timeZone": "UTC" }, "end": { "dateTime": "2026-03-01T15:30:00", "timeZone": "UTC" },
+            "isReminderOn": true, "reminderMinutesBeforeStart": 15 });
+        let ics = graph_to_ics(&e, "cal", "me@x.test").unwrap();
+        assert_eq!(satchel_ical::parse(&ics).events[0].alerts(), [Alert { minutes_before: 15 }]);
+        let (body, _, _) = ics_to_graph(&ics).unwrap();
+        assert_eq!((body["isReminderOn"].clone(), body["reminderMinutesBeforeStart"].clone()), (json!(true), json!(15)));
+        // Unchanged, the reminder stays out of a PATCH; changed, it's all that's sent for someone else's meeting.
+        assert!(changed_reminder(&body, &e).is_none());
+        let off = graph_to_ics(&json!({ "subject": "1:1", "start": e["start"], "end": e["end"], "isReminderOn": false }), "cal", "me@x.test").unwrap();
+        let (off, _, _) = ics_to_graph(&off).unwrap();
+        assert_eq!(changed_reminder(&off, &e), Some(json!({ "isReminderOn": false })));
     }
 }

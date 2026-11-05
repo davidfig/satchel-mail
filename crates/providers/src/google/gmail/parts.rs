@@ -68,7 +68,7 @@ impl GmailProvider {
     /// The message without attachment contents, or `None` if it has none to
     /// leave out or doesn't rebuild (the caller then downloads it whole).
     pub(super) async fn fetch_slim(&self, id: &str) -> Result<Option<satchel_mime::Slim>> {
-        let m = self.get(&format!("{GMAIL}/messages/{id}?format=full"), "get message").await?;
+        let m = self.get(&format!("{GMAIL}/messages/{}?format=full", crate::net::enc(id)), "get message").await?;
         let payload = &m["payload"];
         if !skips_any(payload, false) {
             return Ok(None);
@@ -77,7 +77,7 @@ impl GmailProvider {
         to_fetch(payload, false, &mut ids);
         let mut fetched = HashMap::new();
         for a in ids {
-            let v = self.get(&format!("{GMAIL}/messages/{id}/attachments/{a}"), "get attachment").await?;
+            let v = self.get(&format!("{GMAIL}/messages/{}/attachments/{}", crate::net::enc(id), crate::net::enc(&a)), "get attachment").await?;
             fetched.insert(a, b64url_decode(v["data"].as_str().context("no attachment data")?)?);
         }
         Ok(part(payload, false, &fetched).and_then(|p| satchel_mime::rebuild(&p)))

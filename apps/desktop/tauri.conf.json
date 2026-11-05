@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Satchel Mail",
-  "version": "0.1.0",
+  "productName": "satchel.email",
+  "version": "0.1.3",
   "identifier": "app.satchel.mail",
   "build": {
     "frontendDist": "../../ui/dist",
-    "devUrl": "http://localhost:7780",
+    "devUrl": "http://127.0.0.1:7780",
     "beforeDevCommand": "npm --prefix ../ui run dev",
     "beforeBuildCommand": "npm --prefix ../ui run build"
   },
@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "satchel.email",
         "width": 1360,
         "height": 860,
@@ -23,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: https: http: blob:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob: data: about:; connect-src 'self' ipc: http://ipc.localhost"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: https: http: blob:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob: data: about: golemdocs://localhost http://golemdocs.localhost https: http: mailto:; media-src blob:; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
   "bundle": {
@@ -31,8 +32,8 @@
     "targets": ["app", "dmg", "deb", "appimage", "msi", "nsis"],
     "category": "Productivity",
     "shortDescription": "Email and calendar with an AI review queue",
-    "longDescription": "Satchel Mail syncs your email and calendars locally, exposes them to AI agents through MCP and a readable folder, and lets agents propose replies and changes that you approve.",
-    "copyright": "© 2026 Satchel Mail",
+    "longDescription": "satchel.email syncs your email and calendars locally, exposes them to AI agents through MCP and a readable folder, and lets agents propose replies and changes that you approve.",
+    "copyright": "© 2026 satchel.email",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "externalBin": ["binaries/satchel"],
     "macOS": { "minimumSystemVersion": "11.0", "entitlements": null, "signingIdentity": null },

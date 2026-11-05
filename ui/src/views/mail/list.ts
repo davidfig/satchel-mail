@@ -1,7 +1,7 @@
 // The virtualized thread list: scroll geometry and row rendering.
 
-import { h, icon, replace } from '../../lib/dom';
-import { listDate, participantsLabel } from '../../lib/format';
+import { h, icon, patch } from '../../lib/dom';
+import { domainOf, listDate, participantsLabel } from '../../lib/format';
 import { store } from '../../state';
 import type { MailView } from './index';
 
@@ -38,7 +38,7 @@ export function renderRows(view: MailView) {
   const total = view.list.total;
   view.spacer.style.height = `${Math.max(Math.min(total * ROW_H, MAX_SCROLL_PX), 1)}px`;
   if (!total) {
-    replace(view.rows, h('div.empty-list', view.list.loaded ? emptyMessage() : 'Loading…'));
+    patch(view.rows, h('div.empty-list', view.list.loaded ? emptyMessage() : 'Loading…'));
     view.rows.style.transform = '';
     return;
   }
@@ -57,15 +57,23 @@ export function renderRows(view: MailView) {
     const active = t.thread_id === store.state.selectedThread;
     out.push(
       h(
-        `div.thread-row${t.unread_count ? '.unread' : ''}${active ? '.active' : ''}${idx === view.cursor ? '.cursor' : ''}${view.selected.has(t.thread_id) ? '.selected' : ''}`,
+        `div.thread-row${t.unread_count ? '.unread' : ''}${t.favorite ? '.favorite' : ''}${active ? '.active' : ''}${idx === view.cursor ? '.cursor' : ''}${view.selected.has(t.thread_id) ? '.selected' : ''}`,
         {
           role: 'option',
           'aria-selected': active ? 'true' : 'false',
           style: { height: `${ROW_H}px` },
           dataset: { idx: String(idx) },
           on: {
+            // Shift+click selects rows, not the text between two clicks.
+            mousedown: (e: MouseEvent) => { if (e.shiftKey) e.preventDefault(); },
             click: (e: MouseEvent) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey) {
+              if (e.shiftKey) {
+                void view.extendTo(idx);
+                return;
+              }
+              if (e.metaKey || e.ctrlKey) {
+                // A later Shift+click ranges from here.
+                view.cursor = idx;
                 view.toggleSelect(t);
                 return;
               }
@@ -78,7 +86,9 @@ export function renderRows(view: MailView) {
         store.state.accounts.length > 1 && h('span.acct-bar', { style: { background: store.accountColor(t.account_id) }, title: store.state.accounts.find((a) => a.id === t.account_id)?.email }),
         h('div.thread-main',
           h('div.thread-line1',
+            t.favorite && h('span.fav', { title: 'From a favorite' }, icon('heart', 13)),
             h('span.who', participantsLabel(t.participants, me)),
+            t.participants.length === 1 && !me.has(t.participants[0].email.toLowerCase()) && h('span.domain', { title: t.participants[0].email }, domainOf(t.participants[0])),
             t.message_count > 1 && h('span.count', String(t.message_count)),
             h('span.spacer'),
             t.has_attachments && icon('paperclip', 14),
@@ -93,7 +103,9 @@ export function renderRows(view: MailView) {
       ),
     );
   }
-  replace(view.rows, out);
+  // Patched, not replaced: this runs on every scroll and refresh, and fresh
+  // rows would drop the hover under the pointer and blink the list.
+  patch(view.rows, out);
 }
 
 function emptyMessage(): string {

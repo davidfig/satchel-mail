@@ -17,7 +17,7 @@ use satchel_api::*;
 use satchel_core::provider::{ApplyOutcome, CredentialHandle, Download, MailProvider, RemoteMailbox, ResolvedOp, SyncCtx};
 use satchel_core::store::{MessageRecord, MessageRef};
 use serde_json::{Value, json};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::oauth::ApiClient;
 
@@ -93,7 +93,7 @@ fn record_from_metadata(m: &Value) -> MessageRecord {
         bcc: p.bcc,
         reply_to: p.reply_to,
         date: internal.or(p.date).unwrap_or_else(Utc::now),
-        snippet: html_unescape(m["snippet"].as_str().unwrap_or_default()),
+        snippet: satchel_mime::preview_text(m["snippet"].as_str().unwrap_or_default()),
         flags: flags_from_labels(&labels),
         attachments: vec![],
         blob_hash: None,
@@ -112,17 +112,15 @@ fn memberships(labels: &[String], known: &HashSet<String>) -> Vec<(String, Optio
     out
 }
 
-fn html_unescape(s: &str) -> String {
-    s.replace("&#39;", "'").replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
-}
-
 pub struct GmailProvider {
     api: ApiClient,
+    /// Label ids from the last sync, for [`MailProvider::backfill`].
+    labels: std::sync::Mutex<HashSet<String>>,
 }
 
 impl GmailProvider {
     pub fn new(creds: CredentialHandle) -> Result<Self> {
-        Ok(Self { api: api_client(creds)? })
+        Ok(Self { api: api_client(creds)?, labels: Default::default() })
     }
 
     async fn get(&self, url: &str, what: &str) -> Result<Value> {
@@ -215,14 +213,26 @@ impl MailProvider for GmailProvider {
             }
             None => self.full_sync(ctx, &labels).await?,
         }
-        if let Err(e) = self.backfill(ctx, &labels).await {
-            warn!("Gmail backfill: {e:#}");
+        *self.labels.lock().unwrap() = labels;
+        Ok(())
+    }
+
+    async fn backfill(&self, ctx: &SyncCtx, until: std::time::Instant) -> Result<()> {
+        let labels = self.labels.lock().unwrap().clone();
+        if labels.is_empty() {
+            return Ok(());
+        }
+        while self.older_page(ctx, &labels).await? {
+            if std::time::Instant::now() >= until {
+                ctx.more_to_sync();
+                break;
+            }
         }
         Ok(())
     }
 
     async fn fetch_raw(&self, _ctx: &SyncCtx, msg: &MessageRef) -> Result<Vec<u8>> {
-        let v = self.get(&format!("{GMAIL}/messages/{}?format=raw", msg.remote_id), "get raw message").await?;
+        let v = self.get(&format!("{GMAIL}/messages/{}?format=raw", crate::net::enc(&msg.remote_id)), "get raw message").await?;
         b64url_decode(v["raw"].as_str().context("no raw content")?)
     }
 

@@ -42,14 +42,14 @@ impl GmailProvider {
                     None => None,
                 };
                 let v = match existing {
-                    Some(d) => self.api.json(|h, t| h.put(format!("{GMAIL}/drafts/{d}")).bearer_auth(t).json(&body), "update draft").await?,
+                    Some(d) => self.api.json(|h, t| h.put(format!("{GMAIL}/drafts/{}", crate::net::enc(&d))).bearer_auth(t).json(&body), "update draft").await?,
                     None => self.post(&format!("{GMAIL}/drafts"), body.clone(), "create draft").await?,
                 };
                 out.stored_remote_id = v["message"]["id"].as_str().map(String::from);
             }
             ResolvedOp::DeleteDraft { message } => {
                 if let Some(d) = self.draft_id_for(&message.remote_id).await? {
-                    self.api.send(|h, t| h.delete(format!("{GMAIL}/drafts/{d}")).bearer_auth(t), "delete draft").await?;
+                    self.api.send(|h, t| h.delete(format!("{GMAIL}/drafts/{}", crate::net::enc(&d))).bearer_auth(t), "delete draft").await?;
                 }
             }
             // Gmail nests labels by name ("Parent/Child"), so the label's name is its full path.
@@ -72,12 +72,12 @@ impl GmailProvider {
                 }
                 for (id, name) in renames {
                     let body = json!({ "name": name });
-                    self.api.json(|h, t| h.patch(format!("{GMAIL}/labels/{id}")).bearer_auth(t).json(&body), "rename label").await?;
+                    self.api.json(|h, t| h.patch(format!("{GMAIL}/labels/{}", crate::net::enc(&id))).bearer_auth(t).json(&body), "rename label").await?;
                 }
             }
             ResolvedOp::DeleteMailbox { remote_id, .. } => {
                 // Removes the label from its messages; the messages stay.
-                self.api.send(|h, t| h.delete(format!("{GMAIL}/labels/{remote_id}")).bearer_auth(t), "delete label").await?;
+                self.api.send(|h, t| h.delete(format!("{GMAIL}/labels/{}", crate::net::enc(remote_id))).bearer_auth(t), "delete label").await?;
             }
             ResolvedOp::Send { raw, replaces_draft, thread_remote_id, .. } => {
                 let mut body = json!({ "raw": b64url(raw) });
@@ -87,7 +87,7 @@ impl GmailProvider {
                 self.post(&format!("{GMAIL}/messages/send"), body, "send").await.map_err(crate::net::send_error)?;
                 if let Some(d) = replaces_draft
                     && let Ok(Some(did)) = self.draft_id_for(&d.remote_id).await {
-                        let _ = self.api.send(|h, t| h.delete(format!("{GMAIL}/drafts/{did}")).bearer_auth(t), "delete draft").await;
+                        let _ = self.api.send(|h, t| h.delete(format!("{GMAIL}/drafts/{}", crate::net::enc(&did))).bearer_auth(t), "delete draft").await;
                     }
             }
         }

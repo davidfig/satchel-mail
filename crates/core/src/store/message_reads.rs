@@ -2,6 +2,18 @@
 
 use super::*;
 
+/// Whether two rows with the same Message-ID are copies of one message: same
+/// sender, and the same text where both have been downloaded. Matches
+/// [`Store::message_copies`].
+pub(super) fn is_copy(from_a: Option<&str>, snippet_a: &str, from_b: Option<&str>, snippet_b: &str) -> bool {
+    let same_from = match (from_a, from_b) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        (None, None) => true,
+        _ => false,
+    };
+    same_from && (snippet_a == snippet_b || snippet_a.is_empty() || snippet_b.is_empty())
+}
+
 impl Store {
     /// Remote ids of all messages in an account (for full-resync diffs).
     pub fn remote_ids(&self, account_id: &str) -> Result<HashMap<String, String>> {
@@ -118,6 +130,24 @@ impl Store {
         })
     }
 
+    /// Other copies of the same message in the same conversation: rows with the
+    /// same Message-ID stored in other folders (Sent and Inbox for a note to
+    /// self, a server's copy in Trash). The reader shows only one of them.
+    /// A copy also has the same sender and text (see [`is_copy`]), so reusing
+    /// a real Message-ID doesn't make a forgery pass for the real message.
+    pub fn message_copies(&self, message_id: &str) -> Result<Vec<String>> {
+        self.r(|c| {
+            let mut s = c.prepare(
+                "SELECT b.id FROM messages a JOIN messages b
+                   ON b.account_id=a.account_id AND b.thread_id=a.thread_id AND b.message_id_hdr=a.message_id_hdr AND b.id<>a.id
+                   AND lower(b.from_email) IS lower(a.from_email) AND (b.snippet=a.snippet OR a.snippet='' OR b.snippet='')
+                 WHERE a.id=? ORDER BY b.id",
+            )?;
+            let rows = s.query_map([message_id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+            Ok(rows)
+        })
+    }
+
     pub fn message_version(&self, id: &str) -> Result<Option<i64>> {
         self.r(|c| Ok(c.query_row("SELECT version FROM messages WHERE id=?", [id], |r| r.get(0)).optional()?))
     }
@@ -166,6 +196,21 @@ impl Store {
     pub fn mark_thread_mirrored(&self, thread_id: &str) -> Result<()> {
         self.w(|c| {
             c.execute("UPDATE messages SET mirrored=1 WHERE thread_id=?", [thread_id])?;
+            Ok(())
+        })
+    }
+
+    pub fn unmirrored_thread_count(&self) -> Result<usize> {
+        self.r(|c| Ok(c.query_row("SELECT COUNT(DISTINCT thread_id) FROM messages WHERE mirrored=0", [], |r| r.get::<_, i64>(0))? as usize))
+    }
+
+    /// Queue these threads to be written to the AI folder again.
+    pub fn mark_threads_unmirrored(&self, thread_ids: &[String]) -> Result<()> {
+        self.w(|c| {
+            let mut s = c.prepare("UPDATE messages SET mirrored=0 WHERE thread_id=?")?;
+            for t in thread_ids {
+                s.execute([t])?;
+            }
             Ok(())
         })
     }

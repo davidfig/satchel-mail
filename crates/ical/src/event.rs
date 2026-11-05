@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Parsing VEVENTs into events.
 
 use super::*;
@@ -44,6 +45,7 @@ pub struct ParsedEvent {
     pub organizer: Option<Address>,
     pub attendees: Vec<Attendee>,
     pub sequence: i64,
+    pub alarms: Vec<ParsedAlarm>,
 }
 
 impl ParsedEvent {
@@ -54,13 +56,15 @@ impl ParsedEvent {
         if let Some(e) = &self.end {
             return e.to_utc();
         }
+        // Hostile values must not panic: fall back to a zero-length event.
+        let start = self.start_utc();
         if let Some(d) = self.duration {
-            return self.start_utc() + d;
+            return start.checked_add_signed(d).unwrap_or(start);
         }
         if self.start.is_date() {
-            self.start_utc() + Duration::days(1)
+            start.checked_add_signed(Duration::days(1)).unwrap_or(start)
         } else {
-            self.start_utc()
+            start
         }
     }
     pub fn duration(&self) -> Duration {
@@ -91,6 +95,7 @@ impl ParsedEvent {
             organizer: self.organizer.clone(),
             status: self.status,
             my_status,
+            alerts: Some(self.alerts()),
         }
     }
 }
@@ -105,6 +110,7 @@ pub fn parse(ics: &str) -> ParsedCalendar {
     let mut cal = ParsedCalendar::default();
     let mut cur: Option<ParsedEvent> = None;
     let mut depth_other = 0; // inside VALARM etc. within VEVENT
+    let mut alarm: Option<ParsedAlarm> = None;
     for line in unfold(ics) {
         let Some(p) = parse_line(&line) else { continue };
         match (p.name.as_str(), p.value.to_ascii_uppercase().as_str()) {
@@ -124,6 +130,7 @@ pub fn parse(ics: &str) -> ParsedCalendar {
                     organizer: None,
                     attendees: vec![],
                     sequence: 0,
+                    alarms: vec![],
                 });
                 continue;
             }
@@ -133,12 +140,19 @@ pub fn parse(ics: &str) -> ParsedCalendar {
                 }
                 continue;
             }
-            ("BEGIN", _) if cur.is_some() => {
+            ("BEGIN", kind) if cur.is_some() => {
                 depth_other += 1;
+                if depth_other == 1 && kind == "VALARM" {
+                    alarm = Some(ParsedAlarm { action: String::new(), trigger: None, default: false });
+                }
                 continue;
             }
             ("END", _) if cur.is_some() && depth_other > 0 => {
                 depth_other -= 1;
+                if depth_other == 0
+                    && let (Some(a), Some(e)) = (alarm.take(), cur.as_mut()) {
+                        e.alarms.push(a);
+                    }
                 continue;
             }
             ("METHOD", _) if cur.is_none() => {
@@ -148,6 +162,9 @@ pub fn parse(ics: &str) -> ParsedCalendar {
             _ => {}
         }
         if depth_other > 0 {
+            if depth_other == 1 && let Some(a) = alarm.as_mut() {
+                a.read(&p);
+            }
             continue;
         }
         let Some(e) = cur.as_mut() else { continue };

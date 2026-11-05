@@ -1,9 +1,9 @@
-# Satchel Mail
+# satchel.email
 
 A desktop email and calendar client that keeps your mail on your own disk and
 lets AI agents help — safely. Agents read your mail and calendars through MCP
 (or a plain-text folder) and **propose** replies, filing and events. Nothing is
-sent, moved or scheduled until you approve it in the Review queue.
+sent, moved or scheduled until you approve it in AI Proposals.
 
 - **Accounts:** Gmail + Google Calendar, Microsoft 365 / Outlook, any IMAP/SMTP
   server (+ CalDAV), Fastmail and other JMAP servers.
@@ -21,6 +21,44 @@ sent, moved or scheduled until you approve it in the Review queue.
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture and
 [docs/decisions/](docs/decisions/README.md) for the decisions behind it.
 
+satchel.email is free, with no ads and no subscription. If it's useful to you,
+you can [sponsor it on GitHub](https://github.com/sponsors/davidfig).
+
+## Status: early release
+
+[Download it](https://satchel.email/#get) for Mac, Windows or Linux. Installed
+apps update themselves from
+[GitHub Releases](https://github.com/davidfig/satchel-mail/releases).
+
+Fastmail, iCloud and any IMAP or JMAP server work fully. Two providers are
+still waiting on a review:
+
+- **Gmail:** `https://mail.google.com/` is a restricted scope, so until Google
+  verifies the app only listed test users can sign in with Google. Verification
+  needs a demo video of the sign-in and of how each scope is used, and a yearly
+  independent security assessment (CASA). See [docs/OAUTH.md](docs/OAUTH.md).
+  Everyone else can add Gmail as an IMAP/SMTP account with a
+  [Google app password](https://myaccount.google.com/apppasswords) (mail only;
+  Google Calendar and Contacts need the Google sign-in).
+- **Microsoft 365 and Outlook:** sign-in works, but the consent screen says
+  "unverified" until publisher verification is done, and some organizations
+  need an admin to approve the app first.
+
+To build with your own Google or Microsoft sign-in, create your own OAuth client
+ids ([docs/OAUTH.md](docs/OAUTH.md)).
+
+## License
+
+| Part | License |
+| --- | --- |
+| The app: `core`, `providers`, `mcp`, `cli`, `apps/desktop`, `ui`, and everything else not listed below | [AGPL-3.0](LICENSE) |
+| The libraries: `crates/mime`, `crates/ical`, `crates/api` | MIT OR Apache-2.0 (each crate's `LICENSE-MIT` and `LICENSE-APACHE`) |
+
+The satchel.email name and logo aren't covered by these licenses: see
+[TRADEMARKS.md](TRADEMARKS.md). Dependencies keep their own licenses: see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). To contribute, see
+[CONTRIBUTING.md](CONTRIBUTING.md). Why: [0058](docs/decisions/0058-licensing.md).
+
 ## Layout
 
 ```
@@ -34,6 +72,7 @@ crates/cli        `satchel` binary: serve (web UI + API), mcp, sync, accounts, a
 apps/desktop      Tauri desktop app
 ui/               vanilla TypeScript UI (shared by desktop and web)
 scripts/          dev-servers (local Stalwart), seed fixtures, release build
+site/             marketing site (static HTML, no build)
 ```
 
 ## Quick start (development)
@@ -44,17 +83,20 @@ Requirements: Rust 1.90+, Node 20+, Python 3 (for fixtures).
 commands are pnpm scripts in the root `package.json`:
 
 ```bash
-pnpm dev              # web UI with hot reload on http://localhost:7780, test data
+pnpm dev              # web UI with hot reload on http://127.0.0.1:7780, test data
 pnpm app              # desktop app on your real data (OAuth client ids from .env)
 pnpm web              # web UI on http://127.0.0.1:7781 (open the link it prints), real data
 pnpm web:test         # web UI against the local test servers and .dev/test-data
 pnpm servers:reset    # restore and reseed the local test servers
 ```
 
-On macOS, run `scripts/dev-signing-cert` once. It creates a local
-code-signing certificate that `scripts/run` signs dev builds with, so the
-keychain's "Always Allow" still holds after a rebuild instead of prompting
-every time.
+On macOS, create an Apple Development certificate once (Xcode → Settings →
+Accounts → Manage Certificates → + → Apple Development; a free personal team
+works). `scripts/run` signs dev builds with it, so the keychain's "Always
+Allow" still holds after a rebuild instead of prompting every time. The
+keychain ties each item to the signer's Team ID, so the self-signed
+certificate from `scripts/dev-signing-cert` is only a fallback: with it macOS
+still asks once per item after each rebuild.
 
 The steps by hand:
 
@@ -72,7 +114,7 @@ SATCHEL_PASSWORD=test-pass-alice target/debug/satchel accounts add-imap \
   --email alice@satchel.test --name Alice --username alice \
   --imap-host 127.0.0.1 --imap-port 2993 --smtp-port 2465 \
   --caldav-url http://127.0.0.1:8480/dav/cal --insecure
-target/debug/satchel serve --ui ui/dist      # open the http://127.0.0.1:7781/?session=… link it prints
+target/debug/satchel serve --ui ui/dist      # open the http://127.0.0.1:7781/#session=… link it prints
 ```
 
 Run the desktop app in development:
@@ -95,6 +137,18 @@ claude mcp add satchel --env SATCHEL_AGENT_TOKEN=stk_… -- satchel mcp
 
 Details, the tool list, and the folder-based alternative are in
 [docs/AI_AGENTS.md](docs/AI_AGENTS.md).
+
+## Installing on your Mac
+
+```bash
+npm run install-app               # release build → /Applications/satchel.email.app
+```
+
+Runs it like a normal app when you're not developing; run it again to update.
+It compiles in the OAuth ids from `.env`, signs with your Apple Development
+certificate, and quits a running copy first. The installed app and
+`scripts/run` share the default data directory, so only one can run at a time.
+On another computer, copy `.env` over first (it isn't in git).
 
 ## Releases
 

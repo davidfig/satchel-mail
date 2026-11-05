@@ -14,6 +14,42 @@ pub(super) fn rebase(url: &str, session_url: &str) -> String {
     url.to_string()
 }
 
+/// Hosts that serve JMAP blob downloads for a provider whose session lives on
+/// another site (Fastmail: api.fastmail.com hands out
+/// www.fastmailusercontent.com download URLs).
+const DOWNLOAD_HOSTS: &[&str] = &["fastmailusercontent.com"];
+
+/// Which session URL an [`endpoint`] is: downloads may also use [`DOWNLOAD_HOSTS`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Use {
+    Api,
+    Download,
+}
+
+/// A URL from the session object, checked before it gets our credentials:
+/// the rule DAV uses ([`crate::net::credentials_allowed`]: same origin, or
+/// another https host of the same site), plus a few known download hosts.
+/// Never a downgrade to plain http, and never this computer or a private
+/// network unless the session itself is there (local test servers).
+pub(super) fn endpoint(url: &str, session_url: &str, kind: Use) -> anyhow::Result<String> {
+    let (u, s) = (url::Url::parse(url)?, url::Url::parse(session_url)?);
+    let refuse = || anyhow::anyhow!("the JMAP server named {url}, which isn't on {}", s.origin().ascii_serialization());
+    if crate::net::is_internal_url(&u) && !crate::net::is_internal_url(&s) {
+        return Err(refuse());
+    }
+    if crate::net::credentials_allowed(&s, &u) {
+        return Ok(url.to_string());
+    }
+    let known_download = || {
+        let host = u.host_str().unwrap_or_default().trim_end_matches('.').to_ascii_lowercase();
+        DOWNLOAD_HOSTS.iter().any(|h| host == *h || host.strip_suffix(h).is_some_and(|rest| rest.ends_with('.')))
+    };
+    if kind == Use::Download && s.scheme() == "https" && u.scheme() == "https" && u.port_or_known_default() == Some(443) && known_download() {
+        return Ok(url.to_string());
+    }
+    Err(refuse())
+}
+
 pub(super) fn addresses(v: &Value) -> Vec<Address> {
     v.as_array()
         .map(|a| {

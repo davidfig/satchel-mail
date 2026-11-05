@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 
 use crate::engine::{Caller, Engine, Mode};
 use crate::error::{err, forbidden, not_found};
+use crate::provider::priority;
 use crate::store::{MsgCond, MsgTerm, Store, StoredMessage, ThreadFilter};
 
 /// Add a search (the search box's language) to a filter. Unless it names a
@@ -46,7 +47,25 @@ fn search_accounts(store: &Store, allowed: Option<Vec<String>>, terms: &[(Vec<St
 impl Engine {
     pub(crate) fn list_threads(&self, caller: &Caller, q: &ThreadQuery) -> Result<Vec<ThreadSummary>> {
         let f = self.thread_filter(caller, q)?;
-        self.store.list_threads(&f)
+        let threads = self.store.list_threads(&f)?;
+        // Under a date limit each thread counts, names and previews only its
+        // messages inside it (the filter already left out threads with none).
+        let Some(cutoff) = self.cutoff(caller) else { return Ok(threads) };
+        let role_mailboxes: Option<Vec<String>> = match q.role {
+            Some(role) => Some(self.store.list_mailboxes(None)?.into_iter().filter(|m| m.role == role).map(|m| m.id).collect()),
+            None => None,
+        };
+        let mut out = vec![];
+        for t in threads {
+            let Some(t) = crate::mail::visible::visible_summary(&self.store, t, Some(cutoff))? else { continue };
+            // Listed in a mailbox only for a message inside the limit there.
+            let in_mailbox = q.mailbox_id.as_ref().is_none_or(|mb| t.mailbox_ids.contains(mb));
+            let in_role = role_mailboxes.as_ref().is_none_or(|ids| t.mailbox_ids.iter().any(|m| ids.contains(m)));
+            if in_mailbox && in_role {
+                out.push(t);
+            }
+        }
+        Ok(out)
     }
 
     pub(crate) fn thread_filter(&self, caller: &Caller, q: &ThreadQuery) -> Result<ThreadFilter> {
@@ -61,7 +80,7 @@ impl Engine {
         };
         if let Some(mb) = &q.mailbox_id {
             let m = self.store.get_mailbox(mb)?.ok_or_else(|| not_found("mailbox"))?;
-            self.check_account(caller, &m.account_id)?;
+            self.check_account(caller, &m.account_id, "mailbox")?;
         }
         let mut accounts = q.account_id.clone().map(|a| vec![a]);
         if let Some(allowed) = self.allowed_accounts(caller) {
@@ -74,7 +93,10 @@ impl Engine {
         f.after = self.cutoff(caller);
         // A smart folder is its saved query; a search inside it narrows it further.
         let folder_query = match &q.smart_folder_id {
-            Some(id) => Some(self.store.get_smart_folder(id)?.ok_or_else(|| not_found("smart folder"))?.query),
+            Some(id) => {
+                let folder = self.store.get_smart_folder(id)?.filter(|_| self.may_see_smart_folders(caller).unwrap_or(false));
+                Some(folder.ok_or_else(|| not_found("smart folder"))?.query)
+            }
             None => None,
         };
         let search = [folder_query.as_deref(), q.search.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" ");
@@ -96,7 +118,8 @@ impl Engine {
         let providers = self.providers_for(&m.summary.account_id)?;
         let Some(mail) = providers.mail.clone() else { return Ok(None) };
         let ctx = self.ctx(&m.summary.account_id)?;
-        match tokio::time::timeout(std::time::Duration::from_secs(30), self.ensure_body(&ctx, mail.as_ref(), id)).await {
+        let fetch = priority::as_user(self.gate(&ctx.account.id), self.ensure_body(&ctx, mail.as_ref(), id));
+        match tokio::time::timeout(std::time::Duration::from_secs(30), fetch).await {
             Ok(r) => r,
             Err(_) => Err(err(ErrorCode::Network, "timed out fetching message")),
         }
@@ -112,7 +135,8 @@ impl Engine {
         let providers = self.providers_for(&m.summary.account_id)?;
         let Some(mail) = providers.mail.clone() else { return self.raw_for(id).await };
         let ctx = self.ctx(&m.summary.account_id)?;
-        match tokio::time::timeout(std::time::Duration::from_secs(120), self.ensure_full(&ctx, mail.as_ref(), id)).await {
+        let fetch = priority::as_user(self.gate(&ctx.account.id), self.ensure_full(&ctx, mail.as_ref(), id));
+        match tokio::time::timeout(std::time::Duration::from_secs(120), fetch).await {
             Ok(r) => r.map(Some),
             Err(_) => Err(err(ErrorCode::Network, "timed out fetching attachments")),
         }
@@ -141,16 +165,28 @@ impl Engine {
         };
         let settings = self.settings();
         let sender = m.summary.from.as_ref().map(|a| a.email.to_lowercase()).unwrap_or_default();
-        let allow_remote = force_remote || settings.remote_image_senders.iter().any(|s| s == &sender);
+        let sender_allowed = settings.remote_image_senders.iter().any(|s| s == &sender);
+        let sender_verdict = self.store.sender_rule(&sender).ok().flatten();
+        // "Always load" never covers spam: mail in Junk or from a sender marked spam.
+        let load_all = settings.load_remote_images
+            && sender_verdict != Some(SenderVerdict::Spam)
+            && !self.store.mailbox_by_role(&m.summary.account_id, MailboxRole::Junk)?.is_some_and(|j| m.summary.mailbox_ids.contains(&j.id));
+        let mut allow_remote = force_remote;
         let mut invite = None;
         let mut warnings = vec![];
         let mut unsubscribe = None;
+        let (mut bulk_headers, mut reply_marker) = (false, false);
         let (text, html, blocked, attachments) = match &raw {
             Some(r) => {
                 let p = satchel_mime::parse(r).unwrap_or_default();
-                invite = self.invite_from(&m.summary.account_id, &p.calendar_parts);
+                invite = self.invite_from(&m.summary.account_id, &p);
+                self.check_dkim(&m.summary.id, &m.summary.account_id, r).await;
                 warnings = self.message_warnings(&m, &p, invite.as_ref());
                 unsubscribe = p.unsubscribe.clone();
+                (bulk_headers, reply_marker) = (p.bulk_headers, p.reply_marker);
+                // Anyone can put a trusted sender's address in From, so the
+                // sender's allowance only counts for mail that isn't forged.
+                allow_remote = force_remote || load_all || (sender_allowed && self.sender_verified(&m.summary.id, &m.summary.account_id, &p));
                 let (html, blocked) = match &p.html {
                     Some(h) => {
                         let inline = satchel_mime::inline_data_urls(r);
@@ -160,10 +196,12 @@ impl Engine {
                     None => (None, false),
                 };
                 // A stored copy without attachment contents parses with zero sizes.
-                (p.text, html, blocked, if m.partial && !m.attachments.is_empty() { m.attachments.clone() } else { p.attachments })
+                (p.text, html, blocked, if m.partial && !m.attachments.is_empty() { recheck(&m.attachments) } else { p.attachments })
             }
-            None => (m.summary.snippet.clone(), None, false, m.attachments.clone()),
+            None => (m.summary.snippet.clone(), None, false, recheck(&m.attachments)),
         };
+        let reply_target = if m.reply_to.is_empty() { m.summary.from.iter().collect::<Vec<_>>() } else { m.reply_to.iter().collect() };
+        let bulk = !reply_marker && (bulk_headers || (!reply_target.is_empty() && reply_target.iter().all(|a| crate::contacts::is_machine_address(&a.email))));
         Ok(MessageDetail {
             summary: m.summary,
             cc: m.cc,
@@ -181,21 +219,20 @@ impl Engine {
             invite,
             warnings,
             unsubscribe,
-            sender_verdict: self.store.sender_rule(&sender).ok().flatten(),
+            bulk,
+            sender_verdict,
         })
     }
 
     pub(crate) fn list_mailboxes(&self, caller: &Caller, account_id: Option<String>) -> Result<Vec<Mailbox>> {
-        if let Some(a) = &account_id {
-            self.check_account(caller, a)?;
-        }
+        // An account the caller may not see lists nothing, as a missing one does.
         let allowed = self.allowed_accounts(caller);
         Ok(self.store.list_mailboxes(account_id.as_deref())?.into_iter().filter(|m| allowed.as_ref().is_none_or(|ids| ids.contains(&m.account_id))).collect())
     }
 
     pub(crate) async fn get_thread(&self, caller: &Caller, thread_id: String) -> Result<Thread> {
         let t = self.store.get_thread_summary(&thread_id)?.ok_or_else(|| not_found("thread"))?;
-        self.check_account(caller, &t.account_id)?;
+        self.check_account(caller, &t.account_id, "thread")?;
         let ids = self.store.thread_message_ids(&thread_id)?;
         let cutoff = self.cutoff(caller);
         let mut messages = vec![];
@@ -212,21 +249,33 @@ impl Engine {
                 }
             messages.push(self.message_detail(&id, false).await?);
         }
-        Ok(Thread { thread_id, account_id: t.account_id, subject: t.subject, messages })
+        // A thread with nothing inside the date limit is as good as missing,
+        // and one that has something there doesn't show an older subject.
+        let subject = match (cutoff, messages.first()) {
+            (None, _) => t.subject,
+            (Some(_), None) => return Err(not_found("thread")),
+            (Some(_), Some(first)) => {
+                let s = &first.summary.subject;
+                if s.is_empty() { messages.last().map(|m| m.summary.subject.clone()).unwrap_or_default() } else { s.clone() }
+            }
+        };
+        Ok(Thread { thread_id, account_id: t.account_id, subject, messages })
     }
 
-    /// An attachment's content. Agents get text content; binary only when
-    /// their policy allows it.
+    /// An attachment's content. Agents get it only when their policy allows
+    /// attachments (the sender picks the MIME type, so "text" proves nothing);
+    /// text then comes as text.
     pub(crate) async fn get_attachment(&self, caller: &Caller, message_id: &str, attachment_id: &str) -> Result<Value> {
+        if let Caller::Agent(a) = caller
+            && !a.policy.allow_attachments {
+                return Err(forbidden("attachments are not shared with this agent"));
+            }
         let raw = self.full_raw_for(message_id).await?.ok_or_else(|| not_found("message body"))?;
         let (filename, mime_type, data) = satchel_mime::attachment_bytes(&raw, attachment_id).ok_or_else(|| not_found("attachment"))?;
-        if let Caller::Agent(a) = caller {
+        if matches!(caller, Caller::Agent(_)) {
             let is_text = mime_type.starts_with("text/") || mime_type == "application/json" || mime_type.ends_with("+xml");
             if is_text {
                 return Ok(json!({ "filename": filename, "mime_type": mime_type, "text": String::from_utf8_lossy(&data) }));
-            }
-            if !a.policy.allow_attachments {
-                return Err(forbidden("binary attachments are not shared with this agent"));
             }
         }
         Ok(json!({ "filename": filename, "mime_type": mime_type, "data_base64": base64::engine::general_purpose::STANDARD.encode(&data) }))
@@ -264,4 +313,17 @@ impl Engine {
         }
         Ok(p)
     }
+}
+
+/// Stored attachment rows may predate the current filename cleaning and risky
+/// list, so check them again as they're shown.
+fn recheck(stored: &[satchel_api::Attachment]) -> Vec<satchel_api::Attachment> {
+    stored
+        .iter()
+        .map(|a| satchel_api::Attachment {
+            risky: a.risky || satchel_mime::is_risky_attachment(&a.filename, &a.mime_type),
+            filename: satchel_mime::clean_filename(&a.filename),
+            ..a.clone()
+        })
+        .collect()
 }

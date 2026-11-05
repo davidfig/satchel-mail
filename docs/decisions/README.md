@@ -19,7 +19,7 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0013 | [Windowed thread list and stable paging](0013-windowed-thread-list.md) | Accepted |
 | 0014 | [Full-text search with SQLite FTS5](0014-sqlite-fts5-search.md) | Accepted (supersedes the tantivy index) |
 | 0015 | [Credentials in the OS keychain](0015-secrets.md) | Accepted |
-| 0016 | [Name: Satchel Mail](0016-name.md) | Accepted |
+| 0016 | [Name: Satchel Mail](0016-name.md) | Superseded by 0055 |
 | 0017 | [OAuth with PKCE and a loopback redirect](0017-oauth.md) | Accepted |
 | 0018 | [Hosted (cloud) version](0018-hosted-version.md) | Proposed — on hold |
 | 0019 | [Conversations as a chat-style stream](0019-conversation-stream.md) | Accepted |
@@ -40,4 +40,33 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0034 | [Sender rules act on the server only for mail they're sure about](0034-sender-rules-act-only-on-authentic-mail.md) | Accepted |
 | 0035 | [Code layout: folders by domain, files under ~400 lines](0035-code-layout.md) | Accepted |
 | 0036 | [Download all mail without attachments, within a storage limit](0036-message-content-and-storage-limit.md) | Accepted |
-| 0039 | [Smart folders: saved searches under Mail](0039-smart-folders.md) | Accepted |
+| 0037 | [The user's requests go before background sync](0037-user-requests-before-sync.md) | Accepted |
+| 0038 | [Background reads use their own connection](0038-separate-read-connections.md) | Accepted |
+| 0039 | [Newer mail first; older mail syncs over time](0039-newer-mail-first.md) | Accepted (per-pass budgets updated by 0047) |
+| 0040 | [Hardening after the October security review](0040-security-review-hardening.md) | Accepted |
+| 0041 | [Changing the AI folder's location moves it](0041-moving-the-ai-folder.md) | Accepted |
+| 0042 | [Hardening after the second security pass](0042-second-security-pass.md) | Accepted |
+| 0043 | [Convert HTML mail to text ourselves](0043-html-to-text-in-tree.md) | Accepted |
+| 0044 | [Approved drafts can be sent straight from Review](0044-send-from-review.md) | Accepted |
+| 0045 | [Agents can propose merging contacts](0045-agents-propose-contact-merges.md) | Accepted |
+| 0046 | [Views that redraw on their own use `patch`, not a framework](0046-redraw-with-patch.md) | Accepted |
+| 0046 | [Opt-in setting loads remote images, except in spam](0046-always-load-remote-images.md) | Accepted |
+| 0047 | [Short sync passes while older mail fills in](0047-short-sync-passes.md) | Accepted |
+| 0048 | [The command palette is built from the shortcuts](0048-command-palette-from-shortcuts.md) | Accepted |
+| 0049 | [Events move between calendars, unless they have guests](0049-move-events-between-calendars.md) | Accepted |
+| 0050 | [Location suggestions: history first, place lookups opt-in](0050-location-suggestions.md) | Accepted |
+| 0051 | [One sidebar: fixed mode rows, each view's own section below](0051-one-sidebar.md) | Accepted |
+| 0052 | [All credentials in one keychain item](0052-one-keychain-item.md) | Accepted |
+| 0053 | [Favorite senders: a local list of addresses, highlighted everywhere](0053-favorite-senders.md) | Accepted |
+| 0054 | [View attachments in the app; Open and Save beside it](0054-attachment-viewer.md) | Partly superseded by 0062 |
+| 0055 | [Name: satchel.email](0055-name-satchel-email.md) | Accepted |
+| 0056 | [Calendar alerts: VALARMs in the stored event, fired by the core](0056-calendar-alerts.md) | Accepted |
+| 0057 | [Calendar alerts scheduled with macOS](0057-calendar-alerts-in-macos.md) | Accepted |
+| 0058 | [Licensing: AGPL app, MIT/Apache libraries, a CLA](0058-licensing.md) | Accepted |
+| 0059 | [Signed releases from CI: Developer ID, Artifact Signing, attestations](0059-signing-releases.md) | Accepted |
+| 0060 | [Full Google verification, with a yearly CASA assessment](0060-google-verification-and-casa.md) | Accepted |
+| 0061 | [Check DKIM ourselves when no server is trusted](0061-checking-dkim-ourselves.md) | Accepted |
+| 0062 | [Documents and web pages through golemdocs' sandboxed viewer](0062-golemdocs-viewer.md) | Accepted |
+| 0063 | [Automatic updates from GitHub Releases, offered with a toast](0063-automatic-updates.md) | Accepted |
+| 0064 | [Release Mac and Linux first; Windows joins when it's signed](0064-mac-and-linux-first.md) | Accepted |
+| 0065 | [Smart folders: saved searches under Mail](0065-smart-folders.md) | Accepted |

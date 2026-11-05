@@ -67,9 +67,15 @@ pub struct Engine {
     pub(crate) factory: Arc<dyn ProviderFactory>,
     pub(crate) events: broadcast::Sender<CoreEvent>,
     pub(crate) runtimes: Mutex<HashMap<String, AccountRuntime>>,
+    /// Per account: user requests in flight, which background sync waits for (0037).
+    gates: Mutex<HashMap<String, Arc<crate::provider::priority::Gate>>>,
     pub(crate) settings: RwLock<Settings>,
     pub(crate) mirror_wake: Arc<Notify>,
+    /// Held while the AI folder is written or moved, so a move can't race a write.
+    pub(crate) mirror_lock: Mutex<()>,
     pub(crate) contacts_wake: Arc<Notify>,
+    /// Wakes the alerts worker: calendars, settings or alerts changed.
+    pub(crate) alerts_wake: Arc<Notify>,
     /// Accounts whose address books sync on the next pass ("Sync now").
     pub(crate) contacts_due: Mutex<std::collections::HashSet<String>>,
     pub(crate) correspondents: Mutex<Option<(std::time::Instant, Arc<crate::mail::spam::Correspondents>)>>,
@@ -77,6 +83,10 @@ pub struct Engine {
     pub(crate) contact_files: Mutex<HashMap<String, String>>,
     /// Contacts changed since the AI folder last wrote them.
     pub(crate) contacts_dirty: std::sync::atomic::AtomicBool,
+    /// When the AI folder's `smart-folders.md` is next due (ms); 0 is now.
+    pub(crate) smart_folders_due: std::sync::atomic::AtomicI64,
+    /// Recent place lookups by query, so retyping doesn't ask again.
+    pub(crate) place_cache: Mutex<HashMap<String, (std::time::Instant, Vec<PlaceSuggestion>)>>,
     pub mode: Mode,
     pub data_dir: PathBuf,
     workers: Mutex<Vec<JoinHandle<()>>>,
@@ -89,14 +99,34 @@ pub fn default_data_dir() -> PathBuf {
     if let Ok(d) = std::env::var("SATCHEL_DATA_DIR") {
         return PathBuf::from(d);
     }
-    directories::ProjectDirs::from("app", "Satchel", "Satchel Mail")
-        .map(|p| p.data_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".satchel"))
+    platform_data_dir().unwrap_or_else(|| PathBuf::from(".satchel"))
+}
+
+pub(crate) fn platform_data_dir() -> Option<PathBuf> {
+    directories::ProjectDirs::from("app", "Satchel", "Satchel Mail").map(|p| p.data_dir().to_path_buf())
+}
+
+/// Creates the data directory (and parents) and makes it private to the user
+/// (0700 on unix), tightening one that already exists. It holds the mailbox.
+pub fn create_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    let mut b = std::fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+    b.create(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if std::fs::metadata(dir)?.permissions().mode() & 0o777 != 0o700 {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    Ok(())
 }
 
 impl Engine {
     pub fn open(opts: EngineOptions) -> Result<Arc<Self>> {
-        std::fs::create_dir_all(&opts.data_dir)?;
+        create_private_dir(&opts.data_dir)?;
         let store = Arc::new(Store::open(&opts.data_dir.join("satchel.db"))?);
         let blobs: Arc<dyn BlobStore> = Arc::new(FsBlobStore::new(opts.data_dir.join("blobs"))?);
         // Search moved from a tantivy index to SQLite FTS5: drop the old
@@ -113,7 +143,12 @@ impl Engine {
     }
 
     pub fn with_parts(store: Arc<Store>, blobs: Arc<dyn BlobStore>, opts: EngineOptions) -> Result<Arc<Self>> {
-        let settings: Settings = store.get_setting("settings")?.unwrap_or_default();
+        let mut settings: Settings = store.get_setting("settings")?.unwrap_or_default();
+        // Any other data directory (tests, dev runs with SATCHEL_DATA_DIR) gets
+        // its own AI folder, so it never writes to, or moves, the user's ~/Satchel.
+        if settings.mirror.root.is_none() && platform_data_dir().as_ref() != Some(&opts.data_dir) {
+            settings.mirror.root = Some(opts.data_dir.join("Satchel").display().to_string());
+        }
         let (events, _) = broadcast::channel(1024);
         let engine = Arc::new(Self {
             store,
@@ -122,13 +157,18 @@ impl Engine {
             factory: opts.factory,
             events,
             runtimes: Mutex::new(HashMap::new()),
+            gates: Mutex::new(HashMap::new()),
             settings: RwLock::new(settings),
             mirror_wake: Arc::new(Notify::new()),
+            mirror_lock: Mutex::new(()),
             contacts_wake: Arc::new(Notify::new()),
+            alerts_wake: Arc::new(Notify::new()),
             contacts_due: Mutex::new(Default::default()),
             correspondents: Mutex::new(None),
             contact_files: Mutex::new(HashMap::new()),
             contacts_dirty: std::sync::atomic::AtomicBool::new(true),
+            smart_folders_due: std::sync::atomic::AtomicI64::new(0),
+            place_cache: Mutex::new(HashMap::new()),
             mode: opts.mode,
             data_dir: opts.data_dir,
             workers: Mutex::new(vec![]),
@@ -146,6 +186,15 @@ impl Engine {
     pub(crate) fn emit(&self, e: CoreEvent) {
         if matches!(e, CoreEvent::ContactsChanged) {
             self.contacts_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if matches!(
+            e,
+            CoreEvent::SmartFoldersChanged | CoreEvent::MessagesChanged { .. } | CoreEvent::MailboxesChanged { .. } | CoreEvent::FavoritesChanged | CoreEvent::AccountsChanged | CoreEvent::DataChanged
+        ) {
+            self.smart_folders_due.store(0, std::sync::atomic::Ordering::Relaxed);
+        }
+        if matches!(e, CoreEvent::CalendarChanged { .. } | CoreEvent::DataChanged) {
+            self.alerts_wake.notify_one();
         }
         let _ = self.events.send(e);
     }
@@ -172,6 +221,9 @@ impl Engine {
         w.push(tokio::spawn(Self::indexer(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::mirror_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::contacts_worker(Arc::downgrade(self))));
+        w.push(tokio::spawn(Self::blob_worker(Arc::downgrade(self))));
+        w.push(tokio::spawn(Self::alerts_worker(Arc::downgrade(self))));
+        w.push(tokio::spawn(Self::snippet_repair_worker(Arc::downgrade(self))));
     }
 
     pub fn shutdown(&self) {
@@ -214,9 +266,14 @@ impl Engine {
         Ok(p)
     }
 
+    /// The account's priority gate (see [`crate::provider::priority`]).
+    pub(crate) fn gate(&self, account_id: &str) -> Arc<crate::provider::priority::Gate> {
+        self.gates.lock().unwrap().entry(account_id.to_string()).or_default().clone()
+    }
+
     pub(crate) fn ctx(&self, account_id: &str) -> Result<SyncCtx> {
         let account = self.store.get_account(account_id)?.ok_or_else(|| crate::error::not_found("account"))?;
-        Ok(SyncCtx { account, store: self.store.clone(), blobs: self.blobs.clone(), settings: self.settings(), events: self.events.clone(), arrivals: Default::default() })
+        Ok(SyncCtx { account, store: self.store.clone(), blobs: self.blobs.clone(), settings: self.settings(), events: self.events.clone(), arrivals: Default::default(), more: Default::default() })
     }
 
     pub(crate) fn start_account(self: &Arc<Self>, acc: &Account) {
@@ -232,7 +289,7 @@ impl Engine {
             }
         };
         let wake = Arc::new(Notify::new());
-        let task = tokio::spawn(Self::account_loop(Arc::downgrade(self), acc.id.clone(), providers.clone(), wake.clone()));
+        let task = tokio::spawn(Self::supervise_account(Arc::downgrade(self), acc.id.clone(), providers.clone(), wake.clone()));
         if let Some(old) = self.runtimes.lock().unwrap().insert(acc.id.clone(), AccountRuntime { providers, wake, task: Some(task) })
             && let Some(t) = old.task {
                 t.abort();

@@ -85,3 +85,25 @@ impl Store {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smart_folders_keep_their_order() {
+        let s = Store::open_in_memory().unwrap();
+        let save = |name: &str| s.save_smart_folder(&SmartFolder { name: name.into(), query: "is:unread".into(), ..Default::default() }).unwrap();
+        let (a, b, c) = (save("A"), save("B"), save("C"));
+        let names = || s.list_smart_folders().unwrap().into_iter().map(|f| f.name).collect::<Vec<_>>();
+        assert_eq!(names(), ["A", "B", "C"]);
+        s.reorder_smart_folders(&[c.clone(), a.clone()]).unwrap();
+        assert_eq!(names(), ["C", "A", "B"]);
+        s.save_smart_folder(&SmartFolder { id: b.clone(), name: "Bee".into(), query: "is:flagged".into(), badge: SmartBadge::Total, count: 0 }).unwrap();
+        let bee = s.get_smart_folder(&b).unwrap().unwrap();
+        assert_eq!((bee.name.as_str(), bee.query.as_str(), bee.badge), ("Bee", "is:flagged", SmartBadge::Total));
+        assert!(s.delete_smart_folder(&a).unwrap());
+        assert_eq!(names(), ["C", "Bee"]);
+        assert!(s.save_smart_folder(&SmartFolder { id: a, name: "gone".into(), ..Default::default() }).is_err());
+    }
+}

@@ -14,7 +14,9 @@ export type ProposalAction =
   | { type: 'update_event'; event: CalEvent }
   | { type: 'cancel_event'; event_id: Id }
   | { type: 'respond_to_invite'; event_id: Id; response: PartStat }
-  | { type: 'save_contact'; contact: Contact };
+  | { type: 'save_contact'; contact: Contact }
+  /** The first contact is kept; the others are merged into it. */
+  | { type: 'merge_contacts'; contact_ids: Id[] };
 
 export type ProposalStatus = 'pending' | 'approved' | 'applied' | 'rejected' | 'stale' | 'failed';
 
@@ -61,11 +63,15 @@ export interface MirrorSettings {
   include_eml: boolean;
   include_attachments: boolean;
   accept_proposals: boolean;
+  include_calendar: boolean;
+  include_contacts: boolean;
 }
 
 export interface Settings {
   mirror: MirrorSettings;
   remote_image_senders: string[];
+  /** Load remote images in all mail except spam. */
+  load_remote_images: boolean;
   sync_ai_drafts_to_server: boolean;
   theme: 'system' | 'light' | 'dark' | string;
   initial_sync_days: number;
@@ -75,6 +81,12 @@ export interface Settings {
   storage_limit_mb: number | null;
   poll_interval_secs: number;
   notify_new_mail: boolean;
+  /** Send what's typed in an event's location to a place service for suggestions. */
+  look_up_places: boolean;
+  /** Show calendar alerts (0056). */
+  calendar_alerts: boolean;
+  /** The alert new timed events start with, in minutes before (null: none). */
+  default_alert_minutes: number | null;
 }
 
 export interface AuditEntry {

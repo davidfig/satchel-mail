@@ -42,4 +42,26 @@ describe('patch', () => {
     button.dispatchEvent(new Event('click'));
     assert.deepEqual(calls, ['new']);
   });
+
+  test('a node passed in that is already there stays put', () => {
+    const root = h('header');
+    const search = h('input', { type: 'search' });
+    patch(root, h('h1', 'Inbox'), search);
+    patch(root, h('h1', 'Spam'), search, h('div.bulk', '2 selected'));
+    assert.equal(root.children[1], search);
+    patch(root, h('h1', 'Spam'), h('div.card'), search);
+    assert.equal(root.children[2], search);
+    assert.equal(root.children.length, 3);
+  });
+
+  // linkedom keeps `value` and `checked` in attributes, unlike browsers, so
+  // checkboxes and fields being typed in are checked in the app.
+  test('copies field values', () => {
+    const root = h('form');
+    patch(root, h('input', { type: 'text', value: 'a' }));
+    const text = root.firstElementChild as HTMLInputElement;
+    text.value = 'stale';
+    patch(root, h('input', { type: 'text', value: 'b' }));
+    assert.equal(text.value, 'b');
+  });
 });

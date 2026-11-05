@@ -15,6 +15,11 @@ pub fn read_person(store: &Store, text: &str, last: Option<&str>) -> Result<Opti
         return Ok(None);
     }
     let (fm, body) = parse(text)?;
+    // Checked on the header only: notes exported from a contact may mention
+    // anything, and aren't the agent's to answer for.
+    if fm.get("agent_token").is_some() {
+        bail!(TOKEN_REFUSED);
+    }
     let contact = match fm.str("contact_id") {
         None => {
             let fields = person_fields(&fm, &body, true)?;
@@ -24,7 +29,8 @@ pub fn read_person(store: &Store, text: &str, last: Option<&str>) -> Result<Opti
             Contact { fields, ..Default::default() }
         }
         Some(id) => {
-            let Some(current) = store.get_contact(id)?.filter(|c| !c.deleted) else {
+            // One outside the folder's accounts reads as gone, like a deleted one.
+            let Some(current) = contact_by_id(store, id)? else {
                 if last.is_none() {
                     return Ok(None);
                 }

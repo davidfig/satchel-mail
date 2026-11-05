@@ -34,6 +34,8 @@ export interface ThreadSummary {
   snippet: string;
   mailbox_ids: Id[];
   latest_message_id: Id;
+  /** A favorite sender wrote one of its messages (0053). */
+  favorite: boolean;
 }
 
 export interface Attachment {
@@ -56,8 +58,20 @@ export interface MessageWarning {
 
 export interface Unsubscribe {
   url: string | null;
+  /** Only set when it names exactly one valid address. */
   mailto: string | null;
   one_click: boolean;
+  /** What `mailto` sends, to show before confirming. */
+  email?: UnsubscribeEmail | null;
+}
+
+/** An unsubscribe email exactly as it would be sent. */
+export interface UnsubscribeEmail {
+  to: string;
+  subject: string;
+  body: string;
+  /** `to` is on another domain than the sender's From. */
+  other_domain: boolean;
 }
 
 export type SenderVerdict = 'spam' | 'not_spam';
@@ -96,6 +110,8 @@ export interface MessageDetail {
   invite?: Invite | null;
   warnings?: MessageWarning[];
   unsubscribe?: Unsubscribe | null;
+  /** List or machine-sent mail nobody expects a reply to (headers or a no-reply/tokenized reply address), unless it has a helpdesk "reply above this line" marker. */
+  bulk?: boolean;
   sender_verdict?: SenderVerdict | null;
 }
 

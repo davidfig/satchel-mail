@@ -6,7 +6,7 @@ fn e(s: &str) -> ContactEmail {
 
 #[test]
 fn machine_addresses() {
-    for m in ["no-reply@x.test", "noreply@x.test", "do_not_reply@x.test", "MAILER-DAEMON@x.test", "notifications@github.com", "reply+AAAAAAAAAAAAAAAAAAAA@reply.github.com", "bounces+123@x.test", "news+abcdefghijklmnopqrstu@x.test", "hello@noreply.x.test", "nope"] {
+    for m in ["no-reply@x.test", "noreply@x.test", "do_not_reply@x.test", "MAILER-DAEMON@x.test", "notifications@github.com", "reply+AAAAAAAAAAAAAAAAAAAA@reply.github.com", "bounces+123@x.test", "reply-J6DMGTJP33VEXMC3HOLHU7LV2E.50123@ealerts.x.test", "news+abcdefghijklmnopqrstu@x.test", "hello@noreply.x.test", "nope"] {
         assert!(is_machine_address(m), "{m}");
     }
     for p in ["bob@x.test", "bob+work@x.test", "info@smallshop.test", "anne-marie@x.test"] {

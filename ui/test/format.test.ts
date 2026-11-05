@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { formatAddress, parseAddresses, shortName } from '../src/lib/format.ts';
+import { formatAddress, parseAddresses, shortName, shortProgress } from '../src/lib/format.ts';
 
 describe('addresses', () => {
   test('names with commas survive a round trip', () => {
@@ -22,5 +22,14 @@ describe('addresses', () => {
     assert.equal(shortName({ name: 'Doe, John', email: 'j@x.com' }), 'John');
     assert.equal(shortName({ name: 'Ann Lee', email: 'a@x.com' }), 'Ann');
     assert.equal(shortName({ name: null, email: 'bob@x.com' }), 'bob');
+  });
+});
+
+describe('sync progress', () => {
+  test('short form drops the noun', () => {
+    assert.equal(shortProgress('Downloading messages: 31,295 left'), 'Downloading: 31,295 left');
+    assert.equal(shortProgress('Downloading headers 1,500/4,000'), 'Downloading 1,500/4,000');
+    assert.equal(shortProgress('INBOX: 1234 messages'), 'INBOX: 1234');
+    assert.equal(shortProgress('Older mail 10/20'), 'Older mail 10/20');
   });
 });

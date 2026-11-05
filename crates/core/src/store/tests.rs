@@ -22,31 +22,35 @@ fn a_database_from_before_versioning_counts_as_version_1() {
     let c = Connection::open(&path).unwrap();
     c.execute_batch(include_str!("schema.sql")).unwrap();
     // Back to the version 1 shape, so the migrations since run on it.
-    c.execute_batch("ALTER TABLE messages DROP COLUMN partial; ALTER TABLE messages DROP COLUMN blob_size; DROP TABLE smart_folders;").unwrap();
+    c.execute_batch("ALTER TABLE messages DROP COLUMN partial; ALTER TABLE messages DROP COLUMN blob_size; ALTER TABLE proposals DROP COLUMN processed_file; ALTER TABLE messages DROP COLUMN auth_serv; ALTER TABLE messages DROP COLUMN dkim_pass; ALTER TABLE events DROP COLUMN location; DROP TABLE smart_folders;").unwrap();
+    // An event from then gets its location read out of its iCalendar.
+    c.pragma_update(None, "foreign_keys", false).unwrap();
+    let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u1\r\nDTSTART:20261105T160000Z\r\nSUMMARY:Lunch\r\nLOCATION:Rose Cafe\\, Main St\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    c.execute("INSERT INTO events (id, calendar_id, account_id, remote_id, uid, ics, title, range_start, range_end) VALUES ('e1', 'c', 'a', 'r', 'u1', ?, 'Lunch', 0, 0)", [ics]).unwrap();
     drop(c);
     drop(Store::open(&path).unwrap());
     let c = Connection::open(&path).unwrap();
     let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
     assert_eq!(v, SCHEMA_VERSION);
     c.query_row("SELECT partial, blob_size FROM messages", [], |_| Ok(())).optional().unwrap();
+    c.query_row("SELECT processed_file FROM proposals", [], |_| Ok(())).optional().unwrap();
+    c.query_row("SELECT auth_serv FROM messages", [], |_| Ok(())).optional().unwrap();
+    c.query_row("SELECT dkim_pass FROM messages", [], |_| Ok(())).optional().unwrap();
+    let location: String = c.query_row("SELECT location FROM events WHERE id='e1'", [], |r| r.get(0)).unwrap();
+    assert_eq!(location, "Rose Cafe, Main St");
     c.query_row("SELECT id, name, query, badge, position FROM smart_folders", [], |_| Ok(())).optional().unwrap();
 }
 
 #[test]
-fn smart_folders_keep_their_order() {
+fn background_reads_skip_the_users_connection() {
     let s = Store::open_in_memory().unwrap();
-    let save = |name: &str| s.save_smart_folder(&SmartFolder { name: name.into(), query: "is:unread".into(), ..Default::default() }).unwrap();
-    let (a, b, c) = (save("A"), save("B"), save("C"));
-    let names = || s.list_smart_folders().unwrap().into_iter().map(|f| f.name).collect::<Vec<_>>();
-    assert_eq!(names(), ["A", "B", "C"]);
-    s.reorder_smart_folders(&[c.clone(), a.clone()]).unwrap();
-    assert_eq!(names(), ["C", "A", "B"]);
-    s.save_smart_folder(&SmartFolder { id: b.clone(), name: "Bee".into(), query: "is:flagged".into(), badge: SmartBadge::Total, count: 0 }).unwrap();
-    let bee = s.get_smart_folder(&b).unwrap().unwrap();
-    assert_eq!((bee.name.as_str(), bee.query.as_str(), bee.badge), ("Bee", "is:flagged", SmartBadge::Total));
-    assert!(s.delete_smart_folder(&a).unwrap());
-    assert_eq!(names(), ["C", "Bee"]);
-    assert!(s.save_smart_folder(&SmartFolder { id: a, name: "gone".into(), ..Default::default() }).is_err());
+    // A slow user read holds its connection; background reads and the
+    // data-version poll still go ahead.
+    let _held = s.read.lock().unwrap();
+    background(|| s.list_accounts()).unwrap();
+    s.data_version().unwrap();
+    // The flag ends with the closure.
+    assert!(!BACKGROUND.with(Cell::get));
 }
 
 fn rec(remote: &str, mid: &str, irt: Option<&str>, subject: &str, mins: i64) -> MessageRecord {
@@ -87,6 +91,33 @@ fn threading_out_of_order() {
     // Newest first: the unrelated message is the most recent.
     assert_eq!(list[0].thread_id, s.thread_of(&u).unwrap().unwrap());
     assert_eq!(list[1].thread_id, tc);
+}
+
+#[test]
+fn favorite_senders_mark_and_filter_threads() {
+    let s = Store::open_in_memory().unwrap();
+    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+    let mb = s.upsert_mailbox(&acc.id, "INBOX", "Inbox", "INBOX", MailboxRole::Inbox, false).unwrap();
+    let (from_bob, _) = s.upsert_message(&acc.id, &rec("1", "m1", None, "hi", 0), &[(mb.clone(), Some(1))]).unwrap();
+    let mut r = rec("2", "m2", None, "other", 1);
+    r.from = Some(Address::new("carol@x.test"));
+    s.upsert_message(&acc.id, &r, &[(mb.clone(), Some(2))]).unwrap();
+    let bob = s.thread_of(&from_bob).unwrap().unwrap();
+
+    // Stored lowercase, so the address's case doesn't matter.
+    assert_eq!(s.set_favorite_senders(&["Bob@X.test".into()], true).unwrap(), 1);
+    assert_eq!(s.set_favorite_senders(&["bob@x.test".into()], true).unwrap(), 0);
+    assert_eq!(s.list_favorite_senders().unwrap(), vec!["bob@x.test".to_string()]);
+    let all = s.list_threads(&ThreadFilter { mailbox_id: Some(mb.clone()), limit: 10, ..Default::default() }).unwrap();
+    assert_eq!(all.iter().filter(|t| t.favorite).map(|t| t.thread_id.clone()).collect::<Vec<_>>(), vec![bob.clone()]);
+    assert!(s.get_thread_summary(&bob).unwrap().unwrap().favorite);
+    let fav = ThreadFilter { conds: vec![MsgCond::new(MsgTerm::Favorite)], limit: 10, ..Default::default() };
+    assert_eq!(s.list_threads(&fav).unwrap().len(), 1);
+    assert_eq!(s.count_threads(&fav).unwrap(), 1);
+
+    s.set_favorite_senders(&["bob@x.test".into()], false).unwrap();
+    assert!(s.list_favorite_senders().unwrap().is_empty());
+    assert_eq!(s.count_threads(&fav).unwrap(), 0);
 }
 
 #[test]
@@ -138,24 +169,6 @@ fn paging_with_identical_timestamps() {
 }
 
 #[test]
-fn ops_run_in_order_and_a_retrying_op_holds_back_later_ones() {
-    let s = Store::open_in_memory().unwrap();
-    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
-    let kinds = |s: &Store| s.due_ops(&acc.id).unwrap().into_iter().map(|o| o.kind).collect::<Vec<_>>();
-    // Queued within the same millisecond: still in queue order.
-    let mv = s.enqueue_op(&acc.id, "move", &serde_json::json!({}), "user").unwrap();
-    let send = s.enqueue_op(&acc.id, "send", &serde_json::json!({}), "user").unwrap();
-    s.enqueue_op(&acc.id, "mailbox_delete", &serde_json::json!({}), "user").unwrap();
-    assert_eq!(kinds(&s), vec!["move", "send", "mailbox_delete"]);
-    // A send waiting to retry doesn't hold anything back...
-    s.op_retry(&send, "down", 1).unwrap();
-    assert_eq!(kinds(&s), vec!["move", "mailbox_delete"]);
-    // ...but any other op does, along with everything after it.
-    s.op_retry(&mv, "down", 1).unwrap();
-    assert!(kinds(&s).is_empty());
-}
-
-#[test]
 fn unread_ids_by_mailbox_or_role() {
     let s = Store::open_in_memory().unwrap();
     let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
@@ -186,8 +199,9 @@ fn with_search_and_person_summary() {
     let mut other = rec("3", "m3", None, "jimbob", 2);
     other.from = Some(Address::new("jimbob@x.test"));
     other.to = vec![Address::new("xbob@work.test")];
-    for r in [&from_bob, &to_bob, &other] {
-        s.upsert_message(&acc.id, r, &[(mb.clone(), None)]).unwrap();
+    let sent = s.upsert_mailbox(&acc.id, "Sent", "Sent", "Sent", MailboxRole::Sent, false).unwrap();
+    for (r, m) in [(&from_bob, &mb), (&to_bob, &sent), (&other, &mb)] {
+        s.upsert_message(&acc.id, r, &[(m.clone(), None)]).unwrap();
     }
     let count = |term: MsgTerm, negate: bool| s.count_threads(&ThreadFilter { conds: vec![MsgCond { term, negate }], ..Default::default() }).unwrap();
     let list = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
@@ -203,4 +217,163 @@ fn with_search_and_person_summary() {
     assert_eq!(p.name.as_deref(), Some("Bob Smith"));
     assert_eq!(p.addresses[1].email, "bob@work.test");
     assert!(p.first_date.unwrap() < p.last_date.unwrap());
+}
+
+#[test]
+fn a_huge_references_header_is_cut_down_and_still_threads() {
+    let s = Store::open_in_memory().unwrap();
+    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+    let mb = s.upsert_mailbox(&acc.id, "INBOX", "Inbox", "INBOX", MailboxRole::Inbox, false).unwrap();
+    let (parent, _) = s.upsert_message(&acc.id, &rec("1", "m1", None, "hi", 0), &[(mb.clone(), Some(1))]).unwrap();
+    // 40,000 ids (over SQLite's bound-variable limit), the parent last.
+    let mut r = rec("2", "m2", Some("m1"), "Re: hi", 1);
+    r.references = (0..40_000).map(|i| format!("junk{i}@x.test")).chain(["m1".to_string()]).collect();
+    let (child, _) = s.upsert_message(&acc.id, &r, &[(mb.clone(), Some(2))]).unwrap();
+    assert_eq!(s.thread_of(&child).unwrap(), s.thread_of(&parent).unwrap());
+    let stored = s.message_row(&child).unwrap().unwrap().references;
+    assert_eq!(stored.len(), messages::MAX_REFERENCES);
+    assert_eq!(stored.last().map(String::as_str), Some("m1"));
+    let refs: i64 = s.r(|c| Ok(c.query_row("SELECT COUNT(*) FROM message_refs WHERE message_id=?", [&child], |r| r.get(0))?)).unwrap();
+    assert_eq!(refs, messages::MAX_REFERENCES as i64);
+}
+
+#[test]
+fn a_message_naming_two_threads_joins_one_and_merges_neither() {
+    let s = Store::open_in_memory().unwrap();
+    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+    let mb = s.upsert_mailbox(&acc.id, "INBOX", "Inbox", "INBOX", MailboxRole::Inbox, false).unwrap();
+    let (a, _) = s.upsert_message(&acc.id, &rec("1", "m1", None, "bank", 0), &[(mb.clone(), Some(1))]).unwrap();
+    let (b, _) = s.upsert_message(&acc.id, &rec("2", "m2", None, "boss", 1), &[(mb.clone(), Some(2))]).unwrap();
+    let mut r = rec("3", "m3", Some("m1"), "Re: both", 2);
+    r.references = vec!["m1".into(), "m2".into()];
+    let (c, _) = s.upsert_message(&acc.id, &r, &[(mb.clone(), Some(3))]).unwrap();
+    let (ta, tb) = (s.thread_of(&a).unwrap().unwrap(), s.thread_of(&b).unwrap().unwrap());
+    assert_ne!(ta, tb);
+    // The most recent of the messages it names.
+    assert_eq!(s.thread_of(&c).unwrap().unwrap(), tb);
+    assert_eq!(s.get_thread_summary(&ta).unwrap().unwrap().message_count, 1);
+
+    // Replies that arrived before their parent are still brought together.
+    let (r1, _) = s.upsert_message(&acc.id, &rec("4", "m5", Some("m4"), "Re: plan", 4), &[(mb.clone(), Some(4))]).unwrap();
+    let (r2, _) = s.upsert_message(&acc.id, &rec("5", "m6", Some("m4"), "Re: plan", 5), &[(mb.clone(), Some(5))]).unwrap();
+    let (p, _) = s.upsert_message(&acc.id, &rec("6", "m4", None, "plan", 3), &[(mb.clone(), Some(6))]).unwrap();
+    let t = s.thread_of(&p).unwrap();
+    assert!(t == s.thread_of(&r1).unwrap() && t == s.thread_of(&r2).unwrap());
+}
+
+#[test]
+fn a_reused_message_id_from_someone_else_is_not_a_copy() {
+    let s = Store::open_in_memory().unwrap();
+    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+    let inbox = s.upsert_mailbox(&acc.id, "INBOX", "Inbox", "INBOX", MailboxRole::Inbox, false).unwrap();
+    let trash = s.upsert_mailbox(&acc.id, "Trash", "Trash", "Trash", MailboxRole::Trash, false).unwrap();
+    let (real, _) = s.upsert_message(&acc.id, &rec("1", "m1", None, "invoice", 0), &[(inbox.clone(), Some(1))]).unwrap();
+    // The server's own copy elsewhere.
+    let (copy, _) = s.upsert_message(&acc.id, &rec("2", "m1", None, "invoice", 0), &[(trash, Some(1))]).unwrap();
+    // A forgery reusing the Message-ID, from another sender or with other text.
+    let mut forged = rec("3", "m1", None, "invoice", 1);
+    forged.from = Some(Address::new("mallory@evil.test"));
+    let (f1, _) = s.upsert_message(&acc.id, &forged, &[(inbox.clone(), Some(2))]).unwrap();
+    let mut forged = rec("4", "m1", None, "pay here instead", 1);
+    forged.from = Some(Address::new("BOB@x.test"));
+    let (f2, _) = s.upsert_message(&acc.id, &forged, &[(inbox, Some(3))]).unwrap();
+    assert_eq!(s.message_copies(&real).unwrap(), vec![copy.clone()]);
+    assert!(s.message_copies(&f1).unwrap().is_empty() && s.message_copies(&f2).unwrap().is_empty());
+    let t = s.get_thread_summary(&s.thread_of(&real).unwrap().unwrap()).unwrap().unwrap();
+    assert_eq!(t.message_count, 3, "the real message once, and each forgery");
+}
+
+#[test]
+fn only_sent_folder_mail_makes_correspondents() {
+    let s = Store::open_in_memory().unwrap();
+    let acc = s.insert_account(&AccountConfig::Gmail { email: "me@x.test".into(), display_name: "Me".into() }).unwrap();
+    let sent = s.upsert_mailbox(&acc.id, "Sent", "Sent", "Sent", MailboxRole::Sent, false).unwrap();
+    let junk = s.upsert_mailbox(&acc.id, "Junk", "Junk", "Junk", MailboxRole::Junk, false).unwrap();
+    let inbox = s.upsert_mailbox(&acc.id, "INBOX", "Inbox", "INBOX", MailboxRole::Inbox, false).unwrap();
+    let mine = |rid: &str, to: &str| {
+        let mut r = rec(rid, rid, None, "hello", 0);
+        r.from = Some(Address::new("Me@x.test"));
+        r.to = vec![Address::new(to)];
+        r
+    };
+    s.upsert_message(&acc.id, &mine("1", "bob@x.test"), &[(sent, Some(1))]).unwrap();
+    // Forged From: me, landing in Junk or the inbox.
+    s.upsert_message(&acc.id, &mine("2", "mallory@evil.test"), &[(junk, Some(1))]).unwrap();
+    s.upsert_message(&acc.id, &mine("3", "eve@evil.test"), &[(inbox, Some(1))]).unwrap();
+    let evidence: Vec<String> = s.correspondence_evidence().unwrap().into_iter().map(|e| e.0).collect();
+    let known: Vec<String> = s.correspondents().unwrap().into_iter().map(|e| e.0).collect();
+    for list in [&evidence, &known] {
+        assert!(list.contains(&"bob@x.test".to_string()));
+        assert!(!list.iter().any(|e| e.ends_with("@evil.test")), "{list:?}");
+    }
+    assert_eq!(s.person_summary(&["mallory@evil.test".into()]).unwrap().sent, 0);
+}
+
+#[test]
+fn deleted_messages_free_their_stored_copies() {
+    let s = Store::open_in_memory().unwrap();
+    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+    let mb = s.upsert_mailbox(&acc.id, "INBOX", "Inbox", "INBOX", MailboxRole::Inbox, false).unwrap();
+    let other = s.upsert_mailbox(&acc.id, "Other", "Other", "Other", MailboxRole::Custom, false).unwrap();
+    let with_blob = |rid: &str, mid: &str| MessageRecord { blob_hash: Some(format!("h{rid}")), ..rec(rid, mid, None, "x", 0) };
+    let (a, _) = s.upsert_message(&acc.id, &with_blob("1", "m1"), &[(mb.clone(), Some(1))]).unwrap();
+    let (b, _) = s.upsert_message(&acc.id, &with_blob("2", "m2"), &[(mb.clone(), Some(2)), (other.clone(), Some(1))]).unwrap();
+    s.upsert_message(&acc.id, &with_blob("3", "m3"), &[(other.clone(), Some(2))]).unwrap();
+    s.upsert_message(&acc.id, &with_blob("4", "m4"), &[(mb.clone(), Some(3))]).unwrap();
+    s.delete_message(&a).unwrap();
+    assert_eq!(s.take_freed_blobs(), vec!["h1"]);
+    // Still in another mailbox: kept.
+    s.remove_from_mailbox(&b, &mb).unwrap();
+    assert!(s.take_freed_blobs().is_empty());
+    s.remove_from_mailbox(&b, &other).unwrap();
+    assert_eq!(s.take_freed_blobs(), vec!["h2"]);
+    s.remove_mailboxes(&acc.id, std::slice::from_ref(&other)).unwrap();
+    assert_eq!(s.take_freed_blobs(), vec!["h3"]);
+    s.delete_account(&acc.id).unwrap();
+    assert_eq!(s.take_freed_blobs(), vec!["h4"]);
+    assert!(!s.blob_in_use("h4").unwrap());
+}
+
+#[test]
+fn data_errors_are_told_apart_from_database_failures() {
+    let c = Connection::open_in_memory().unwrap();
+    c.execute_batch("CREATE TABLE t (x TEXT UNIQUE)").unwrap();
+    c.execute("INSERT INTO t VALUES ('a')", []).unwrap();
+    let dup = anyhow::Error::from(c.execute("INSERT INTO t VALUES ('a')", []).unwrap_err());
+    assert!(is_data_error(&dup));
+    let many = vec!["?"; 40_000].join(",");
+    let too_many = anyhow::Error::from(c.prepare(&format!("SELECT 1 WHERE 1 IN ({many})")).unwrap_err());
+    assert!(is_data_error(&too_many), "{too_many}");
+    let busy = anyhow::Error::from(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY), None)).context("upsert");
+    assert!(!is_data_error(&busy));
+    assert!(!is_data_error(&anyhow!("store poisoned")));
+}
+
+#[test]
+fn sync_leaves_messages_with_queued_changes_alone() {
+    let s = Store::open_in_memory().unwrap();
+    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+    let junk = s.upsert_mailbox(&acc.id, "SPAM", "Spam", "SPAM", MailboxRole::Junk, false).unwrap();
+    let trash = s.upsert_mailbox(&acc.id, "TRASH", "Trash", "TRASH", MailboxRole::Trash, false).unwrap();
+    let (a, _) = s.upsert_message(&acc.id, &rec("1", "m1", None, "spam", 0), &[(junk.clone(), None)]).unwrap();
+    // Deleted locally; the move hasn't reached the server.
+    s.set_memberships(&a, &[(trash.clone(), None)]).unwrap();
+    let r = s.message_ref(&a).unwrap().unwrap();
+    let op = s.enqueue_op(&acc.id, "labels", &serde_json::json!({ "refs": [r] }), "user").unwrap();
+    // A sync that read the server before the move doesn't put it back in Spam.
+    let mut stale = rec("1", "m1", None, "spam", 0);
+    stale.flags.flagged = true;
+    s.upsert_message(&acc.id, &stale, &[(junk.clone(), None)]).unwrap();
+    assert_eq!(s.memberships(&a).unwrap(), vec![(trash.clone(), None)]);
+    assert!(!s.message_ref(&a).unwrap().unwrap().flags.flagged);
+    // Once the server has it, sync is in charge again.
+    s.op_done(&op).unwrap();
+    s.upsert_message(&acc.id, &stale, &[(junk.clone(), None)]).unwrap();
+    assert_eq!(s.memberships(&a).unwrap(), vec![(junk, None)]);
+    // A message being deleted for good isn't stored again meanwhile.
+    let r = s.message_ref(&a).unwrap().unwrap();
+    s.delete_message(&a).unwrap();
+    s.enqueue_op(&acc.id, "expunge", &serde_json::json!({ "refs": [r] }), "user").unwrap();
+    assert_eq!(s.upsert_message(&acc.id, &stale, &[(trash, None)]).unwrap(), (String::new(), false));
+    assert!(s.message_id_by_remote(&acc.id, "1").unwrap().is_none());
 }

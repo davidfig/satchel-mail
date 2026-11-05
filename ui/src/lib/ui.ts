@@ -4,34 +4,101 @@ import { h, icon, listen } from './dom';
 
 // ---------------------------------------------------------------- toasts
 
-let toastHost: HTMLElement | null = null;
+interface ToastOpts {
+  kind?: 'info' | 'error' | 'success';
+  action?: { label: string; run: () => void };
+  ms?: number;
+  /** Stays until it's dismissed or its action runs, in a slot of its own that other toasts don't replace. */
+  sticky?: boolean;
+  /** Only confirms what the screen already shows: flashes briefly and never replaces an error. */
+  quiet?: boolean;
+}
 
-export function toast(message: string, opts: { kind?: 'info' | 'error' | 'success'; action?: { label: string; run: () => void }; ms?: number } = {}) {
+interface Slot {
+  el: HTMLElement;
+  message: string;
+  kind: string;
+  count: number;
+  label: HTMLElement;
+  timers: number[];
+}
+
+// At most two toasts show: one with an action (Undo and the like), which only another action
+// toast replaces, and one plain toast, which any new plain toast replaces. Repeats of the same
+// message count up instead of stacking. A sticky toast (an update waiting) has a third slot of its own.
+let toastHost: HTMLElement | null = null;
+type SlotKey = 'action' | 'plain' | 'sticky';
+const slots: Record<SlotKey, Slot | null> = { action: null, plain: null, sticky: null };
+
+function clearSlot(key: SlotKey) {
+  const s = slots[key];
+  if (!s) return;
+  s.timers.forEach(clearTimeout);
+  s.el.remove();
+  slots[key] = null;
+}
+
+export function toast(message: string, opts: ToastOpts = {}) {
+  const kind = opts.kind ?? 'info';
+  const key: SlotKey = opts.sticky ? 'sticky' : opts.action ? 'action' : 'plain';
+  const ms = opts.ms ?? (opts.quiet ? 1800 : 4500);
+  const cur = slots[key];
+  if (key === 'plain' && opts.quiet && cur?.kind === 'error') return;
+
+  const arm = (s: Slot) => {
+    s.timers.forEach(clearTimeout);
+    s.el.classList.remove('leaving');
+    if (opts.sticky) return void (s.timers = []);
+    s.timers = [window.setTimeout(() => s.el.classList.add('leaving'), ms - 300), window.setTimeout(() => clearSlot(key), ms)];
+  };
+
+  if (cur && cur.message === message && cur.kind === kind && !opts.action) {
+    cur.count++;
+    cur.label.textContent = `${message} ×${cur.count}`;
+    arm(cur);
+    return;
+  }
+  clearSlot(key);
   if (!toastHost) {
     toastHost = h('div.toasts', { role: 'status', 'aria-live': 'polite' });
     document.body.appendChild(toastHost);
   }
-  const t = h(
-    `div.toast.${opts.kind ?? 'info'}`,
-    h('span', message),
+  const label = h('span', message);
+  const el = h(
+    `div.toast.${kind}`,
+    label,
     opts.action &&
       h('button.link', {
         on: {
           click: () => {
             opts.action!.run();
-            t.remove();
+            clearSlot(key);
           },
         },
       }, opts.action.label),
-    h('button.icon-btn', { 'aria-label': 'Dismiss', on: { click: () => t.remove() } }, icon('close', 14)),
+    h('button.icon-btn', { 'aria-label': 'Dismiss', on: { click: () => clearSlot(key) } }, icon('close', 14)),
   );
-  toastHost.appendChild(t);
-  setTimeout(() => t.classList.add('leaving'), (opts.ms ?? 4500) - 300);
-  setTimeout(() => t.remove(), opts.ms ?? 4500);
+  const slot: Slot = { el, message, kind, count: 1, label, timers: [] };
+  slots[key] = slot;
+  // The action toast sits below the plain one, nearest the edge; a sticky one below both.
+  if (key === 'sticky') toastHost.appendChild(el);
+  else if (key === 'action') toastHost.insertBefore(el, slots.sticky?.el ?? null);
+  else toastHost.insertBefore(el, toastHost.firstChild);
+  arm(slot);
 }
 
 export function errorToast(e: unknown) {
   toast(e instanceof Error ? e.message : String(e), { kind: 'error', ms: 7000 });
+}
+
+/** Puts `text` on the clipboard and says so (`done` is the toast). */
+export function copyText(text: string, done = 'Copied') {
+  void navigator.clipboard.writeText(text).then(() => toast(done, { quiet: true }), errorToast);
+}
+
+/** Text to paste elsewhere (a token, a command, a prompt) with a Copy button beside it. */
+export function copyBlock(text: string, tag = 'pre.snippet'): HTMLElement {
+  return h('div.copy-row', h(tag, text), h('button', { title: 'Copy to clipboard', on: { click: () => copyText(text) } }, icon('copy', 16), 'Copy'));
 }
 
 // ---------------------------------------------------------------- modal
@@ -52,7 +119,9 @@ export function modal(title: string, content: Node, opts: { wide?: boolean; onCl
     prev?.focus?.();
   };
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
+    // An open menu or suggestion list closes first, and only the top dialog
+    // closes when one is open over another.
+    if (e.key === 'Escape' && !document.querySelector('.menu') && root === [...document.querySelectorAll('.modal-backdrop')].pop()) {
       e.stopPropagation();
       close();
     }
@@ -60,7 +129,7 @@ export function modal(title: string, content: Node, opts: { wide?: boolean; onCl
   const panel = h(
     `div.modal${opts.wide ? '.wide' : ''}`,
     { role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-    h('header.modal-head', h('h2', title), h('button.icon-btn', { 'aria-label': 'Close', on: { click: close } }, icon('close'))),
+    h('header.modal-head', h('h2', title), h('button.icon-btn', { 'aria-label': 'Close', title: 'Close (Esc)', on: { click: close } }, icon('close'))),
     body,
     opts.footer && h('footer.modal-foot', opts.footer),
   );
@@ -71,7 +140,8 @@ export function modal(title: string, content: Node, opts: { wide?: boolean; onCl
   return { close, body, root };
 }
 
-export function confirmDialog(title: string, message: string, okLabel = 'OK', danger = false): Promise<boolean> {
+/** `message` is plain text, or a node for a richer body. */
+export function confirmDialog(title: string, message: string | Node, okLabel = 'OK', danger = false): Promise<boolean> {
   return new Promise((resolve) => {
     let done = false;
     const finish = (v: boolean) => {
@@ -85,7 +155,7 @@ export function confirmDialog(title: string, message: string, okLabel = 'OK', da
       h('button', { on: { click: () => finish(false) } }, 'Cancel'),
       h(`button.primary${danger ? '.danger' : ''}`, { on: { click: () => finish(true) } }, okLabel),
     );
-    const m = modal(title, h('p', message), { footer, onClose: () => finish(false) });
+    const m = modal(title, typeof message === 'string' ? h('p', message) : message, { footer, onClose: () => finish(false) });
   });
 }
 
@@ -155,18 +225,76 @@ export function popupMenu(anchor: HTMLElement | { x: number; y: number }, items:
 // ---------------------------------------------------------------- shortcuts
 
 type Handler = (e: KeyboardEvent) => void;
-const bindings = new Map<string, { scope: string; fn: Handler; desc: string }[]>();
+const bindings = new Map<string, { scope: string; fn: Handler; desc: string; when?: () => boolean }[]>();
 let activeScope = 'mail';
 
 export function setScope(s: string) {
   activeScope = s;
 }
 
-/** Register a key like "j", "shift+3", "mod+k", "g i". */
-export function bind(key: string, desc: string, fn: Handler, scope = 'global') {
+/** Register a key like "j", "shift+3", "mod+k", "g i". `when` says whether
+ *  it has anything to act on, so the command palette can leave it out. */
+export function bind(key: string, desc: string, fn: Handler, scope = 'global', when?: () => boolean) {
   const list = bindings.get(key) ?? [];
-  list.push({ scope, fn, desc });
+  list.push({ scope, fn, desc, when });
   bindings.set(key, list);
+}
+
+/** How a key reads on screen: ⌘K on a Mac (Ctrl+K elsewhere), Shift+I. */
+export function keyLabel(key: string): string {
+  const mac = navigator.platform.includes('Mac');
+  return key
+    .replace(/mod\+(.)$/, (_, c: string) => (mac ? '⌘' : 'Ctrl+') + c.toUpperCase())
+    .replace(/shift\+(.)$/, (_, c: string) => `Shift+${c.toUpperCase()}`);
+}
+
+/** Something the command palette can run. */
+export interface Command {
+  label: string;
+  run: () => void;
+  /** Its shortcut, as `keyLabel` shows it. */
+  hint?: string;
+  /** Secondary text, such as the account a folder belongs to. */
+  detail?: string;
+  icon?: string;
+}
+
+/** Commands a view adds to the palette, built when it opens, and what they
+ *  act on ("“Lunch on Friday”"), shown above them. */
+export type CommandSource = () => { context?: string; commands: Command[] };
+const sources: { scope: string; fn: CommandSource }[] = [];
+
+export function commandSource(fn: CommandSource, scope = 'global') {
+  sources.push({ scope, fn });
+}
+
+/** Keys that move around a list or close things; not worth a palette entry. */
+const NOT_COMMANDS = new Set(['ArrowDown', 'ArrowUp', 'shift+ArrowDown', 'shift+ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Backspace', 'Delete', 'j', 'k', 'o', 'x', 'mod+k']);
+
+/** What the palette offers now: the current view's shortcuts and commands,
+ *  then the global ones. A shortcut's command shows its key. */
+export function activeCommands(): { context?: string; commands: Command[] } {
+  const out: Command[] = [];
+  const seen = new Set<string>();
+  const add = (c: Command) => {
+    if (seen.has(c.label)) return;
+    seen.add(c.label);
+    out.push(c);
+  };
+  let context: string | undefined;
+  for (const scope of [activeScope, 'global']) {
+    for (const key of bindings.keys()) {
+      const b = binding(key);
+      if (b?.scope !== scope || NOT_COMMANDS.has(key) || (b.when && !b.when())) continue;
+      add({ label: b.desc, hint: keyLabel(key), run: () => b.fn(new KeyboardEvent('keydown')) });
+    }
+    for (const s of sources.filter((x) => x.scope === scope)) {
+      const r = s.fn();
+      context ??= r.context;
+      r.commands.forEach(add);
+    }
+  }
+  return { context, commands: out };
 }
 
 export function shortcutList(): { key: string; desc: string; scope: string }[] {
@@ -183,9 +311,21 @@ function keyName(e: KeyboardEvent): string {
   if (e.metaKey || e.ctrlKey) mods.push('mod');
   if (e.altKey) mods.push('alt');
   let k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  if (e.shiftKey && e.key.length === 1 && /[a-z]/i.test(e.key)) mods.push('shift');
+  if (e.shiftKey && ((e.key.length === 1 && /[a-z]/i.test(e.key)) || e.key.startsWith('Arrow'))) mods.push('shift');
   if (k === ' ') k = 'space';
   return [...mods, k].join('+');
+}
+
+/** The handler `key` runs in the current view, if any. */
+function binding(key: string) {
+  return bindings.get(key)?.filter((b) => b.scope === 'global' || b.scope === activeScope).pop();
+}
+
+/** Runs what pressing `key` would, for menus that offer the same action.
+ *  Like the keyboard, plain keys do nothing while a dialog is open. */
+export function trigger(key: string) {
+  if (document.querySelector('.modal-backdrop') && !key.startsWith('mod+')) return;
+  binding(key)?.fn(new KeyboardEvent('keydown'));
 }
 
 export function installShortcuts() {
@@ -194,16 +334,16 @@ export function installShortcuts() {
     const typing = t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName);
     const k = keyName(e);
     if (typing && !k.startsWith('mod+') && k !== 'Escape') return;
+    // Select all in a text field selects its text.
+    if (typing && k === 'mod+a') return;
     if (document.querySelector('.modal-backdrop') && !k.startsWith('mod+')) return;
     const full = pendingPrefix ? `${pendingPrefix} ${k}` : k;
     const run = (key: string) => {
-      const list = bindings.get(key)?.filter((b) => b.scope === 'global' || b.scope === activeScope);
-      if (list?.length) {
-        e.preventDefault();
-        list[list.length - 1].fn(e);
-        return true;
-      }
-      return false;
+      const b = binding(key);
+      if (!b) return false;
+      e.preventDefault();
+      b.fn(e);
+      return true;
     };
     if (pendingPrefix) {
       pendingPrefix = null;

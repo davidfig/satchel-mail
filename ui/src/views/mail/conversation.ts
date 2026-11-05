@@ -2,14 +2,15 @@
 
 import { api } from '../../api';
 import { h, icon, replace } from '../../lib/dom';
-import { fullDate, shortName } from '../../lib/format';
+import { domainOf, fullDate, shortName } from '../../lib/format';
 import { avatarLink, openPerson, personLink } from '../../lib/person';
-import { contextMenu, errorToast, popupMenu } from '../../lib/ui';
+import { contextMenu, copyText, errorToast, popupMenu } from '../../lib/ui';
 import type { MenuItem } from '../../lib/ui';
 import { store } from '../../state';
 import type { Address, MessageDetail, ReplyMode, Thread } from '../../types';
-import { looksDesigned, planFold, stripHtmlQuotes } from '../../lib/thread';
-import { attachments, draftBanner, htmlFrame, inviteCard, textBody, viewSource, warnings } from './message-body';
+import { looksDesigned, planFold, stripHtmlQuotes, threadMarkdown } from '../../lib/thread';
+import { attachments } from './attachments';
+import { draftBanner, htmlFrame, inviteCard, textBody, viewSource, warnings } from './message-body';
 
 /** Consecutive messages from one sender within this window share a name line. */
 const GROUP_MS = 15 * 60_000;
@@ -31,16 +32,31 @@ export class Conversation {
   private newMarker: HTMLElement | null = null;
   private mine: Mine;
 
-  /** `spam`: the thread is in Spam, so links ask first and invitations can't be answered. */
-  constructor(private thread: Thread, private onReply: (mode: ReplyMode, messageId: string) => void, private opts: { spam?: boolean } = {}) {
+  /** `spam`: the thread is in Spam, so links ask first and invitations can't be answered.
+   *  `onUnsubscribe`: offered on messages with a List-Unsubscribe header. */
+  constructor(private thread: Thread, private onReply: (mode: ReplyMode, messageId: string) => void, private opts: { spam?: boolean; onUnsubscribe?: (m: MessageDetail) => void } = {}) {
     this.mine = mineFor(thread);
     this.render();
   }
 
-  /** Scroll the reader so the first new message (or the latest one) is in view. */
+  /** Scroll the reader so the first new message (or the latest one) is in
+   *  view. A latest message taller than the reader shows from its top, not
+   *  its end. */
   settle(scroller: HTMLElement) {
-    if (this.newMarker) this.newMarker.scrollIntoView({ block: 'start' });
-    else scroller.scrollTop = scroller.scrollHeight;
+    if (this.newMarker) return this.newMarker.scrollIntoView({ block: 'start' });
+    scroller.scrollTop = scroller.scrollHeight;
+    const msgs = this.root.querySelectorAll<HTMLElement>('[data-msg]');
+    const last = msgs[msgs.length - 1];
+    if (!last) return;
+    // A single message starts at the top, so the spam banner and the day
+    // label above it stay visible under the sticky header.
+    if (last === msgs[0]) {
+      scroller.scrollTop = 0;
+      return;
+    }
+    const head = scroller.querySelector<HTMLElement>('.reader-head')?.offsetHeight ?? 0;
+    const above = last.getBoundingClientRect().top - scroller.getBoundingClientRect().top - head - 12;
+    if (above < 0) scroller.scrollTop += above;
   }
 
   private render() {
@@ -118,9 +134,15 @@ export class Conversation {
       { label: 'Forward', icon: 'forward', run: () => this.onReply('forward', m.id) },
       '-',
       ...(swap ? [{ label: 'Show original formatting', icon: 'image', run: swap }] : []),
+      { label: 'Copy for AI', icon: 'copy', run: () => copyText(threadMarkdown(this.thread.subject, [m]), 'Copied the message') },
       { label: 'View source', icon: 'draft', run: () => void viewSource(m.id) },
+      ...(this.canUnsubscribe(m) ? [{ label: 'Unsubscribe', icon: 'close', run: () => this.opts.onUnsubscribe!(m) }] : []),
       ...(m.from && !this.mine(m.from) ? ['-' as const, { label: `All mail with ${shortName(m.from)}`, icon: 'user', run: () => openPerson(m.from!) }] : []),
     ];
+  }
+
+  private canUnsubscribe(m: MessageDetail): boolean {
+    return !!m.unsubscribe && !!this.opts.onUnsubscribe && !this.mine(m.from);
   }
 
   private bubble(m: MessageDetail, showName: boolean, parent: MessageDetail | null): HTMLElement {
@@ -144,7 +166,7 @@ export class Conversation {
     const more = h('button.icon-btn.convo-more', { 'aria-label': 'Message actions', on: { click: (e: MouseEvent) => this.menu(e.currentTarget as HTMLElement, m, swap) } }, icon('more', 16));
     contextMenu(row, () => this.menuItems(m, swap));
     const time = h('time', { datetime: m.date }, clock(m.date));
-    if (showName) row.append(h('div.convo-meta', mine ? time : [personLink(m.from), time]));
+    if (showName) row.append(h('div.convo-meta', mine ? time : [personLink(m.from), m.from && h('span.domain', { title: m.from.email }, domainOf(m.from)), time]));
     row.append(h('div.convo-line',
       !mine && (showName ? avatarLink(m.from) : h('span.avatar-gap')),
       body,
@@ -157,6 +179,7 @@ export class Conversation {
     const head = h('header.convo-card-head',
       avatarLink(m.from),
       h('div.grow', h('strong', personLink(m.from)), m.from && h('span.muted.small', ` ${m.from.email}`)),
+      this.canUnsubscribe(m) && h('button.unsubscribe', { title: 'Ask the sender to stop sending you this mail', on: { click: () => this.opts.onUnsubscribe!(m) } }, 'Unsubscribe'),
       h('time.muted.small', { datetime: m.date, title: fullDate(m.date) }, clock(m.date)),
       h('button.icon-btn', { 'aria-label': 'Message actions', on: { click: (e: MouseEvent) => this.menu(e.currentTarget as HTMLElement, m) } }, icon('more', 16)));
     card.append(head);
@@ -168,7 +191,8 @@ export class Conversation {
           icon('image', 16),
           h('span', 'Remote images are hidden to protect your privacy.'),
           h('button.link', { title: 'Load remote images for this message only', on: { click: () => void this.loadImages(m, false, card) } }, 'Show once'),
-          h('button.link', { title: 'Always load remote images from this sender', on: { click: () => void this.loadImages(m, true, card) } }, `Always for ${m.from?.email ?? 'sender'}`)),
+          h('button.link', { title: 'Always load remote images from this sender', on: { click: () => void this.loadImages(m, true, card) } }, `Always for ${m.from?.email ?? 'sender'}`),
+          h('button.link', { title: 'Open the remote images setting in Privacy', on: { click: () => store.set({ view: 'settings', settingsSection: 'privacy' }) } }, 'Change setting')),
       );
     }
     const warned = warnings(m);

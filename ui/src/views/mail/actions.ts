@@ -1,13 +1,15 @@
 // Acting on conversations: archive, delete, spam, flags, moves, menus.
 
 import { api } from '../../api';
+import { h } from '../../lib/dom';
 import { shortName } from '../../lib/format';
 import { folderDialog } from '../../lib/folders';
-import { openPerson } from '../../lib/person';
-import { confirmDialog, errorToast, popupMenu, toast } from '../../lib/ui';
-import type { MenuItem } from '../../lib/ui';
+import { favoriteItem, openPerson } from '../../lib/person';
+import { confirmDialog, copyText, errorToast, popupMenu, toast } from '../../lib/ui';
+import { threadMarkdown } from '../../lib/thread';
+import type { Command, MenuItem } from '../../lib/ui';
 import { store } from '../../state';
-import type { Mailbox, MessageDetail, Thread, ThreadSummary } from '../../types';
+import type { Mailbox, MessageDetail, Thread, ThreadSummary, UnsubscribeEmail } from '../../types';
 import { openExternal, viewSource } from './message-body';
 import type { MailView } from './index';
 
@@ -57,7 +59,7 @@ export function rowMenu(view: MailView, t: ThreadSummary, at: { x: number; y: nu
       : [{ label: 'Mark as spam', icon: 'junk', hint: '!', run: () => void view.act('spam', threads) }]),
     { label: `Delete${n}`, icon: 'trash', hint: '#', danger: true, run: () => void view.act('trash', threads) },
     '-',
-    ...(person ? [{ label: `All mail with ${shortName(person)}`, icon: 'user', run: () => openPerson(person) }] : []),
+    ...(person ? [{ label: `All mail with ${shortName(person)}`, icon: 'user', run: () => openPerson(person) }, favoriteItem([person])] : []),
     { label: view.selected.has(t.thread_id) ? 'Deselect' : 'Select', icon: 'check', hint: 'x', run: () => view.toggleSelect(t) },
   ];
 }
@@ -90,16 +92,23 @@ export function inSpam(view: MailView, threads = view.targetThreads()): boolean 
   return threads.length > 0 && threads.every((t) => isJunk(t.mailbox_ids));
 }
 
+/** Actions that take conversations out of the current list, and their toasts. */
+const MOVED: Partial<Record<Action, string>> = { archive: 'Archived', trash: 'Moved to Trash', spam: 'Marked as spam.', not_spam: 'Moved to Inbox.', block: 'Deleted.' };
+
 export async function act(view: MailView, kind: Action, threads = view.targetThreads()) {
   if (!threads.length) return;
+  const moved = MOVED[kind];
+  if (kind === 'trash') {
+    const inTrash = threads.every((t) => t.mailbox_ids.every((m) => store.mailbox(m)?.role === 'trash'));
+    if (inTrash && !(await confirmDialog('Delete forever?', 'These messages will be permanently deleted.', 'Delete', true))) return;
+  }
   try {
-    const ids = await view.messageIds(threads);
+    // Starts reading the open thread's ids synchronously, before removeNow closes it.
+    const pending = view.messageIds(threads);
+    if (moved) removeNow(view, threads);
+    const ids = await pending;
     if (kind === 'archive') await api.archive(ids);
-    if (kind === 'trash') {
-      const inTrash = threads.every((t) => t.mailbox_ids.every((m) => store.mailbox(m)?.role === 'trash'));
-      if (inTrash && !(await confirmDialog('Delete forever?', 'These messages will be permanently deleted.', 'Delete', true))) return;
-      await api.trash(ids);
-    }
+    if (kind === 'trash') await api.trash(ids);
     if (kind === 'read') await api.setFlags(ids, true, null);
     if (kind === 'unread') await api.setFlags(ids, false, null);
     let note = '';
@@ -113,27 +122,40 @@ export async function act(view: MailView, kind: Action, threads = view.targetThr
         + (removed ? ` Removed ${removed === 1 ? 'its invitation' : `${removed} invitations`} from your calendar; the organizer isn’t told.` : '');
       if (r.senders.length) note = kind !== 'not_spam' ? ` Future mail from ${who} goes to Spam.${more}` : ` Mail from ${who} will stay out of Spam.${more}`;
     }
-    if (kind === 'archive' || kind === 'trash' || kind === 'spam' || kind === 'not_spam' || kind === 'block') {
-      const removed = new Set(threads.map((t) => t.thread_id));
-      // The store already reflects the change; re-read the window and keep the
-      // cursor at the same position, which now holds the next thread.
-      const pos = Math.max(0, view.cursor >= 0 ? view.cursor : view.list.indexOf(threads[0].thread_id));
-      view.selected.clear();
-      view.renderHeader();
-      await view.refresh();
-      view.cursor = Math.min(pos, view.list.total - 1);
-      view.renderRows();
-      const next = view.list.at(view.cursor);
-      if (next && store.state.selectedThread && removed.has(store.state.selectedThread)) void view.showThread(next.thread_id);
-      else if (!next) view.renderEmptyReader();
-      const done = { archive: 'Archived', trash: 'Moved to Trash', spam: 'Marked as spam.', not_spam: 'Moved to Inbox.', block: 'Deleted.' }[kind];
-      toast(done + note, note ? { ms: 6000 } : {});
-    } else {
-      void view.refresh();
-    }
+    if (moved) toast(moved + note, note ? { ms: 6000 } : {});
   } catch (e) {
     errorToast(e);
   }
+  // Re-read the window: confirms the removal, or brings rows back if it failed.
+  void view.refresh();
+}
+
+/** Take moved conversations off screen before the server answers: drop them
+ *  from the list with the cursor staying at the same position, which now holds
+ *  the next thread, and if the reader showed one of them, open that next thread
+ *  in its place (or show the empty reader when the list is empty). */
+function removeNow(view: MailView, threads: ThreadSummary[]) {
+  const removed = new Set(threads.map((t) => t.thread_id));
+  const pos = view.cursor >= 0 ? view.cursor : view.list.indexOf(threads[0].thread_id);
+  const sel = store.state.selectedThread;
+  const wasOpen = (sel && removed.has(sel)) || (view.openThread && removed.has(view.openThread.thread_id));
+  if (wasOpen) {
+    store.set({ selectedThread: null });
+    view.renderEmptyReader();
+  }
+  view.selected.clear();
+  view.renderHeader();
+  view.list.remove(removed);
+  view.cursor = pos < 0 ? -1 : Math.min(pos, view.list.total - 1);
+  view.renderRows();
+  if (wasOpen && view.cursor >= 0) void openAtCursor(view);
+}
+
+/** Open the thread under the cursor, unless the cursor moved while its row loaded. */
+async function openAtCursor(view: MailView) {
+  const cursor = view.cursor;
+  const t = await view.list.get(cursor);
+  if (t && cursor === view.cursor && !store.state.selectedThread) void view.showThread(t.thread_id);
 }
 
 export async function flagThread(view: MailView, t: ThreadSummary) {
@@ -151,11 +173,12 @@ export async function flagThread(view: MailView, t: ThreadSummary) {
 export async function unsubscribe(view: MailView, m: MessageDetail, inSpam: boolean) {
   const u = m.unsubscribe!;
   const who = m.from?.name || m.from?.email || 'this sender';
-  const how = u.one_click ? `Satchel will tell ${who} to stop sending you this mail.`
-    : u.mailto ? `Satchel will send ${who} an unsubscribe email from your account.`
+  const how: string | Node = u.one_click ? `Satchel will tell ${who} to stop sending you this mail.`
+    : u.email ? unsubscribeEmailText(u.email, m)
     : `This opens ${who}'s unsubscribe page in your browser.`;
+  const spamWarning = 'Unsubscribing from real spam tells the sender your address works. Only do this for senders you recognize; otherwise leave it in Spam.';
   const ok = inSpam
-    ? await confirmDialog('Unsubscribe from mail in Spam?', `Unsubscribing from real spam tells the sender your address works. Only do this for senders you recognize; otherwise leave it in Spam. ${how}`, 'Unsubscribe', true)
+    ? await confirmDialog('Unsubscribe from mail in Spam?', typeof how === 'string' ? `${spamWarning} ${how}` : h('div', h('p', spamWarning), how), 'Unsubscribe', true)
     : await confirmDialog(`Unsubscribe from ${who}?`, how, 'Unsubscribe');
   if (!ok) return;
   try {
@@ -170,28 +193,69 @@ export async function unsubscribe(view: MailView, m: MessageDetail, inSpam: bool
   }
 }
 
+/** Exactly what an unsubscribe email will send, and from which account,
+ *  since the sender wrote the address, subject and text. Shown in full:
+ *  nothing is cut, so nothing is sent that you didn't see. */
+function unsubscribeEmailText(e: UnsubscribeEmail, m: MessageDetail): HTMLElement {
+  const account = store.state.accounts.find((a) => a.id === m.account_id)?.email ?? 'your account';
+  const domain = m.from?.email.split('@').pop();
+  return h('div',
+    h('p', `Satchel will send this email from ${account} to ${e.to}:`),
+    h('div.kv', h('span', 'Subject'), h('span.sent-preview-subject', e.subject || '(no subject)')),
+    h('pre.draft-text.sent-preview', e.body),
+    e.other_domain && h('p', `Note: ${e.to} isn’t at ${domain ?? 'the sender’s domain'}. Mailing list services often use their own domain, but only continue if you recognize it.`));
+}
+
+/** Folders and labels the conversations can move to. */
+function moveTargets(accountId: string): Mailbox[] {
+  return store.state.mailboxes.filter((m) => m.account_id === accountId && m.role !== 'all' && m.role !== 'flagged');
+}
+
+async function moveTo(view: MailView, threads: ThreadSummary[], b: Mailbox) {
+  try {
+    await api.move(await view.messageIds(threads), b.id);
+    toast(`Moved to ${b.name}`);
+    void view.refresh();
+  } catch (e) {
+    errorToast(e);
+  }
+}
+
 export function moveMenu(view: MailView, anchor: HTMLElement | { x: number; y: number }, threads = view.targetThreads()) {
   const t = threads[0];
   if (!t) return;
-  const boxes = store.state.mailboxes.filter((m) => m.account_id === t.account_id && m.role !== 'all' && m.role !== 'flagged');
-  const moveTo = async (b: Mailbox) => {
-    try {
-      await api.move(await view.messageIds(threads), b.id);
-      toast(`Moved to ${b.name}`);
-      void view.refresh();
-    } catch (e) {
-      errorToast(e);
-    }
-  };
   popupMenu(anchor, [
-    ...boxes.map((b) => ({ label: b.path, icon: b.is_label ? 'label' : 'folder', run: () => void moveTo(b) })),
+    ...moveTargets(t.account_id).map((b) => ({ label: b.path, icon: b.is_label ? 'label' : 'folder', run: () => void moveTo(view, threads, b) })),
     '-',
-    { label: 'New folder…', icon: 'plus', run: () => void folderDialog(t.account_id).then((f) => f && moveTo(f)) },
+    { label: 'New folder…', icon: 'plus', run: () => void folderDialog(t.account_id).then((f) => f && moveTo(view, threads, f)) },
   ]);
+}
+
+/** The palette's commands for the conversations the keys act on: a move to
+ *  each folder they aren't all in, and everything with the other person. */
+export function paletteCommands(view: MailView): { context?: string; commands: Command[] } {
+  const threads = view.targetThreads();
+  const t = threads[0];
+  if (!t) return { commands: [] };
+  const context = threads.length === 1 ? `“${t.subject || '(no subject)'}”` : `${threads.length} conversations`;
+  const me = store.state.myEmails;
+  const person = threads.length === 1 ? t.participants.find((a) => !me.has(a.email.toLowerCase())) : undefined;
+  return {
+    context,
+    commands: [
+      ...moveTargets(t.account_id)
+        .filter((b) => !threads.every((x) => x.mailbox_ids.includes(b.id)))
+        .map((b) => ({ label: `Move to ${b.path}`, icon: b.is_label ? 'label' : 'folder', run: () => void moveTo(view, threads, b) })),
+      { label: 'Move to new folder…', icon: 'plus', run: () => void folderDialog(t.account_id).then((f) => f && moveTo(view, threads, f)) },
+      ...(person ? [{ label: `All mail with ${shortName(person)}`, icon: 'user', run: () => openPerson(person) }, favoriteItem([person])] : []),
+    ],
+  };
 }
 
 export function moreMenu(view: MailView, anchor: HTMLElement, thread: Thread) {
   const lastMsg = thread.messages[thread.messages.length - 1];
+  const me = store.state.myEmails;
+  const sender = [...thread.messages].reverse().find((m) => m.from && !me.has(m.from.email.toLowerCase()))?.from;
   popupMenu(anchor, [
     { label: 'Mark as unread', icon: 'mail', hint: 'u', run: () => void view.act('unread') },
     ...(view.inSpam()
@@ -201,7 +265,14 @@ export function moreMenu(view: MailView, anchor: HTMLElement, thread: Thread) {
         ]
       : [{ label: 'Mark as spam', icon: 'junk', hint: '!', run: () => void view.act('spam') }]),
     { label: 'Forward', icon: 'forward', hint: 'f', run: () => void view.reply('forward') },
+    ...(sender ? [favoriteItem([sender])] : []),
     '-',
+    { label: 'Copy for AI', icon: 'copy', hint: 'y', run: () => copyThread(thread) },
     { label: 'View source', icon: 'draft', run: () => void viewSource(lastMsg.id) },
   ]);
+}
+
+/** Copies a conversation as Markdown, to paste into an AI chat. */
+export function copyThread(thread: Thread) {
+  copyText(threadMarkdown(thread.subject, thread.messages), 'Copied the conversation');
 }

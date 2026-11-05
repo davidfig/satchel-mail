@@ -11,6 +11,7 @@ import type {
   AuditEntry,
   CalEvent,
   Calendar,
+  CalendarAlert,
   Contact,
   Credential,
   Draft,
@@ -22,6 +23,7 @@ import type {
   Occurrence,
   OutboxItem,
   PartStat,
+  PlaceSuggestion,
   PersonSummary,
   Proposal,
   ProposalAction,
@@ -40,7 +42,8 @@ import type {
 const call = <T>(cmd: string, args?: unknown) => transport.invoke<T>(cmd, args);
 
 export const api = {
-  info: () => call<{ version: string; mode: string; data_dir: string; mirror_root: string }>('info'),
+  /** `places_service`: who looks up places when that's turned on ("Apple Maps"), or null. */
+  info: () => call<{ version: string; mode: string; data_dir: string; mirror_root: string; places_service: string | null }>('info'),
 
   listAccounts: () => call<Account[]>('list_accounts'),
   testAccount: (config: AccountConfig, credential: Credential) => call<{ ok: boolean }>('test_account', { config, credential }),
@@ -69,6 +72,7 @@ export const api = {
   updateMailbox: (mailbox_id: Id, name: string, parent_id: Id | null) => call<Mailbox>('update_mailbox', { mailbox_id, name, parent_id }),
   deleteMailbox: (mailbox_id: Id) => call<{ moved_to_trash: number }>('delete_mailbox', { mailbox_id }),
   markAllRead: (mailbox_id: Id | null, role: MailboxRole | null) => call<{ message_ids: Id[] }>('mark_all_read', { mailbox_id, role }),
+  emptyMailbox: (mailbox_id: Id | null, role: MailboxRole | null) => call<{ deleted: number }>('empty_mailbox', { mailbox_id, role }),
   move: (message_ids: Id[], mailbox_id: Id) => call('move', { message_ids, mailbox_id }),
   archive: (message_ids: Id[]) => call('archive', { message_ids }),
   trash: (message_ids: Id[]) => call('trash', { message_ids }),
@@ -77,6 +81,8 @@ export const api = {
   markNotSpam: (message_ids: Id[]) => call<{ senders: string[]; also_moved: number }>('mark_not_spam', { message_ids }),
   listSenderRules: () => call<SenderRule[]>('list_sender_rules'),
   setSenderRule: (email: string, verdict: SenderVerdict | null) => call('set_sender_rule', { email, verdict }),
+  listFavoriteSenders: () => call<string[]>('list_favorite_senders'),
+  setFavoriteSenders: (emails: string[], favorite: boolean) => call('set_favorite_senders', { emails, favorite }),
   unsubscribe: (message_id: Id) => call<{ via: 'one_click' | 'email' | 'browser'; url?: string; to?: string }>('unsubscribe', { message_id }),
   saveDraft: (draft: Draft) => call<{ draft_id: Id }>('save_draft', { draft }),
   deleteDraft: (draft_id: Id) => call('delete_draft', { draft_id }),
@@ -95,7 +101,12 @@ export const api = {
   updateEvent: (event: CalEvent) => call<CalEvent>('update_event', { event }),
   deleteEvent: (event_id: Id) => call('delete_event', { event_id }),
   respondToInvite: (event_id: Id, response: PartStat) => call('respond_to_invite', { event_id, response }),
+  listAlerts: () => call<CalendarAlert[]>('list_alerts'),
+  snoozeAlert: (alert_id: Id, until: string) => call('snooze_alert', { alert_id, until }),
+  /** `null` dismisses every open alert. */
+  dismissAlert: (alert_id: Id | null) => call('dismiss_alert', { alert_id }),
   respondToEmailInvite: (message_id: Id, response: PartStat) => call<{ ok: boolean; via: string }>('respond_to_email_invite', { message_id, response }),
+  suggestLocations: (query: string) => call<PlaceSuggestion[]>('suggest_locations', { query }),
   findFreeTime: (from: string, to: string, duration_minutes: number, timezone: string) =>
     call<FreeSlot[]>('find_free_time', { from, to, duration_minutes, day_start_hour: 9, day_end_hour: 17, timezone }),
 

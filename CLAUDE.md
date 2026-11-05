@@ -1,4 +1,4 @@
-# Satchel Mail — notes for Claude
+# satchel.email — notes for Claude
 
 Local-first email + calendar client. A Rust core syncs accounts into SQLite;
 the desktop app (Tauri) and `satchel serve` host it; AI agents work through the
@@ -42,6 +42,10 @@ for the layout and `docs/` for design and decisions.
   `title: '…'` in `h()` (rendered by `tooltip.ts`, never the browser's), and
   every button has one, with its shortcut in parentheses if it has one. See
   `docs/decisions/0021-shared-ui-components.md`.
+- **Redraw with `patch`, not `replace`,** anywhere a view redraws while it's
+  on screen (sync ticks, events, typing), or it blinks. Listeners go through
+  `on`/`listen`, and handlers read `e.currentTarget`, not a captured element
+  (0046).
 - Email content is untrusted: sanitize HTML in the core, render it in the
   sandboxed iframe, never `innerHTML` untrusted text.
 
@@ -50,7 +54,8 @@ for the layout and `docs/` for design and decisions.
 ```bash
 scripts/dev-servers reset                 # local Stalwart (IMAP/SMTP/JMAP/CalDAV) + fixtures
 scripts/run [web] [--test]                # build + run the app (also `pnpm app|web|web:test`)
-scripts/dev-signing-cert                  # once: stable dev signing so keychain "Always Allow" sticks
+scripts/dev-sign --sign-only BIN          # sign with the Apple Development cert so keychain "Always Allow" sticks
+scripts/vendor-golemdocs [REF]            # rebuild (or re-pin) the vendored document viewer (0062)
 cargo test --workspace                    # unit + engine integration tests
 cargo clippy --workspace                  # keep at zero warnings
 (cd ui && npx tsc --noEmit && npm test && npm run build)
@@ -85,7 +90,7 @@ folder's `mod.rs` (or `index.ts`) says what's in it (0035).
   - `provider/` — the traits providers implement, and `SyncCtx`.
 - `crates/providers/src` — by vendor: `imap/`, `jmap/`, `google/` (Gmail,
   Calendar, Contacts), `microsoft/` (mail, calendar, contacts), `dav/`
-  (CalDAV, CardDAV); `net.rs`, `oauth.rs`.
+  (CalDAV, CardDAV), `places/` (Photon, Apple Maps); `net.rs`, `oauth.rs`.
 - `crates/ical`, `crates/mime` — parsing and building, split by concern.
 - `crates/mcp` — MCP tools. `crates/cli` — `satchel` binary + HTTP server.
 - `crates/core/tests` — integration tests by area, with fakes in `support/`.

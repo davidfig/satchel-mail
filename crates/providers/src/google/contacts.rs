@@ -150,8 +150,22 @@ pub fn update_body(person: &Value, new: &ContactFields) -> (Value, Vec<&'static 
     (body, fields)
 }
 
+/// Whether a contact id has the shape Google gives them, `people/<id>`, so it
+/// can't steer the URL we build from it to another API path.
+fn is_resource_name(rn: &str) -> bool {
+    rn.strip_prefix("people/").is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'))
+}
+
+/// [`is_resource_name`] as an error, for ids about to go into a URL.
+fn resource_name(rn: &str) -> Result<&str> {
+    if !is_resource_name(rn) {
+        anyhow::bail!("not a Google contact id: {}", rn.chars().take(80).collect::<String>());
+    }
+    Ok(rn)
+}
+
 fn card(p: &Value) -> Option<(String, Option<String>, String)> {
-    let rn = p["resourceName"].as_str()?.to_string();
+    let rn = p["resourceName"].as_str().filter(|r| is_resource_name(r))?.to_string();
     let vcard = satchel_ical::vcard::build(None, &rn, &person_to_fields(p));
     Some((rn, p["etag"].as_str().map(String::from), vcard))
 }
@@ -196,7 +210,7 @@ impl GoogleContactsProvider {
             }
             let v = self.api.json(|h, t| h.get(&url).bearer_auth(t), "list contacts").await.map_err(scope_error)?;
             for p in v["connections"].as_array().cloned().unwrap_or_default() {
-                let Some(rn) = p["resourceName"].as_str() else { continue };
+                let Some(rn) = p["resourceName"].as_str().filter(|r| is_resource_name(r)) else { continue };
                 seen.insert(rn.to_string());
                 if p["metadata"]["deleted"] == true {
                     ctx.delete_card_remote(local, rn)?;
@@ -254,6 +268,7 @@ impl ContactsProvider for GoogleContactsProvider {
                         self.api.json(|h, t| h.post(&url).bearer_auth(t).json(&body), "create contact").await.map_err(scope_error)?
                     }
                     Some(rn) => {
+                        let rn = resource_name(rn)?;
                         let url = format!("{PEOPLE}/{rn}?personFields={UPDATE_FIELDS},metadata");
                         let person = self.api.json(|h, t| h.get(&url).bearer_auth(t), "get contact").await?;
                         if etag.is_some() && person["etag"].as_str() != etag.as_deref() {
@@ -275,7 +290,7 @@ impl ContactsProvider for GoogleContactsProvider {
                 }
             }
             ContactOp::Delete { card_remote_id, .. } => {
-                let url = format!("{PEOPLE}/{card_remote_id}:deleteContact");
+                let url = format!("{PEOPLE}/{}:deleteContact", resource_name(card_remote_id)?);
                 match self.api.send(|h, t| h.delete(&url).bearer_auth(t), "delete contact").await {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("HTTP 404") => {}
@@ -287,7 +302,7 @@ impl ContactsProvider for GoogleContactsProvider {
     }
 
     async fn fetch(&self, _ctx: &SyncCtx, _book: &str, card_remote_id: &str) -> Result<Option<(Option<String>, String)>> {
-        let url = format!("{PEOPLE}/{card_remote_id}?personFields={FIELDS}");
+        let url = format!("{PEOPLE}/{}?personFields={FIELDS}", resource_name(card_remote_id)?);
         match self.api.json(|h, t| h.get(&url).bearer_auth(t), "get contact").await {
             Ok(v) => Ok(card(&v).map(|(_, etag, vcard)| (etag, vcard))),
             Err(e) if e.to_string().contains("HTTP 404") => Ok(None),
@@ -299,6 +314,17 @@ impl ContactsProvider for GoogleContactsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resource_names_are_checked() {
+        for ok in ["people/c1", "people/c7034_x-Y"] {
+            assert!(is_resource_name(ok), "{ok}");
+        }
+        for bad in ["people/", "c1", "people/c1/../../v1/x", "people/c1:deleteContact", "people/c1?x=1", "people/c 1", "otherContacts/c1", "people/c1#"] {
+            assert!(!is_resource_name(bad), "{bad}");
+        }
+        assert!(card(&json!({ "resourceName": "people/../x" })).is_none());
+    }
 
     #[test]
     fn person_round_trip() {

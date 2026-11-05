@@ -5,6 +5,11 @@ export function displayName(a: Address | null | undefined): string {
   return a.name?.trim() || a.email;
 }
 
+/** The part of an address after the @, for showing where mail really comes from. */
+export function domainOf(a: Address | null | undefined): string {
+  return a?.email.split('@').pop()?.toLowerCase() ?? '';
+}
+
 export function shortName(a: Address | null | undefined): string {
   const n = displayName(a);
   if (n.includes('@')) return n.split('@')[0];
@@ -67,6 +72,16 @@ export function relative(iso: string | null): string {
   if (s < 3600) return `${Math.floor(s / 60)} min ago`;
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return `${Math.floor(s / 86400)} d ago`;
+}
+
+/** `relative` for tight spaces: "now", "5m", "3h", "2d". */
+export function relativeShort(iso: string | null): string {
+  if (!iso) return 'never';
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return 'now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
 }
 
 /** Split an address list on commas, semicolons and newlines, except inside
@@ -134,4 +149,10 @@ export function avatarColor(email: string): string {
   let h = 0;
   for (const c of email.toLowerCase()) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return `hsl(${h % 360} 55% 48%)`;
+}
+
+/** Sync progress without its noun, for when the full text doesn't fit:
+ *  "Downloading messages: 31,295 left" → "Downloading: 31,295 left". */
+export function shortProgress(detail: string): string {
+  return detail.replace(/\s+(messages|headers)\b/gi, '').trim();
 }

@@ -1,7 +1,15 @@
-//! Satchel Mail desktop host: owns the engine, bridges the UI over Tauri IPC
+//! satchel.email desktop host: owns the engine, bridges the UI over Tauri IPC
 //! and forwards core events. All product logic lives in satchel-core.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod doc_viewer;
+#[cfg(target_os = "macos")]
+mod mac_alerts;
+#[cfg(target_os = "macos")]
+mod menu;
+mod notify;
+mod update;
 
 use std::sync::Arc;
 
@@ -9,7 +17,8 @@ use base64::Engine as _;
 use satchel_api::{Request, Response};
 use satchel_core::secrets::{FileSecretStore, KeychainSecretStore, SecretStore};
 use satchel_core::{Caller, Engine, EngineOptions, Mode};
-use tauri::{Emitter, Manager, State};
+use tauri::webview::NewWindowResponse;
+use tauri::{Emitter, Manager, State, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
 struct AppState {
@@ -37,19 +46,125 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
-/// Ask where to save an attachment, then write it. Returns the chosen path.
+/// Whether a navigation stays in the app: its own pages (and the dev server's
+/// in a dev build), IPC, the in-memory documents frames show (message
+/// bodies, attachments), and the document viewer's page (0062).
+fn stays_in_app(url: &tauri::Url, dev_url: Option<&tauri::Url>) -> bool {
+    match url.scheme() {
+        "tauri" | "ipc" | "about" | "blob" | "data" => true,
+        _ if doc_viewer::is_viewer(url) => true,
+        // Windows serves the app and IPC from these hosts.
+        "http" | "https" if matches!(url.host_str(), Some("tauri.localhost" | "ipc.localhost")) => true,
+        _ => cfg!(debug_assertions) && dev_url.is_some_and(|d| d.origin() == url.origin()),
+    }
+}
+
+/// Ask the user to pick a folder, starting in `start` if it exists. Returns
+/// the chosen path, or nothing if they cancelled.
 #[tauri::command]
+async fn choose_folder(app: tauri::AppHandle, title: String, start: Option<String>) -> Result<Option<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut dialog = app.dialog().file().set_title(title).set_can_create_directories(true);
+    if let Some(dir) = start.map(std::path::PathBuf::from).filter(|d| d.is_dir()) {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.pick_folder(move |p| {
+        let _ = tx.send(p);
+    });
+    let Some(path) = rx.await.map_err(|e| e.to_string())? else { return Ok(None) };
+    Ok(Some(path.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned()))
+}
+
+/// Ask where to save an attachment, then write it. Returns the chosen path.
+#[tauri::command(rename_all = "snake_case")]
 async fn save_file(app: tauri::AppHandle, filename: String, data_base64: String) -> Result<Option<String>, String> {
     let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64).map_err(|e| e.to_string())?;
-    let safe: String = filename.chars().map(|c| if "/\\:".contains(c) { '_' } else { c }).collect();
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog().file().set_file_name(&safe).save_file(move |p| {
+    app.dialog().file().set_file_name(safe_filename(&filename)).save_file(move |p| {
         let _ = tx.send(p);
     });
     let Some(path) = rx.await.map_err(|e| e.to_string())? else { return Ok(None) };
     let path = path.into_path().map_err(|e| e.to_string())?;
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    write_downloaded(&path, &bytes)?;
     Ok(Some(path.display().to_string()))
+}
+
+/// Open an attachment in its default app: write it to a fresh folder in the
+/// cache (marked as downloaded, like a saved one), then hand it to the OS.
+#[tauri::command(rename_all = "snake_case")]
+fn open_file(app: tauri::AppHandle, filename: String, data_base64: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64).map_err(|e| e.to_string())?;
+    let root = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("opened");
+    clear_old_opened(&root);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    // Its own folder, so the file keeps its name and two with the same name don't collide.
+    let dir = root.join(format!("{nanos:x}"));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(safe_filename(&filename));
+    write_downloaded(&path, &bytes)?;
+    app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Removes files opened more than a day ago; the app they went to has had them long enough.
+fn clear_old_opened(root: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    let day = std::time::Duration::from_secs(24 * 60 * 60);
+    for e in entries.flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > day);
+        if old {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
+/// An attachment's name, safe to write: without the invisible marks that make
+/// "invoice\u{202E}fdp.exe" read as "invoiceexe.pdf", and without path separators.
+fn safe_filename(filename: &str) -> String {
+    let safe: String = satchel_mime::clean_filename(filename).chars().map(|c| if "/\\:".contains(c) { '_' } else { c }).collect();
+    if safe.trim_matches('.').is_empty() { "attachment".into() } else { safe }
+}
+
+/// Writes the file and marks it as downloaded, so the OS checks it
+/// (Gatekeeper, SmartScreen) when it's opened. A file we can't mark isn't
+/// left behind unchecked, unless the disk can't hold the mark at all (FAT,
+/// some network shares).
+fn write_downloaded(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    std::fs::write(path, bytes).map_err(|e| e.to_string())?;
+    if let Err(e) = mark_downloaded(path)
+        && !matches!(e.kind(), std::io::ErrorKind::Unsupported | std::io::ErrorKind::InvalidFilename)
+    {
+        let _ = std::fs::remove_file(path);
+        return Err(format!("couldn't mark the file as downloaded from the internet: {e}"));
+    }
+    Ok(())
+}
+
+/// macOS: the `com.apple.quarantine` attribute browsers set
+/// ("flags;hex time;agent;event id"; 0081 = downloaded, not yet approved).
+#[cfg(target_os = "macos")]
+fn mark_downloaded(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let value = format!("0081;{secs:08x};satchel.email;");
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes())?;
+    // SAFETY: both strings are NUL-terminated and `value` outlives the call.
+    let r = unsafe { libc::setxattr(path.as_ptr(), c"com.apple.quarantine".as_ptr(), value.as_ptr().cast(), value.len(), 0, 0) };
+    if r == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+}
+
+/// Windows: the Mark of the Web, a `Zone.Identifier` stream saying the file
+/// came from the Internet zone (3).
+#[cfg(windows)]
+fn mark_downloaded(path: &std::path::Path) -> std::io::Result<()> {
+    let mut stream = path.as_os_str().to_owned();
+    stream.push(":Zone.Identifier");
+    std::fs::write(stream, "[ZoneTransfer]\r\nZoneId=3\r\n")
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn mark_downloaded(_path: &std::path::Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 /// Absolute path of the bundled `satchel` CLI (used in MCP setup snippets).
@@ -72,6 +187,43 @@ fn lock(dir: &std::path::Path) -> anyhow::Result<Option<std::fs::File>> {
     }
 }
 
+/// The window-state plugin only writes to disk on a clean quit, so a crash,
+/// force-quit or `tauri dev` restart forgets where the window was. Also save
+/// half a second after the window stops moving or resizing.
+fn save_window_state_on_change(window: &tauri::WebviewWindow) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+    let changes = Arc::new(AtomicU64::new(0));
+    let app = window.app_handle().clone();
+    window.on_window_event(move |e| {
+        if !matches!(e, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+            return;
+        }
+        let n = changes.fetch_add(1, Ordering::SeqCst) + 1;
+        let (changes, app) = (changes.clone(), app.clone());
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            if changes.load(Ordering::SeqCst) == n {
+                let _ = app.save_window_state(StateFlags::all());
+            }
+        });
+    });
+}
+
+/// Providers for the engine; on macOS, places come from Apple Maps (0050).
+fn factory(app: &tauri::AppHandle) -> satchel_providers::Factory {
+    let f = satchel_providers::Factory::new();
+    #[cfg(target_os = "macos")]
+    let f = {
+        let app = app.clone();
+        let maps = satchel_providers::places::apple_maps::AppleMaps::new(Box::new(move |job| Ok(app.run_on_main_thread(job)?)));
+        f.with_places(Arc::new(maps))
+    };
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+    f
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,tantivy=warn".into()))
@@ -86,15 +238,25 @@ fn main() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_notification::init())
+        // Reopen the window where and at the size the user last left it.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .register_asynchronous_uri_scheme_protocol(doc_viewer::SCHEME, doc_viewer::handle);
     #[cfg(feature = "updater")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(menu::build).on_menu_event(|app, e| menu::forward(app, e.id().as_ref()));
     builder
         .setup(|app| {
+            // Dev builds of the notification plugin post as Terminal, which macOS
+            // drops unless Terminal may notify. Only the first application set
+            // counts, so claim ours before the plugin's first notification.
+            #[cfg(target_os = "macos")]
+            let _ = mac_notification_sys::set_application(&app.config().identifier);
             let data_dir = satchel_core::default_data_dir();
             let Some(lock) = lock(&data_dir)? else {
                 app.dialog()
-                    .message(format!("Satchel Mail is already running for {} (perhaps `satchel serve`). Quit it and try again.", data_dir.display()))
+                    .message(format!("satchel.email is already running for {} (perhaps `satchel serve`). Quit it and try again.", data_dir.display()))
                     .title("Already running")
                     .blocking_show();
                 std::process::exit(1);
@@ -109,7 +271,7 @@ fn main() {
                     data_dir,
                     mode: Mode::Full,
                     secrets,
-                    factory: Arc::new(satchel_providers::Factory::new()),
+                    factory: Arc::new(factory(app.handle())),
                     start_workers: true,
                 })
             })?;
@@ -128,10 +290,75 @@ fn main() {
                     }
                 }
             });
+            // Calendar alerts scheduled with macOS (0057), when running as an app.
+            #[cfg(target_os = "macos")]
+            if mac_alerts::available() {
+                mac_alerts::start(app.handle(), engine.clone());
+            }
             app.manage(AppState { engine, _lock: lock });
+            // Built here, not from the config, so we can catch popups. WebKit
+            // runs no listeners in the script-less message iframe, so its links
+            // open as `target=_blank` popups; hand them to the UI, which asks
+            // first for risky mail and opens them in the system browser.
+            let links = app.handle().clone();
+            // Frames can try to leave the app too, like a link clicked in a
+            // PDF attachment, which the PDF viewer opens in its own frame.
+            // Nothing but the app's own pages loads here; other links go to
+            // the UI the same way.
+            let navigations = app.handle().clone();
+            let dev_url = app.config().build.dev_url.clone();
+            let config = app.config().app.windows.iter().find(|w| w.label == "main").ok_or("no main window in tauri.conf.json")?;
+            let window = WebviewWindowBuilder::from_config(app.handle(), config)?
+                .on_new_window(move |url, _| {
+                    let _ = links.emit_to("main", "satchel://open-link", url.as_str());
+                    NewWindowResponse::Deny
+                })
+                .on_navigation(move |url| {
+                    if stays_in_app(url, dev_url.as_ref()) {
+                        return true;
+                    }
+                    let _ = navigations.emit_to("main", "satchel://open-link", url.as_str());
+                    false
+                })
+                .build()?;
+            save_window_state_on_change(&window);
+            update::start(app.handle());
+            #[cfg(target_os = "macos")]
+            window.on_window_event(|e| {
+                if let tauri::WindowEvent::Focused(f) = e {
+                    mac_alerts::set_focused(*f);
+                }
+            });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![api, open_url, save_file, cli_path])
+        .invoke_handler(tauri::generate_handler![
+            api,
+            open_url,
+            save_file,
+            open_file,
+            choose_folder,
+            cli_path,
+            notify::os_alerts,
+            notify::can_notify,
+            notify::notify,
+            notify::take_open_request,
+            update::update_ready,
+            update::install_update
+        ])
         .run(tauri::generate_context!())
-        .expect("error while running Satchel Mail");
+        .expect("error while running satchel.email");
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    #[test]
+    fn saved_files_are_quarantined() {
+        let path = std::env::temp_dir().join(format!("satchel-quarantine-{}.command", std::process::id()));
+        std::fs::write(&path, "echo hi").unwrap();
+        super::mark_downloaded(&path).unwrap();
+        let out = std::process::Command::new("xattr").arg("-p").arg("com.apple.quarantine").arg(&path).output().unwrap();
+        let _ = std::fs::remove_file(&path);
+        let v = String::from_utf8_lossy(&out.stdout);
+        assert!(v.starts_with("0081;") && v.trim_end().ends_with(";satchel.email;"), "{v}");
+    }
 }

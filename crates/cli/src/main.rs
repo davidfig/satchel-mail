@@ -1,4 +1,4 @@
-//! `satchel` — headless host for the Satchel Mail core.
+//! `satchel` — headless host for the satchel.email core.
 //!
 //!   satchel serve            run sync + the web UI/API on localhost
 //!   satchel mcp              MCP server over stdio for AI agents
@@ -18,7 +18,7 @@ use satchel_core::secrets::{FileSecretStore, SecretStore};
 use satchel_core::{Caller, Engine, EngineOptions, Mode};
 
 #[derive(Parser)]
-#[command(name = "satchel", version, about = "Satchel Mail headless host")]
+#[command(name = "satchel", version, about = "satchel.email headless host")]
 struct Cli {
     /// Data directory (default: platform app-data dir, or $SATCHEL_DATA_DIR).
     #[arg(long, global = true, env = "SATCHEL_DATA_DIR")]
@@ -39,6 +39,10 @@ enum Cmd {
         /// Directory with the built UI (ui/dist).
         #[arg(long)]
         ui: Option<PathBuf>,
+        /// Make a new session token, signing out every browser (it also
+        /// rotates by itself every 30 days).
+        #[arg(long)]
+        new_session: bool,
     },
     /// MCP server over stdio. Requires an agent token.
     Mcp {
@@ -152,7 +156,7 @@ fn secrets_store(kind: &str, data_dir: &std::path::Path) -> Result<Arc<dyn Secre
 pub struct EngineLock(#[allow(dead_code)] std::fs::File);
 
 pub fn try_lock(data_dir: &std::path::Path) -> Result<Option<EngineLock>> {
-    std::fs::create_dir_all(data_dir)?;
+    satchel_core::engine::create_private_dir(data_dir)?;
     let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(data_dir.join("engine.lock"))?;
     match f.try_lock() {
         Ok(()) => Ok(Some(EngineLock(f))),
@@ -166,7 +170,7 @@ fn open(cli: &Cli, mode: Mode, workers: bool) -> Result<(Arc<Engine>, Option<Eng
     let (mode, lock) = if mode == Mode::Full {
         match try_lock(&data_dir)? {
             Some(l) => (Mode::Full, Some(l)),
-            None => bail!("another Satchel Mail process (the app or `satchel serve`) is already running for {}", data_dir.display()),
+            None => bail!("another satchel.email process (the app or `satchel serve`) is already running for {}", data_dir.display()),
         }
     } else {
         (mode, None)
@@ -208,10 +212,10 @@ async fn main() -> Result<()> {
         .init();
 
     match &cli.cmd {
-        Cmd::Serve { port, ui } => {
+        Cmd::Serve { port, ui, new_session } => {
             let (engine, _lock) = open(&cli, Mode::Full, true)?;
             let ui = ui.clone().or_else(default_ui_dir);
-            server::serve(engine, *port, ui).await?;
+            server::serve(engine, *port, ui, *new_session).await?;
         }
         Cmd::Mcp { token } => {
             let (engine, _lock) = open(&cli, Mode::Agent, true)?;
@@ -225,7 +229,7 @@ async fn main() -> Result<()> {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 let accounts = engine.store().list_accounts()?;
-                let done = accounts.iter().all(|a| a.sync.last_success.is_some_and(|t| t > start) || a.sync.state == SyncState::Error);
+                let done = accounts.iter().all(|a| (a.sync.last_success.is_some_and(|t| t > start) && a.sync.state != SyncState::Syncing) || matches!(a.sync.state, SyncState::Error | SyncState::SignIn));
                 if done && engine.store().unindexed(1)?.is_empty() {
                     for a in &accounts {
                         println!("{}\t{:?}\t{}", a.email, a.sync.state, a.sync.error.clone().unwrap_or_default());

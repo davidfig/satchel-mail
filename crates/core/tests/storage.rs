@@ -40,6 +40,23 @@ async fn attachments_download_only_when_asked_for() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn old_snippets_are_rebuilt_without_html_entities() {
+    let (engine, fake, account, _dir) = setup().await;
+    deliver(&fake, "plan", dated("plan", "Plan", 1, "&zwnj;&#847;Welcome &ndash; your plan"), "INBOX");
+    sync(&engine, &account, "plan").await;
+    let id = engine.store().message_id_by_remote(&account, "plan").unwrap().unwrap();
+    let row = || engine.store().message_row(&id).unwrap().unwrap();
+    wait_for(|| row().blob_hash.is_some()).await;
+    assert_eq!(row().summary.snippet, "Welcome – your plan");
+
+    // As an older version stored it, cut off inside the padding.
+    engine.store().set_snippet(&id, "&zwnj;&zwnj;&z…").unwrap();
+    assert_eq!(engine.repair_snippets().unwrap(), 1);
+    assert_eq!(row().summary.snippet, "Welcome – your plan");
+    assert_eq!(engine.repair_snippets().unwrap(), 0, "nothing left to change");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn storage_limit_keeps_the_newest_mail() {
     let (engine, fake, account, _dir) = setup().await;
     let mut s = engine.settings();
@@ -97,4 +114,47 @@ async fn attachments_stay_on_the_server_when_the_provider_can_leave_them_out() {
     let v = engine.handle(&Caller::User, Command::GetAttachment { message_id: id.clone(), attachment_id: row.attachments[0].id.clone() }).await.unwrap();
     assert_eq!(v["data_base64"].as_str().unwrap().len(), 200_000);
     assert_eq!(fake.raw_fetches.load(std::sync::atomic::Ordering::Relaxed), before + 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleted_mail_and_removed_accounts_leave_no_stored_copies() {
+    use satchel_core::blobs::{BlobStore, MemBlobStore};
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Arc::new(Fake::default());
+    let blobs = Arc::new(MemBlobStore::default());
+    let engine = Engine::with_parts(
+        Arc::new(satchel_core::store::Store::open_in_memory().unwrap()),
+        blobs.clone(),
+        satchel_core::EngineOptions {
+            data_dir: dir.path().to_path_buf(),
+            mode: satchel_core::Mode::Full,
+            secrets: Arc::new(satchel_core::secrets::MemSecretStore::default()),
+            factory: Arc::new(FakeFactory(fake.clone())),
+            start_workers: false,
+        },
+    )
+    .unwrap();
+    let acc: Account = serde_json::from_value(
+        engine
+            .handle(&Caller::User, Command::AddAccount { config: AccountConfig::Gmail { email: "me@x.test".into(), display_name: "Me".into() }, credential: Credential::Password { password: "x".into() } })
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    wait_for(|| engine.store().message_id_by_remote(&acc.id, "r3").ok().flatten().is_some()).await;
+    let count = || blobs.list(Duration::ZERO).unwrap().len();
+    assert_eq!(count(), 3);
+
+    let r1 = engine.store().message_id_by_remote(&acc.id, "r1").unwrap().unwrap();
+    engine.store().delete_message(&r1).unwrap();
+    assert_eq!(engine.free_unused_blobs().unwrap(), 1);
+    assert_eq!(count(), 2);
+
+    // Left behind by an earlier run.
+    blobs.put(b"orphan").unwrap();
+    assert_eq!(engine.sweep_orphan_blobs().unwrap(), 1);
+    assert_eq!(count(), 2);
+
+    engine.handle(&Caller::User, Command::RemoveAccount { account_id: acc.id.clone() }).await.unwrap();
+    assert_eq!(count(), 0);
 }

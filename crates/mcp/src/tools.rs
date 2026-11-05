@@ -26,10 +26,10 @@ pub(crate) fn tools() -> Vec<Tool> {
         ro(Tool::new("whoami", "Show this agent's name, its access policy, and server info.", schema(json!({}), &[]))),
         ro(Tool::new("list_accounts", "List the mail accounts you can read.", schema(json!({}), &[]))),
         ro(Tool::new("list_mailboxes", "List folders/labels with unread and total counts.", schema(json!({ "account_id": { "type": "string" } }), &[]))),
-        ro(Tool::new("list_smart_folders", "List the user's smart folders (saved searches) with their queries and badge counts. Browse one with search_threads and smart_folder_id.", schema(json!({}), &[]))),
+        ro(Tool::new("list_smart_folders", "List the user's smart folders (saved searches) with their queries and badge counts. Browse one with search_threads and smart_folder_id. Empty for an agent limited to some accounts.", schema(json!({}), &[]))),
         ro(Tool::new(
             "search_threads",
-            "Search or list conversations, newest first. `query` supports free text and operators: from:, to:, with: (sender or recipient), subject:, has:attachment, is:unread, is:read, is:flagged, is:unflagged, before:YYYY-MM-DD, after:YYYY-MM-DD, newer_than:7d, older_than:1y (d, w, m, y), in:<mailbox>, in:anywhere (include Trash and Junk), account:<address>. from:, to:, with:, in: and account: take a comma-separated list; a full address matches exactly. Every term must match; put - before a term to exclude it (-from:noreply). Use role (inbox, sent, drafts, archive, trash, junk, flagged), mailbox_id or smart_folder_id to browse.",
+            "Search or list conversations, newest first. `query` supports free text and operators: from:, to:, with: (sender or recipient), subject:, has:attachment, is:unread, is:read, is:flagged, is:unflagged, is:favorite (from a sender the user marked as a favorite), before:YYYY-MM-DD, after:YYYY-MM-DD, newer_than:7d, older_than:1y (d, w, m, y), in:<mailbox>, in:anywhere (include Trash and Junk), account:<address>. from:, to:, with:, in: and account: take a comma-separated list; a full address matches exactly. Every term must match; put - before a term to leave out threads with any message matching it (-from:noreply). Use role (inbox, sent, drafts, archive, trash, junk, flagged), mailbox_id or smart_folder_id to browse.",
             schema(json!({
                 "query": { "type": "string" },
                 "smart_folder_id": { "type": "string", "description": "A smart folder from list_smart_folders; `query` narrows it further." },
@@ -43,7 +43,7 @@ pub(crate) fn tools() -> Vec<Tool> {
         )),
         ro(Tool::new("get_thread", "Read a whole conversation as plain text, oldest first, quoted history removed.", schema(json!({ "thread_id": { "type": "string" } }), &["thread_id"]))),
         ro(Tool::new("get_message", "Read one message (plain text body, headers, attachment list).", schema(json!({ "message_id": { "type": "string" } }), &["message_id"]))),
-        ro(Tool::new("get_attachment", "Read an attachment. Text attachments are returned as text; binary ones only if the user allowed it.", schema(json!({ "message_id": { "type": "string" }, "attachment_id": { "type": "string" } }), &["message_id", "attachment_id"]))),
+        ro(Tool::new("get_attachment", "Read an attachment, if the user allowed attachments for this agent. Text attachments are returned as text.", schema(json!({ "message_id": { "type": "string" }, "attachment_id": { "type": "string" } }), &["message_id", "attachment_id"]))),
         ro(Tool::new("list_calendars", "List calendars.", schema(json!({}), &[]))),
         ro(Tool::new("list_events", "List event occurrences in a time range (recurrences expanded). Dates are RFC 3339.", schema(json!({ "from": { "type": "string" }, "to": { "type": "string" }, "calendar_ids": ids_prop("Limit to these calendars.") }), &["from", "to"]))),
         ro(Tool::new("get_event", "Get one event (the series master for recurring events).", schema(json!({ "event_id": { "type": "string" } }), &["event_id"]))),
@@ -93,7 +93,7 @@ pub(crate) fn tools() -> Vec<Tool> {
         Tool::new("propose_invite_response", "Propose accepting, declining or tentatively accepting an invitation.", schema(json!({ "event_id": { "type": "string" }, "response": { "type": "string", "enum": ["accept", "decline", "tentative"] }, "source_thread_ids": src, "rationale": rationale_prop() }), &["event_id", "response", "rationale"])),
         ro(Tool::new("search_contacts", "Search the user's contacts by name, address, phone or organization (omit query to list them).", schema(json!({ "query": { "type": "string" }, "limit": { "type": "integer", "minimum": 1, "maximum": 500 } }), &[]))),
         ro(Tool::new("get_contact", "Get one contact with all its addresses.", schema(json!({ "contact_id": { "type": "string" } }), &["contact_id"]))),
-        Tool::new("propose_contact", "Propose a new contact (no contact_id) or a change to one. Omit fields you don't want to change; `emails` replaces the list, `add_emails` appends. Contacts are never deleted or merged by agents.", schema(json!({
+        Tool::new("propose_contact", "Propose a new contact (no contact_id) or a change to one. Omit fields you don't want to change; `emails` replaces the list, `add_emails` appends. Contacts are never deleted by agents; use propose_merge_contacts for duplicates.", schema(json!({
             "contact_id": { "type": "string" }, "name": { "type": "string" },
             "emails": addr_prop("All addresses (replaces the list)."), "add_emails": addr_prop("Addresses to add."),
             "phones": ids_prop("Phone numbers (replaces the list)."),
@@ -102,6 +102,10 @@ pub(crate) fn tools() -> Vec<Tool> {
             "notes": { "type": "string" },
             "source_thread_ids": src, "rationale": rationale_prop()
         }), &["rationale"])),
+        Tool::new("propose_merge_contacts", "Propose merging duplicate contacts for one person. The first contact is kept and the others are merged into it. A merge can't be undone from Satchel, so it always waits for the user's review.", schema(json!({
+            "contact_ids": ids_prop("Two or more contact ids; the first is kept."),
+            "source_thread_ids": src, "rationale": rationale_prop()
+        }), &["contact_ids", "rationale"])),
         ro(Tool::new("get_proposal_status", "Check whether the user approved, edited, or rejected a proposal (with their note).", schema(json!({ "proposal_id": { "type": "string" } }), &["proposal_id"]))),
         ro(Tool::new("list_my_proposals", "List proposals you made, optionally filtered by status.", schema(json!({ "status": { "type": "string", "enum": ["pending", "applied", "rejected", "stale", "failed"] } }), &[]))),
     ]

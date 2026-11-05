@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Create a self-signed code-signing certificate, "Satchel Mail Dev", in your
-# login keychain. scripts/run signs dev builds with it, so macOS sees every
-# rebuild as the same app and "Always Allow" on the keychain prompt sticks.
+# login keychain. Fallback only: scripts/dev-sign prefers an Apple Development
+# certificate. This one keeps the keychain's access list stable across
+# rebuilds, but it has no Team ID, so the item's partition list still names
+# each build's hash and macOS asks once per item after every rebuild.
 #
 #   scripts/dev-signing-cert          create it (asks for your login password once, to trust it)
 #   scripts/dev-signing-cert --remove delete it
@@ -53,4 +55,4 @@ security import "$tmp/cert.p12" -k "$KEYCHAIN" -P satchel -T /usr/bin/codesign >
 security add-trusted-cert -p codeSign -k "$KEYCHAIN" "$tmp/cert.pem"
 
 echo "Created \"$NAME\". scripts/run will sign dev builds with it."
-echo "Click Always Allow on the next keychain prompt; it will stick across rebuilds."
+echo "For prompts that stop after rebuilds, create an Apple Development certificate in Xcode instead."

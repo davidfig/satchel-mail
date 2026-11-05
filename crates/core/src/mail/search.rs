@@ -1,7 +1,8 @@
 //! Search query parsing. Operators (`from:`, `is:unread`, …) become structured
 //! conditions; the remaining free text becomes an SQLite FTS5 MATCH expression.
 //! Every term must hold (AND); a comma list inside one operator matches any of
-//! its values (OR); a leading `-` negates a term. Smart folders store queries
+//! its values (OR); a leading `-` leaves out threads with any message matching
+//! the term. Smart folders store queries
 //! in this language, so relative dates (`newer_than:7d`) keep them current.
 
 use chrono::{DateTime, Duration, Utc};
@@ -11,7 +12,8 @@ use crate::store::{MsgCond, MsgTerm};
 /// A parsed search box query.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ParsedQuery {
-    /// Conditions on a message of the thread; all must hold for the same message.
+    /// Plain conditions must all hold for the same message of the thread;
+    /// negated ones must hold for none of them.
     pub conds: Vec<MsgCond>,
     /// `account:` values (part of an account's address) and whether negated.
     pub accounts: Vec<(Vec<String>, bool)>,
@@ -95,6 +97,7 @@ fn operator(k: &str, v: &str, now: DateTime<Utc>) -> Option<MsgTerm> {
         "has" if is("attachment") => MsgTerm::HasAttachment,
         "is" if is("unread") => MsgTerm::Unread,
         "is" if is("flagged") || is("starred") => MsgTerm::Flagged,
+        "is" if is("favorite") || is("favourite") => MsgTerm::Favorite,
         "before" => MsgTerm::Before(parse_date(v)?),
         "after" | "since" => MsgTerm::After(parse_date(v)?),
         "older_than" => MsgTerm::Before(now - parse_age(v)?),
@@ -123,6 +126,7 @@ pub fn parse_query_at(q: &str, now: DateTime<Utc>) -> ParsedQuery {
             continue;
         };
         let k = k.to_ascii_lowercase();
+        let quoted = v.starts_with('"');
         let v = v.trim_matches('"');
         // `is:read` and `is:unflagged` are the negations of `is:unread` and `is:flagged`.
         let (v, negate) = match (k.as_str(), v.to_ascii_lowercase().as_str()) {
@@ -134,6 +138,9 @@ pub fn parse_query_at(q: &str, now: DateTime<Utc>) -> ParsedQuery {
             p.anywhere = !negate;
         } else if k == "account" {
             p.accounts.push((list(v), negate));
+        } else if k == "in" && quoted {
+            // One folder's name, which may have a comma in it.
+            p.conds.push(MsgCond { term: MsgTerm::InMailbox(vec![v.to_string()]), negate });
         } else if let Some(term) = operator(&k, v, now) {
             p.conds.push(MsgCond { term, negate });
         } else if negate {
@@ -211,6 +218,14 @@ mod tests {
     }
 
     #[test]
+    fn favorites() {
+        assert!(has(&parse_query("is:favorite"), false, MsgTerm::Favorite));
+        assert!(has(&parse_query("IS:Favourite budget"), false, MsgTerm::Favorite));
+        assert!(has(&parse_query("-is:favorite"), true, MsgTerm::Favorite));
+        assert!(!has(&parse_query("is:flagged"), false, MsgTerm::Favorite));
+    }
+
+    #[test]
     fn address_lists() {
         let p = parse_query("with:bob@x.test,Bob@Work.test from:carol");
         assert_eq!(p.conds[0].term, MsgTerm::With(vec!["bob@x.test".into(), "Bob@Work.test".into()]));
@@ -218,6 +233,13 @@ mod tests {
         assert_eq!(p.conds.len(), 2);
         assert!(is_full_address("bob@x.test"));
         assert!(!is_full_address("@x.test") && !is_full_address("bob@") && !is_full_address("bob"));
+    }
+
+    #[test]
+    fn a_quoted_folder_name_is_one_name() {
+        assert!(has(&parse_query("in:\"Clients, 2026\""), false, MsgTerm::InMailbox(vec!["Clients, 2026".into()])));
+        assert!(has(&parse_query("-in:\"Clients, 2026\""), true, MsgTerm::InMailbox(vec!["Clients, 2026".into()])));
+        assert!(has(&parse_query("in:inbox,archive"), false, MsgTerm::InMailbox(vec!["inbox".into(), "archive".into()])));
     }
 
     #[test]

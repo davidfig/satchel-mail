@@ -25,6 +25,19 @@ describe('smart folder query fields', () => {
     assert.equal(formatFields(parseFields(q)), q);
   });
 
+  test('names keep their spaces', () => {
+    const q = formatFields({ ...emptyFields(), from: 'Bob Smith, carol@x.test' });
+    assert.equal(q, 'from:"Bob Smith,carol@x.test"');
+    assert.equal(parseFields(q).from, 'Bob Smith, carol@x.test');
+    assert.equal(formatFields(parseFields('to:"Dana Ruiz" is:unread')), 'to:"Dana Ruiz" is:unread');
+  });
+
+  test('favorites have a field', () => {
+    assert.equal(parseFields('IS:Favourite').favorite, true);
+    assert.equal(formatFields({ ...emptyFields(), favorite: true }), 'is:favorite');
+    assert.deepEqual(parseFields('-is:favorite').other, ['-is:favorite']);
+  });
+
   test('ages the form has no choice for stay in the query', () => {
     const f = parseFields('newer_than:3d');
     assert.equal(f.age, '');

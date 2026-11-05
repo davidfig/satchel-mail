@@ -35,6 +35,23 @@ async fn people_you_write_to_become_contacts_and_user_edits_win() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_automatic_contact_gives_way_to_another_with_its_address() {
+    let (engine, _, _, _dir) = setup(false).await;
+    engine.contacts_pass().unwrap();
+    // A server card for Dave stored while the pass was running, so it
+    // didn't take over his automatic contact.
+    let fields = ContactFields { name: "Dave J.".into(), emails: vec![ContactEmail { email: "dave@x.test".into(), label: None }], ..Default::default() };
+    engine.store().insert_contact(&fields, ContactOrigin::Remote).unwrap();
+    let daves = |list: Vec<Contact>| list.into_iter().filter(|c| c.fields.emails.iter().any(|e| e.email == "dave@x.test")).collect::<Vec<_>>();
+    assert_eq!(daves(contacts(&engine, &Caller::User).await).len(), 2);
+    engine.contacts_pass().unwrap();
+    let left = daves(contacts(&engine, &Caller::User).await);
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(left[0].origin, ContactOrigin::Remote);
+    assert_eq!(engine.contacts_pass().unwrap(), 0, "and nothing comes back");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn merging_pools_addresses_and_composer_suggests_contacts() {
     let (engine, _, _, _dir) = setup(false).await;
     engine.contacts_pass().unwrap();
@@ -202,4 +219,72 @@ async fn agents_edit_and_add_contact_files_as_proposals() {
     assert!(bob_record.contains("status: error") && bob_record.contains("nothing to change"), "{bob_record}");
     engine.mirror_pass(false).unwrap();
     assert!(std::fs::read_to_string(&bob_file).unwrap().contains("- email: bob@x.test"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agents_propose_merging_duplicate_contacts_and_the_user_decides() {
+    let (engine, _, _, dir) = setup(false).await;
+    engine.contacts_pass().unwrap();
+    let dave = by_email(&contacts(&engine, &Caller::User).await, "dave@x.test").unwrap().id.clone().unwrap();
+    let mut other = Contact::default();
+    other.fields.name = "David Jones".into();
+    other.fields.emails = vec![ContactEmail { email: "dave@home.test".into(), label: None }];
+    let other = save(&engine, other, None).await.id.unwrap();
+    let pending = || async { serde_json::from_value::<Vec<Proposal>>(engine.handle(&Caller::User, Command::ListProposals { status: Some(ProposalStatus::Pending) }).await.unwrap()).unwrap() };
+
+    // Agents can't merge directly, and need contacts shared to propose it.
+    let v = engine.handle(&Caller::User, Command::CreateAgent { name: "A".into(), policy: AgentPolicy::default() }).await.unwrap();
+    let agent = Caller::Agent(engine.authenticate_agent(v["token"].as_str().unwrap()).unwrap());
+    let err = engine.handle(&agent, Command::MergeContacts { contact_ids: vec![dave.clone(), other.clone()] }).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    let v = engine.handle(&Caller::User, Command::CreateAgent { name: "B".into(), policy: AgentPolicy { allow_contacts: false, ..Default::default() } }).await.unwrap();
+    let blocked = Caller::Agent(engine.authenticate_agent(v["token"].as_str().unwrap()).unwrap());
+    let merge = ProposalAction::MergeContacts { contact_ids: vec![dave.clone(), other.clone()] };
+    let err = engine.handle(&blocked, Command::CreateProposal { action: merge.clone(), rationale: String::new(), source_thread_ids: vec![] }).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Forbidden);
+    let one = ProposalAction::MergeContacts { contact_ids: vec![dave.clone(), dave.clone()] };
+    assert!(engine.handle(&agent, Command::CreateProposal { action: one, rationale: String::new(), source_thread_ids: vec![] }).await.is_err());
+    assert!(pending().await.is_empty());
+
+    // A proposal file in the AI folder; it waits for the user with warnings.
+    engine.mirror_pass(true).unwrap();
+    std::fs::write(dir.path().join("mirror/proposals/inbox/m.md"), format!("---\naction: merge_contacts\ncontacts: [{dave}, {other}]\nwhy: same person\n---\n")).unwrap();
+    engine.ingest_dropped_proposals().await;
+    let ps = pending().await;
+    assert_eq!(ps.len(), 1, "{ps:?}");
+    let ProposalAction::MergeContacts { contact_ids } = &ps[0].action else { panic!("{:?}", ps[0].action) };
+    assert_eq!(contact_ids, &vec![dave.clone(), other.clone()]);
+    assert_eq!(ps[0].summary, "Merge 2 contacts into Dave Jones");
+    assert_eq!(ps[0].rationale, "same person");
+    assert!(ps[0].warnings.iter().any(|w| w.contains("dave@home.test")), "{:?}", ps[0].warnings);
+    assert!(ps[0].warnings.iter().any(|w| w.contains("different names")), "{:?}", ps[0].warnings);
+    let bad = format!("---\naction: merge_contacts\ncontacts: [{dave}, nobody]\n---\n");
+    std::fs::write(dir.path().join("mirror/proposals/inbox/bad.md"), bad).unwrap();
+    engine.ingest_dropped_proposals().await;
+    let record = std::fs::read_to_string(dir.path().join("mirror/proposals/processed/bad.md")).unwrap();
+    assert!(record.contains("status: error") && record.contains("unknown contact"), "{record}");
+
+    // Approving merges them into the first.
+    engine.handle(&Caller::User, Command::ApproveProposal { proposal_id: ps[0].id.clone(), edited: None }).await.unwrap();
+    let merged: Contact = serde_json::from_value(engine.handle(&Caller::User, Command::GetContact { contact_id: dave.clone() }).await.unwrap()).unwrap();
+    assert_eq!(merged.fields.name, "Dave Jones");
+    assert_eq!(merged.fields.emails.iter().map(|e| e.email.as_str()).collect::<Vec<_>>(), vec!["dave@x.test", "dave@home.test"]);
+    assert!(engine.handle(&Caller::User, Command::GetContact { contact_id: other.clone() }).await.is_err());
+
+    // A contact changed after the proposal makes it stale.
+    let mut third = Contact::default();
+    third.fields.emails = vec![ContactEmail { email: "dj@x.test".into(), label: None }];
+    let third = save(&engine, third, None).await;
+    let p: Proposal = serde_json::from_value(
+        engine
+            .handle(&agent, Command::CreateProposal { action: ProposalAction::MergeContacts { contact_ids: vec![dave.clone(), third.id.clone().unwrap()] }, rationale: String::new(), source_thread_ids: vec![] })
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let mut t = third.clone();
+    t.fields.name = "DJ".into();
+    save(&engine, t, None).await;
+    let err = engine.handle(&Caller::User, Command::ApproveProposal { proposal_id: p.id, edited: None }).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Conflict);
 }

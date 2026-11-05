@@ -70,10 +70,10 @@ pub(crate) fn contact_file(c: &Contact, accounts: &HashMap<String, String>) -> S
     if let Some(d) = c.last_contacted {
         s.push_str(&format!("last_contacted: {}\n", d.to_rfc3339()));
     }
-    s.push_str(&format!("version: {}\n---\n\n# {}\n\n", c.version, display_name(f)));
+    s.push_str(&format!("version: {}\n---\n\n# {}\n\n", c.version, one_line(&display_name(f))));
     let labeled = |v: &str, l: &Option<String>| match l {
-        Some(l) => format!("{v} ({l})"),
-        None => v.to_string(),
+        Some(l) => format!("{} ({})", one_line(v), one_line(l)),
+        None => one_line(v),
     };
     for e in &f.emails {
         s.push_str(&format!("- email: {}\n", labeled(&e.email, &e.label)));
@@ -83,15 +83,15 @@ pub(crate) fn contact_file(c: &Contact, accounts: &HashMap<String, String>) -> S
     }
     let work = [f.title.as_str(), f.organization.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(", ");
     if !work.is_empty() {
-        s.push_str(&format!("- work: {work}\n"));
+        s.push_str(&format!("- work: {}\n", one_line(&work)));
     }
     if let Some(b) = &f.birthday {
-        s.push_str(&format!("- birthday: {b}\n"));
+        s.push_str(&format!("- birthday: {}\n", one_line(b)));
     }
     match c.sources.len() {
         0 if c.origin == ContactOrigin::Auto => s.push_str("- saved in: only in Satchel, added because the user wrote to them\n"),
         0 => s.push_str("- saved in: only in Satchel, not in any account's address book\n"),
-        _ => s.push_str(&format!("- saved in: {}\n", c.sources.iter().map(|x| source_label(x, accounts)).collect::<Vec<_>>().join("; "))),
+        _ => s.push_str(&format!("- saved in: {}\n", one_line(&c.sources.iter().map(|x| source_label(x, accounts)).collect::<Vec<_>>().join("; ")))),
     }
     if let Some(d) = c.last_contacted {
         s.push_str(&format!("- messages: {}, last {}\n", c.message_count, d.format("%Y-%m-%d")));
@@ -112,9 +112,13 @@ impl Mirror<'_> {
         let people = base.join("people");
         let accounts: HashMap<String, String> = self.store.list_accounts()?.into_iter().map(|a| (a.id, a.email)).collect();
         let sources = self.store.contact_sources()?;
-        let stats = self.store.address_stats()?;
+        // Message counts under the date limit count only the messages inside it.
+        let stats = match self.cutoff() {
+            Some(c) => self.store.address_stats_since(c)?,
+            None => self.store.address_stats()?,
+        };
         let mut md = String::from(
-            "# Contacts\n\nPeople in the user's address book, including ones Satchel added because the user wrote to them. Each has a file in `people/` with every field and the accounts it is saved in.\n\n| name | emails | phones | organization | address books | messages | contact_id |\n|---|---|---|---|---|---|---|\n",
+            "# Contacts\n\nPeople saved in the user's address books, and people Satchel added because the user has exchanged mail with them recently. Each has a file in `people/` with every field and the address books it is saved in; people Satchel added who haven't written lately are only there.\n\n| name | emails | phones | organization | messages | contact_id |\n|---|---|---|---|---|---|\n",
         );
         let mut listed = HashSet::new();
         let mut written = self.contact_files.lock().unwrap();
@@ -141,47 +145,54 @@ impl Mirror<'_> {
             let pending = on_disk.as_deref().is_some_and(|t| !matches!(crate::ai_folder::import::read_person(self.store, t, written.get(&file).map(String::as_str)), Ok(None)));
             if !pending {
                 let text = contact_file(&contact, &accounts);
-                write_if_changed(&self.root(), &path, text.as_bytes())?;
-                written.insert(file.clone(), text);
+                match write_if_changed(&self.root(), &path, text.as_bytes()) {
+                    Ok(()) => {
+                        written.insert(file.clone(), text);
+                    }
+                    Err(e) => tracing::warn!("AI folder: {file}: {e:#}"),
+                }
+            }
+            listed.insert(file.clone());
+            // Most automatic contacts are people from years ago; listing them
+            // all made this file too big to read whole.
+            if contact.origin == ContactOrigin::Auto && contact.message_count == 0 {
+                continue;
             }
             let f = &contact.fields;
-            let cell = |s: &str| s.replace('|', "/").replace('\n', " ");
-            let books = contact.sources.iter().map(|s| source_label(s, &accounts)).collect::<Vec<_>>().join(", ");
+            let cell = |s: &str| one_line(s).replace('|', "/");
             md.push_str(&format!(
-                "| [{}](people/{}) | {} | {} | {} | {} | {} | `{}` |\n",
+                "| [{}](people/{}) | {} | {} | {} | {} | `{}` |\n",
                 cell(&display_name(f)).replace(['[', ']'], ""),
                 file,
                 cell(&f.emails.iter().map(|e| e.email.as_str()).collect::<Vec<_>>().join(", ")),
                 cell(&f.phones.iter().map(|p| p.number.as_str()).collect::<Vec<_>>().join(", ")),
                 cell(&[f.title.as_str(), f.organization.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(", ")),
-                if books.is_empty() { "only in Satchel".into() } else { cell(&books) },
                 contact.message_count,
                 contact.id.as_deref().unwrap_or_default()
             ));
-            listed.insert(file);
         }
         write_if_changed(&self.root(), &base.join("CONTACTS.md"), md.as_bytes())?;
         // Files of deleted contacts and old names of renamed ones go; files an
         // agent added or edited stay until they're read as proposals.
-        if let Ok(dir) = std::fs::read_dir(&people) {
-            for entry in dir.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
+        if let Ok(files) = list_files(&self.root(), &people) {
+            for path in files {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 if listed.contains(&name) {
                     continue;
                 }
-                let text = read_regular(&self.root(), &entry.path()).unwrap_or_default();
+                let Ok(text) = read_regular(&self.root(), &path) else { continue };
                 let ours = match written.get(&name) {
                     Some(last) => *last == text,
                     None => crate::ai_folder::import::parse(&text).is_ok_and(|(fm, _)| fm.str("contact_id").is_some()),
                 };
                 if ours {
-                    let _ = std::fs::remove_file(entry.path());
+                    let _ = remove_file(&self.root(), &path);
                     written.remove(&name);
                 }
             }
         }
         // Replaced by the per-person files.
-        let _ = std::fs::remove_file(base.join("contacts.json"));
+        let _ = remove_file(&self.root(), &base.join("contacts.json"));
         Ok(())
     }
 }

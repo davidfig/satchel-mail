@@ -9,11 +9,13 @@
 pub mod export;
 pub mod import;
 mod readme;
+mod relocate;
 mod safe_fs;
 
 pub use export::Mirror;
 pub(crate) use export::contact_file;
 pub use readme::README;
+pub(crate) use relocate::relocate;
 pub(crate) use safe_fs::*;
 
 use std::collections::{HashMap, HashSet};
@@ -31,6 +33,16 @@ pub fn default_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("Satchel"))
 }
 
+/// Where the AI folder is: the user's choice (`~` means their home folder),
+/// or `~/Satchel`.
 pub fn root(settings: &MirrorSettings) -> PathBuf {
-    settings.root.as_ref().map(PathBuf::from).unwrap_or_else(default_root)
+    let Some(r) = settings.root.as_deref().map(str::trim).filter(|r| !r.is_empty()) else { return default_root() };
+    let home = || directories::UserDirs::new().map(|u| u.home_dir().to_path_buf());
+    match r.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => match home() {
+            Some(h) => h.join(rest.trim_start_matches('/')),
+            None => PathBuf::from(r),
+        },
+        _ => PathBuf::from(r),
+    }
 }

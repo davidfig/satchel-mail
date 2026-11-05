@@ -172,7 +172,7 @@ impl ContactsProvider for CardDavProvider {
                     return Err(anyhow::Error::new(ApiError::new(ErrorCode::Conflict, "the contact changed on the server")));
                 }
                 if !st.is_success() {
-                    return Err(crate::net::http_error(st, &resp.text().await.unwrap_or_default(), "CardDAV PUT"));
+                    return Err(crate::net::http_error(st, &crate::net::error_text(resp).await, "CardDAV PUT"));
                 }
                 out.card_etag = resp.headers().get("etag").and_then(|v| v.to_str().ok()).map(String::from);
                 out.card_remote_id = Some(href);
@@ -188,7 +188,7 @@ impl ContactsProvider for CardDavProvider {
                     return Err(anyhow::Error::new(ApiError::new(ErrorCode::Conflict, "the contact changed on the server")));
                 }
                 if !(st.is_success() || st.as_u16() == 404) {
-                    return Err(crate::net::http_error(st, &resp.text().await.unwrap_or_default(), "CardDAV DELETE"));
+                    return Err(crate::net::http_error(st, &crate::net::error_text(resp).await, "CardDAV DELETE"));
                 }
             }
         }
@@ -202,10 +202,10 @@ impl ContactsProvider for CardDavProvider {
             return Ok(None);
         }
         if !st.is_success() {
-            return Err(crate::net::http_error(st, &resp.text().await.unwrap_or_default(), "CardDAV GET"));
+            return Err(crate::net::http_error(st, &crate::net::error_text(resp).await, "CardDAV GET"));
         }
         let etag = resp.headers().get("etag").and_then(|v| v.to_str().ok()).map(String::from);
-        Ok(Some((etag, resp.text().await?)))
+        Ok(Some((etag, crate::net::text_capped(resp, crate::net::DATA_LIMIT).await?)))
     }
 }
 

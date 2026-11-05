@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Mail: mailboxes, messages, threads, drafts, warnings and sender rules.
 
 use super::*;
@@ -87,6 +88,9 @@ pub struct ThreadSummary {
     pub snippet: String,
     pub mailbox_ids: Vec<Id>,
     pub latest_message_id: Id,
+    /// A favorite sender wrote one of its messages (0053).
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 /// Everything exchanged with one person, across all of their addresses.
@@ -166,6 +170,11 @@ pub struct MessageDetail {
     /// How to unsubscribe, from the List-Unsubscribe header.
     #[serde(default)]
     pub unsubscribe: Option<Unsubscribe>,
+    /// List or machine-sent mail nobody expects a reply to: its headers say
+    /// so, or replies would go to a no-reply or tokenized machine address —
+    /// unless the body has a helpdesk "reply above this line" marker.
+    #[serde(default)]
+    pub bulk: bool,
     /// The user's standing verdict on the sender, if any.
     #[serde(default)]
     pub sender_verdict: Option<SenderVerdict>,
@@ -198,9 +207,25 @@ pub struct MessageWarning {
 pub struct Unsubscribe {
     /// https URL to open, or to POST to when `one_click`.
     pub url: Option<String>,
+    /// Only set when it names exactly one valid address; `email` says what it sends.
     pub mailto: Option<String>,
     /// The sender supports RFC 8058 one-click unsubscribe at `url`.
     pub one_click: bool,
+    /// The email `mailto` would send, so the user sees it before confirming.
+    #[serde(default)]
+    pub email: Option<UnsubscribeEmail>,
+}
+
+/// An unsubscribe request sent by email, exactly as it would be sent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnsubscribeEmail {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+    /// `to` is on a different domain than the sender's From. List services
+    /// do this legitimately, but it is worth showing.
+    #[serde(default)]
+    pub other_domain: bool,
 }
 
 /// A standing decision about every message from one address.
@@ -255,10 +280,11 @@ pub struct ThreadQuery {
     #[serde(default)]
     pub smart_folder_id: Option<Id>,
     /// Search query (supports from:, to:, with:, subject:, has:attachment,
-    /// is:unread/read, is:flagged/unflagged, before:, after:, newer_than:7d,
-    /// older_than:1y, in:, in:anywhere, account:). from:, to:, with:, in: and
-    /// account: take a comma-separated list; a full address matches exactly.
-    /// Every term must hold; a leading `-` negates one.
+    /// is:unread/read, is:flagged/unflagged, is:favorite, before:, after:,
+    /// newer_than:7d, older_than:1y, in:, in:anywhere, account:). from:, to:,
+    /// with:, in: and account: take a comma-separated list; a full address
+    /// matches exactly. Every term must hold; a leading `-` leaves out threads
+    /// with any message matching it.
     pub search: Option<String>,
     pub limit: Option<u32>,
     /// Keyset paging: threads older than this `last_date`...

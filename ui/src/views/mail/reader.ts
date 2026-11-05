@@ -9,30 +9,59 @@ import { store } from '../../state';
 import type { Address, Mailbox, Thread, ThreadSummary } from '../../types';
 import { editDraft, openComposer } from './composer';
 import { Conversation, mineFor } from './conversation';
+import { frameSized } from './message-body';
 import { ReplyBox } from './reply-box';
-import { BLOCK_TIP, isJunk } from './actions';
+import { BLOCK_TIP, copyThread, isJunk } from './actions';
 import type { MailView } from './index';
 
 export function renderEmptyReader(view: MailView) {
+  ++view.readerSeq;
+  view.readerThread = null;
+  view.readerLoad = Promise.resolve();
   view.openThread = null;
   view.openSummary = null;
   view.replyBox = null;
   replace(view.reader, h('div.reader-empty', icon('mail', 40), h('p', 'Select a conversation'), h('p.muted.small', 'j/k to move · enter to open · c to compose · / to search')));
 }
 
-export async function showThread(view: MailView, threadId: string, markRead = true) {
+/** Show a conversation in the reader. Clicking the one already shown does
+ *  nothing; `reload` re-fetches it anyway (new messages arrived). */
+export function showThread(view: MailView, threadId: string, markRead = true, reload = false): Promise<void> {
   store.set({ selectedThread: threadId });
   view.renderRows();
+  if (view.readerThread !== threadId || reload) {
+    view.readerThread = threadId;
+    view.readerLoad = load(view, threadId, markRead);
+  }
+  return view.readerLoad;
+}
+
+async function load(view: MailView, threadId: string, markRead: boolean) {
+  const seq = ++view.readerSeq;
   const gen = view.generation;
-  replace(view.reader, h('div.reader-loading', 'Loading…'));
+  // The old conversation stays up until the new one is ready, so switching
+  // doesn't flash an empty pane; only a slow fetch shows "Loading…". Until
+  // then its buttons and keys act on the new selection (`targetThreads`),
+  // so the reply box and thread they'd use go now.
+  view.openThread = null;
+  view.replyBox = null;
+  const slow = window.setTimeout(() => {
+    if (seq === view.readerSeq) replace(view.reader, h('div.reader-loading', 'Loading…'));
+  }, LOADING_DELAY_MS);
   try {
     const thread = await api.getThread(threadId);
-    if (gen !== view.generation || store.state.selectedThread !== threadId) return;
+    clearTimeout(slow);
+    if (seq !== view.readerSeq) return;
+    if (gen !== view.generation || store.state.selectedThread !== threadId) {
+      view.readerThread = null;
+      return;
+    }
     view.openThread = thread;
     // Opened from outside the loaded rows (a notification, Review, or
     // scrolled away): build the summary so the header's actions still work.
     view.openSummary = view.list.find(threadId) ?? summaryOf(thread);
-    view.renderThread(thread);
+    await renderThread(view, thread, seq);
+    if (seq !== view.readerSeq) return;
     // Opening a draft from Drafts means finishing it.
     const src = store.state.source;
     const draft = [...thread.messages].reverse().find((m) => m.flags.draft);
@@ -47,10 +76,17 @@ export async function showThread(view: MailView, threadId: string, markRead = tr
       }
     }
   } catch (e) {
+    clearTimeout(slow);
+    if (seq !== view.readerSeq) return;
     errorToast(e);
     view.renderEmptyReader();
   }
 }
+
+/** How long a fetch may take before the reader says it's loading. */
+const LOADING_DELAY_MS = 250;
+/** The longest we keep the old conversation up waiting for message frames. */
+const FRAME_WAIT_MS = 400;
 
 function summaryOf(thread: Thread): ThreadSummary {
   const ms = thread.messages;
@@ -70,27 +106,35 @@ function summaryOf(thread: Thread): ThreadSummary {
     snippet: last?.snippet ?? '',
     mailbox_ids: [...new Set(ms.flatMap((m) => m.mailbox_ids))],
     latest_message_id: last?.id ?? '',
+    favorite: ms.some((m) => !!m.from && store.state.favorites.has(m.from.email.toLowerCase())),
   };
 }
 
-export function renderThread(view: MailView, thread: Thread) {
+/** Builds the conversation as a page and swaps it in for what the reader
+ *  shows (see `present`); resolves once it's on screen, or abandoned. */
+async function renderThread(view: MailView, thread: Thread, seq: number) {
   const labels = [...new Set(thread.messages.flatMap((m) => m.mailbox_ids))].map((id) => store.mailbox(id)).filter((m): m is Mailbox => !!m && m.role !== 'inbox');
   const mine = mineFor(thread);
   const people = new Map<string, Address>();
-  for (const m of thread.messages) for (const a of [m.from, ...m.to, ...m.cc]) if (a && !mine(a)) people.set(a.email.toLowerCase(), a);
+  const myAddrs = new Set<string>();
+  for (const m of thread.messages) for (const a of [m.from, ...m.to, ...m.cc]) {
+    if (!a) continue;
+    if (mine(a)) myAddrs.add(a.email.toLowerCase());
+    else people.set(a.email.toLowerCase(), a);
+  }
+  // Name which of your addresses this thread reached, for people with several.
+  const ownEmail = store.state.accounts.find((a) => a.id === thread.account_id)?.email.toLowerCase();
+  const you = myAddrs.size ? [...myAddrs].join(', ') : ownEmail;
   const spam = isJunk(thread.messages.flatMap((m) => m.mailbox_ids));
-  const convo = new Conversation(thread, (mode, id) => void view.reply(mode, id), { spam });
-  view.replyBox = new ReplyBox(thread);
-  const unsub = [...thread.messages].reverse().find((m) => m.unsubscribe);
+  const convo = new Conversation(thread, (mode, id) => void view.reply(mode, id), { spam, onUnsubscribe: (m) => void view.unsubscribe(m, spam) });
   const blocked = thread.messages.find((m) => m.sender_verdict === 'spam' && m.from);
-  replace(
-    view.reader,
+  const replyBox = new ReplyBox(thread);
+  const page = h('div.reader-page',
     h('header.reader-head',
       h('div.reader-title',
         h('h2.reader-subject', thread.subject || '(no subject)'),
-        h('div.muted.small.reader-people', [...people.values()].map((a) => [personLink(a, shortName(a)), ', ']), 'you')),
+        h('div.muted.small.reader-people', [...people.values()].map((a) => [personLink(a, shortName(a)), ', ']), you ? `you (${you})` : 'you')),
       h('div.reader-actions',
-        unsub && h('button.unsubscribe', { title: 'Ask the sender to stop sending you this mail', on: { click: () => void view.unsubscribe(unsub, spam) } }, 'Unsubscribe'),
         spam
           ? [
               h('button.icon-btn', { title: 'Not spam (!)', 'aria-label': 'Not spam', on: { click: () => void view.act('not_spam') } }, icon('inbox')),
@@ -100,6 +144,7 @@ export function renderThread(view: MailView, thread: Thread) {
         h('button.icon-btn', { title: 'Archive (e)', 'aria-label': 'Archive', on: { click: () => void view.act('archive') } }, icon('archive')),
         h('button.icon-btn', { title: 'Delete (#)', 'aria-label': 'Delete', on: { click: () => void view.act('trash') } }, icon('trash')),
         h('button.icon-btn', { title: 'Mark unread (u)', 'aria-label': 'Mark unread', on: { click: () => void view.act('unread') } }, icon('mail')),
+        h('button.icon-btn', { title: 'Copy conversation for AI (y)', 'aria-label': 'Copy for AI', on: { click: () => copyThread(thread) } }, icon('copy')),
         h('button.icon-btn', { title: 'Move to… (v)', 'aria-label': 'Move', on: { click: (e: MouseEvent) => view.moveMenu(e.currentTarget as HTMLElement) } }, icon('folder')),
         h('button.icon-btn', { title: 'More', 'aria-label': 'More actions', on: { click: (e: MouseEvent) => view.moreMenu(e.currentTarget as HTMLElement, thread) } }, icon('more'))),
       labels.length > 0 && h('div.labels', labels.map((m) => h('span.label-chip', m.name)))),
@@ -113,9 +158,38 @@ export function renderThread(view: MailView, thread: Thread) {
           h('button', { title: 'Move to Inbox and keep this sender out of Spam (!)', on: { click: () => void view.act('not_spam') } }, 'Not spam'),
           h('button', { title: BLOCK_TIP, on: { click: () => void view.act('block') } }, 'Spam'))),
     convo.root,
-    view.replyBox.root,
+    replyBox.root,
   );
+  if (!(await present(view, page, seq))) return;
+  view.replyBox = replyBox;
   convo.settle(view.reader);
+}
+
+/** Puts `page` in the reader in one step. HTML messages render in iframes,
+ *  which load blank and then grow to fit, so the page is laid out hidden
+ *  behind the current one until they're sized (or `FRAME_WAIT_MS` passes),
+ *  then revealed in place: moving an iframe would reload it. False if a newer
+ *  conversation was asked for meanwhile. */
+async function present(view: MailView, page: HTMLElement, seq: number): Promise<boolean> {
+  const old = [...view.reader.children];
+  const frames = [...page.querySelectorAll('iframe')];
+  if (!old.length || !frames.length) {
+    replace(view.reader, page);
+    return true;
+  }
+  page.classList.add('staging');
+  view.reader.append(page);
+  await Promise.race([
+    Promise.all(frames.map(frameSized)),
+    new Promise((r) => setTimeout(r, FRAME_WAIT_MS)),
+  ]);
+  if (seq !== view.readerSeq) {
+    page.remove();
+    return false;
+  }
+  for (const el of old) el.remove();
+  page.classList.remove('staging');
+  return true;
 }
 
 export async function reply(view: MailView, mode: 'reply' | 'reply_all' | 'forward', messageId?: string) {

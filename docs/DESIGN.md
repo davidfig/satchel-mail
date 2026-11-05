@@ -1,4 +1,4 @@
-# Satchel Mail — Design & Build Plan
+# satchel.email — Design & Build Plan
 
 > Draft v0.2 — 2026-10-23. Name cleared in a basic USPTO search (no SATCHEL MAIL mark; no live SATCHEL software marks); get a formal clearance search before filing.
 
@@ -14,7 +14,7 @@ A desktop email + calendar client that:
 Secondary: a **paid hosted version** that runs the same core in the cloud (always-on sync, AI access from anywhere). Not built in v1, but every v1 decision must keep it cheap to add (§9).
 
 ### Non-goals (v1)
-- A built-in AI/LLM. Satchel Mail is the *substrate*; the AI is external. (A bundled local-model option can come later.)
+- A built-in AI/LLM. satchel.email is the *substrate*; the AI is external. (A bundled local-model option can come later.)
 - Contacts sync (CardDAV/People API) beyond what's needed for address autocomplete.
 - Mobile apps.
 - Auto-send rules for AI. Approval is mandatory in v1; policy-based auto-approve is a later feature.
@@ -138,7 +138,7 @@ AI action ──► Proposal{ops[], rationale, agent, source refs} (pending_revi
 
 - Ops are durable (survive restart, work offline) and idempotent per provider.
 - **Drafts are special**: an AI-proposed draft is *not* written to the server Drafts folder until approved — it lives only in the proposal. Option (setting): "sync AI drafts to server Drafts folder" so you can review from your phone; still never sent.
-- **`Send` can never originate from an AI scope.** Only a human action in the UI produces a `Send` op. Approving an AI draft opens it in the composer pre-filled; the human hits send.
+- **`Send` can never originate from an AI scope.** Only a human action in the UI produces a `Send` op. Review offers Send (the human presses it, with the usual undo window) or Save as draft, which opens it in the composer (0044).
 - Calendar proposals render as a diff ("Move *Standup* Tue 9:00 → 10:00; invites 4 attendees") and, optionally, as ghost events on the calendar view.
 - Conflict handling: if the target changed since the proposal was made (etag/modseq mismatch), the proposal is marked **stale** and must be re-reviewed.
 - Everything is written to an **audit log**: who/what proposed, what was approved, what was sent.
@@ -218,7 +218,7 @@ Initial sync strategy: headers + snippets for the last N months first (fast inbo
 - Keyboard-first (Gmail/Superhuman-style shortcuts), command palette.
 
 Views:
-1. **Mail** — accounts/mailboxes sidebar, unified inbox, thread list, reading pane, composer (rich text + plain), search with operators (`from: to: has:attachment before:`), smart folders (saved searches under Mail, 0039).
+1. **Mail** — accounts/mailboxes sidebar, unified inbox, thread list, reading pane, composer (rich text + plain), search with operators (`from: to: has:attachment before:`), smart folders (saved searches under Mail, 0065).
 2. **Calendar** — day/week/month/agenda, event editor, invite responses, free-time finder.
 3. **Review** — the proposal queue: grouped by agent and thread, inline diffs, edit-before-approve, bulk approve for low-risk ops (labels/archive), reject with note (fed back to the agent via `get_proposal_status`).
 4. **Settings** — accounts, AI agents & policies, mirror scope, privacy.
@@ -300,4 +300,4 @@ Each decision, including these, has its own record in [docs/decisions/](decision
 - **Proposal de-duplication** and **email-invite RSVP** (`RespondToEmailInvite`) were added.
 - **Large lists:** the thread list is a windowed cache addressed by offset, sized by `CountThreads`, holding at most 30 pages of 100; the scrollbar is compressed above 8M px so million-thread folders scroll. Refreshes re-read only the visible window and keep the top visible thread anchored. Agents page with keyset (`before` + `before_thread_id`).
 - **Search:** SQLite FTS5 instead of a tantivy index, so text search, filters, counts and paging are one query with no result cap; headers are searchable before bodies download.
-- **Updater:** behind the `updater` feature; `scripts/release.sh` enables it when an update URL and signing key are provided.
+- **Updater:** behind the `updater` feature; `scripts/release.sh` enables it when an update URL and signing key are provided. Release builds read `latest.json` from the newest GitHub release and offer the update with a toast (0063).
