@@ -1,5 +1,5 @@
 //! Background workers: the search indexer, the AI folder writer, deleting
-//! unused stored mail and calendar alerts.
+//! unused stored mail, calendar alerts and repairing old snippets.
 
 use super::*;
 use std::time::Duration;
@@ -160,6 +160,49 @@ impl Engine {
                 _ = wake.notified() => {},
             }
         }
+    }
+
+    /// Once per database, rebuilds snippets stored before they decoded HTML
+    /// character references. Tried again next start if it fails.
+    pub(crate) async fn snippet_repair_worker(this: std::sync::Weak<Self>) {
+        const KEY: &str = "snippet_repair";
+        const DONE: &str = "entities-v1";
+        let Some(e) = this.upgrade() else { return };
+        let e2 = e.clone();
+        let r = tokio::task::spawn_blocking(move || {
+            crate::store::background(|| {
+                if e2.store.get_setting::<String>(KEY)?.as_deref() == Some(DONE) {
+                    return Ok(0);
+                }
+                let n = e2.repair_snippets()?;
+                e2.store.set_setting(KEY, &DONE)?;
+                Ok::<_, anyhow::Error>(n)
+            })
+        })
+        .await;
+        match r {
+            Ok(Ok(n)) if n > 0 => {
+                debug!("snippets: repaired {n}");
+                e.emit(CoreEvent::DataChanged);
+            }
+            Ok(Err(err)) => warn!("snippets: {err:#}"),
+            _ => {}
+        }
+    }
+
+    /// Rebuild, from the stored copy, each snippet that may hold a literal
+    /// character reference. Returns how many changed.
+    pub fn repair_snippets(&self) -> Result<usize> {
+        let mut n = 0;
+        for (id, old, hash) in self.store.snippets_with_entities()? {
+            // A copy that's missing or unreadable keeps the snippet it has.
+            let Some(parsed) = self.blobs.get(&hash).ok().flatten().as_deref().and_then(satchel_mime::parse) else { continue };
+            if parsed.snippet != old {
+                self.store.set_snippet(&id, &parsed.snippet)?;
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     /// Delete the stored copies of deleted messages that no message uses

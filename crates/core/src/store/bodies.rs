@@ -34,6 +34,29 @@ impl Store {
         Ok(())
     }
 
+    /// Messages with a stored copy whose snippet may hold a literal HTML
+    /// character reference, as (id, snippet, blob hash).
+    pub fn snippets_with_entities(&self) -> Result<Vec<(String, String, String)>> {
+        self.r(|c| {
+            let rows = c
+                .prepare("SELECT id, snippet, blob_hash FROM messages WHERE blob_hash IS NOT NULL AND snippet LIKE '%&%;%'")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    pub fn set_snippet(&self, message_id: &str, snippet: &str) -> Result<()> {
+        self.w(|c| {
+            c.execute("UPDATE messages SET snippet=?, version=version+1, mirrored=0 WHERE id=?", params![snippet, message_id])?;
+            Ok(())
+        })?;
+        if let Some(t) = self.thread_of(message_id)? {
+            self.recompute_thread(&t)?;
+        }
+        Ok(())
+    }
+
     /// How many messages have no stored copy (dated from `since`, if given).
     pub fn count_without_body(&self, account_id: &str, since: Option<DateTime<Utc>>) -> Result<u64> {
         self.r(|c| {

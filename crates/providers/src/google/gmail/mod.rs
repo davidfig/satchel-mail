@@ -93,7 +93,7 @@ fn record_from_metadata(m: &Value) -> MessageRecord {
         bcc: p.bcc,
         reply_to: p.reply_to,
         date: internal.or(p.date).unwrap_or_else(Utc::now),
-        snippet: html_unescape(m["snippet"].as_str().unwrap_or_default()),
+        snippet: satchel_mime::preview_text(m["snippet"].as_str().unwrap_or_default()),
         flags: flags_from_labels(&labels),
         attachments: vec![],
         blob_hash: None,
@@ -110,10 +110,6 @@ fn memberships(labels: &[String], known: &HashSet<String>) -> Vec<(String, Optio
         out.push(("ALL".into(), None));
     }
     out
-}
-
-fn html_unescape(s: &str) -> String {
-    s.replace("&#39;", "'").replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 }
 
 pub struct GmailProvider {

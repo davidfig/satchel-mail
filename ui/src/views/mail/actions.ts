@@ -130,14 +130,16 @@ export async function act(view: MailView, kind: Action, threads = view.targetThr
   void view.refresh();
 }
 
-/** Take moved conversations off screen before the server answers: close the
- *  reader if it shows one, and drop them from the list with the cursor staying
- *  at the same position, which now holds the next thread. */
+/** Take moved conversations off screen before the server answers: drop them
+ *  from the list with the cursor staying at the same position, which now holds
+ *  the next thread, and if the reader showed one of them, open that next thread
+ *  in its place (or show the empty reader when the list is empty). */
 function removeNow(view: MailView, threads: ThreadSummary[]) {
   const removed = new Set(threads.map((t) => t.thread_id));
   const pos = view.cursor >= 0 ? view.cursor : view.list.indexOf(threads[0].thread_id);
   const sel = store.state.selectedThread;
-  if ((sel && removed.has(sel)) || (view.openThread && removed.has(view.openThread.thread_id))) {
+  const wasOpen = (sel && removed.has(sel)) || (view.openThread && removed.has(view.openThread.thread_id));
+  if (wasOpen) {
     store.set({ selectedThread: null });
     view.renderEmptyReader();
   }
@@ -146,6 +148,14 @@ function removeNow(view: MailView, threads: ThreadSummary[]) {
   view.list.remove(removed);
   view.cursor = pos < 0 ? -1 : Math.min(pos, view.list.total - 1);
   view.renderRows();
+  if (wasOpen && view.cursor >= 0) void openAtCursor(view);
+}
+
+/** Open the thread under the cursor, unless the cursor moved while its row loaded. */
+async function openAtCursor(view: MailView) {
+  const cursor = view.cursor;
+  const t = await view.list.get(cursor);
+  if (t && cursor === view.cursor && !store.state.selectedThread) void view.showThread(t.thread_id);
 }
 
 export async function flagThread(view: MailView, t: ThreadSummary) {
