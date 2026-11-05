@@ -78,10 +78,15 @@ impl Engine {
             limit: q.limit.unwrap_or(50).min(500),
             ..Default::default()
         };
+        let mut listed = q.role;
         if let Some(mb) = &q.mailbox_id {
             let m = self.store.get_mailbox(mb)?.ok_or_else(|| not_found("mailbox"))?;
             self.check_account(caller, &m.account_id, "mailbox")?;
+            listed = Some(m.role);
         }
+        // Gmail keeps the other labels of a message in Trash or Spam, and hides it
+        // under them. Mail in a folder is in nothing else, so the rest skip the check.
+        f.exclude_trash_junk = listed.is_some_and(|r| matches!(r, MailboxRole::Custom | MailboxRole::Sent | MailboxRole::Flagged | MailboxRole::Important | MailboxRole::All));
         let mut accounts = q.account_id.clone().map(|a| vec![a]);
         if let Some(allowed) = self.allowed_accounts(caller) {
             accounts = Some(match accounts {

@@ -48,6 +48,12 @@ pub struct Fake {
     pub raw_fetches: std::sync::atomic::AtomicUsize,
     /// Queries sent to the place service.
     pub place_queries: Mutex<Vec<String>>,
+    /// Labels each label change added and removed on the server.
+    pub labels: Mutex<Vec<(Vec<String>, Vec<String>)>>,
+    /// Keep ops from reaching the server, as if the connection were slow.
+    pub hold_ops: std::sync::atomic::AtomicBool,
+    /// The context of the latest sync, for writing as a sync would.
+    pub ctx: Mutex<Option<SyncCtx>>,
 }
 
 pub fn raw(id: &str, from: &str, subject: &str, irt: Option<&str>) -> Vec<u8> {
@@ -67,6 +73,7 @@ impl MailProvider for Fake {
         Ok(())
     }
     async fn sync(&self, ctx: &SyncCtx) -> Result<()> {
+        *self.ctx.lock().unwrap() = Some(ctx.clone());
         ctx.set_mailboxes(&[
             RemoteMailbox { remote_id: "INBOX".into(), name: "Inbox".into(), path: "INBOX".into(), role: MailboxRole::Inbox, is_label: false },
             RemoteMailbox { remote_id: "Archive".into(), name: "Archive".into(), path: "Archive".into(), role: MailboxRole::Archive, is_label: false },
@@ -101,6 +108,12 @@ impl MailProvider for Fake {
         self.originals.lock().unwrap().get(&msg.remote_id).cloned().ok_or_else(|| anyhow::anyhow!("not on the server"))
     }
     async fn apply(&self, _ctx: &SyncCtx, op: &ResolvedOp) -> Result<ApplyOutcome> {
+        while self.hold_ops.load(std::sync::atomic::Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        if let ResolvedOp::Labels { add, remove, .. } = op {
+            self.labels.lock().unwrap().push((add.clone(), remove.clone()));
+        }
         let name = match op {
             ResolvedOp::SetFlags { .. } => "flags",
             ResolvedOp::Move { .. } => "move",
@@ -191,6 +204,37 @@ impl MailProvider for Shared {
     }
 }
 
+/// A Gmail-style fake, where mailboxes are labels.
+pub struct Labels(pub Arc<Fake>);
+#[async_trait]
+impl MailProvider for Labels {
+    async fn test(&self) -> Result<()> {
+        Ok(())
+    }
+    async fn sync(&self, ctx: &SyncCtx) -> Result<()> {
+        self.0.sync(ctx).await
+    }
+    async fn fetch_raw(&self, ctx: &SyncCtx, msg: &MessageRef) -> Result<Vec<u8>> {
+        self.0.fetch_raw(ctx, msg).await
+    }
+    async fn apply(&self, ctx: &SyncCtx, op: &ResolvedOp) -> Result<ApplyOutcome> {
+        self.0.apply(ctx, op).await
+    }
+    async fn wait_for_changes(&self, ctx: &SyncCtx, max: Duration) -> Result<bool> {
+        self.0.wait_for_changes(ctx, max).await
+    }
+    fn uses_labels(&self) -> bool {
+        true
+    }
+}
+
+pub struct LabelsFactory(pub Arc<Fake>);
+impl ProviderFactory for LabelsFactory {
+    fn create(&self, _account: &Account, _creds: CredentialHandle) -> Result<Providers> {
+        Ok(Providers { mail: Some(Arc::new(Labels(self.0.clone()))), calendar: None, contacts: None })
+    }
+}
+
 pub struct SharedCal(pub Arc<Fake>);
 #[async_trait]
 impl CalendarProvider for SharedCal {
@@ -247,6 +291,15 @@ impl PlaceSearch for FakePlaces {
 }
 
 pub async fn setup() -> (Arc<Engine>, Arc<Fake>, String, tempfile::TempDir) {
+    setup_with(|fake| Arc::new(FakeFactory(fake))).await
+}
+
+/// `setup` with a Gmail-style account, where mailboxes are labels.
+pub async fn setup_labels() -> (Arc<Engine>, Arc<Fake>, String, tempfile::TempDir) {
+    setup_with(|fake| Arc::new(LabelsFactory(fake))).await
+}
+
+async fn setup_with(factory: impl FnOnce(Arc<Fake>) -> Arc<dyn ProviderFactory>) -> (Arc<Engine>, Arc<Fake>, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let fake = Arc::new(Fake::default());
     let engine = Engine::with_parts(
@@ -256,7 +309,7 @@ pub async fn setup() -> (Arc<Engine>, Arc<Fake>, String, tempfile::TempDir) {
             data_dir: dir.path().to_path_buf(),
             mode: Mode::Full,
             secrets: Arc::new(MemSecretStore::default()),
-            factory: Arc::new(FakeFactory(fake.clone())),
+            factory: factory(fake.clone()),
             start_workers: false,
         },
     )

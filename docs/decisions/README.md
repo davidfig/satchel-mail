@@ -70,3 +70,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0063 | [Automatic updates from GitHub Releases, offered with a toast](0063-automatic-updates.md) | Accepted |
 | 0064 | [Release Mac and Linux first; Windows joins when it's signed](0064-mac-and-linux-first.md) | Accepted |
 | 0065 | [Smart folders: saved searches under Mail](0065-smart-folders.md) | Accepted |
+| 0066 | [A change on screen stays there: commit it with its op, and hold list reads](0066-changes-that-stick.md) | Accepted |
