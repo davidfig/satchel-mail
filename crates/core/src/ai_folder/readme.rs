@@ -23,6 +23,8 @@ editing their files (see Contacts).
         meta.json                              ids, participants, mailboxes, flags
         <n>.eml                                raw messages (if enabled)
         attachments/                           attachments (if enabled)
+    smart-folders.md                           the user's saved searches, each with
+                                               its query and newest threads
     calendar/AGENDA.md                         the next 60 days, all calendars
     calendar/<account>/<calendar>/<uid>-<hash>.ics  raw events
     contacts/CONTACTS.md                       saved contacts and recent correspondents,

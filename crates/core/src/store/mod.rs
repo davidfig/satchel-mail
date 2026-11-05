@@ -17,8 +17,10 @@ mod messages;
 mod ops;
 mod people;
 mod sender_rules;
+mod smart_folders;
 #[cfg(test)]
 mod tests;
+mod thread_search;
 mod threads;
 mod types;
 
@@ -243,7 +245,7 @@ fn open_conn(path: &Path) -> Result<Connection> {
 /// The schema version `schema.sql` creates. To change the schema, edit
 /// `schema.sql` to the new shape, bump this, and append to [`MIGRATIONS`] the
 /// SQL that takes a database from the previous version to this one.
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` database to version `i + 2`.
 const MIGRATIONS: &[&str] = &[
@@ -271,6 +273,15 @@ const MIGRATIONS: &[&str] = &[
      );",
     // 8: domains whose DKIM signatures Satchel verified itself, read lazily.
     "ALTER TABLE messages ADD COLUMN dkim_pass TEXT;",
+    // 9: smart folders (0065).
+    "CREATE TABLE IF NOT EXISTS smart_folders (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        query       TEXT NOT NULL,
+        badge       TEXT NOT NULL DEFAULT 'unread',
+        position    INTEGER NOT NULL,
+        created_at  INTEGER NOT NULL
+    );",
 ];
 
 /// Create or upgrade the schema, tracked in `PRAGMA user_version`.

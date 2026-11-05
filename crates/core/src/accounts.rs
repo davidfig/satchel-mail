@@ -33,6 +33,7 @@ impl Engine {
                 let _ = crate::ai_folder::remove_dir_all(&new_root, &new_root.join("mail"));
             }
             self.store.reset_mirrored()?;
+            self.smart_folders_due.store(0, std::sync::atomic::Ordering::Relaxed);
             self.mirror_wake.notify_one();
         }
         Ok(())

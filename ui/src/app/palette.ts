@@ -11,6 +11,7 @@ import { UNIFIED, readJson, writeJson } from './location';
 /** What the palette needs from the shell. */
 export interface PaletteHost {
   go(view: View, source?: MailSource): void;
+  newSmartFolder(query?: string): Promise<void>;
 }
 
 const RECENT_KEY = 'satchel.paletteRecent';
@@ -24,9 +25,11 @@ function placesAndTools(host: PaletteHost): Command[] {
   const account = (id: string) => (multi ? store.state.accounts.find((a) => a.id === id)?.email : undefined);
   return [
     ...UNIFIED.map((u) => ({ label: `Go to ${u.label}`, icon: u.icon, run: () => host.go('mail', { kind: 'role', role: u.role, label: u.label }) })),
+    ...store.state.smartFolders.map((f) => ({ label: `Go to ${f.name}`, icon: 'smartFolder', run: () => host.go('mail', { kind: 'smart', id: f.id, label: f.name }) })),
     ...store.state.mailboxes.filter((m) => m.role === 'custom').map((m) => ({ label: `Go to ${m.path}`, detail: account(m.account_id), icon: m.is_label ? 'label' : 'folder', run: () => host.go('mail', { kind: 'mailbox', mailbox_id: m.id, label: m.path }) })),
     ...SETTINGS.map(([section, label]) => ({ label: `Settings: ${label}`, icon: 'settings', run: () => store.set({ view: 'settings', settingsSection: section }) })),
     // The calendar's and contacts' own shortcuts make these, once the view is up.
+    { label: 'New smart folder', icon: 'smartFolder', run: () => void host.newSmartFolder() },
     { label: 'New event', icon: 'calendar', run: () => { host.go('calendar'); requestAnimationFrame(() => trigger('n')); } },
     { label: 'New contact', icon: 'user', run: () => { host.go('contacts'); requestAnimationFrame(() => trigger('n')); } },
     { label: 'Sync all accounts now', icon: 'refresh', run: () => void api.syncNow(null) },

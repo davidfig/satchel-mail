@@ -18,6 +18,7 @@ pub(crate) fn agent_may_run(cmd: &Command) -> bool {
         Command::Info
             | Command::ListAccounts
             | Command::ListMailboxes { .. }
+            | Command::ListSmartFolders
             | Command::ListThreads { .. }
             | Command::CountThreads { .. }
             | Command::GetThread { .. }

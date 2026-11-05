@@ -12,6 +12,9 @@ use tracing::{debug, warn};
 const INDEX_BATCH: u32 = 200;
 const MAX_INDEXED_BODY: usize = 1024 * 1024;
 
+/// How often `smart-folders.md` is rewritten when nothing else prompts it.
+const SMART_FOLDERS_REFRESH_MS: i64 = 10 * 60 * 1000;
+
 impl Engine {
     pub(crate) async fn indexer(this: std::sync::Weak<Self>) {
         loop {
@@ -291,6 +294,14 @@ impl Engine {
             // Indexes can queue threads whose folders went missing.
             let pending = self.store.unmirrored_thread_count()?;
             log("sync.json", m.write_status(pending == 0, pending));
+            // Only when something it shows may have changed: running every
+            // folder's search each pass would be steady work on an idle machine.
+            // The timer keeps relative dates (`newer_than:7d`) current.
+            let now = crate::store::now_ms();
+            if n > 0 || pending > 0 || self.smart_folders_due.load(std::sync::atomic::Ordering::Relaxed) <= now {
+                self.smart_folders_due.store(now + SMART_FOLDERS_REFRESH_MS, std::sync::atomic::Ordering::Relaxed);
+                log("smart folders", m.write_smart_folders());
+            }
         }
         if indexes || n > 0 || self.contacts_dirty.swap(false, std::sync::atomic::Ordering::Relaxed) {
             log("contacts", if settings.mirror.include_contacts { m.write_contacts() } else { m.remove_section("contacts") });

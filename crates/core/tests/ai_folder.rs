@@ -116,6 +116,36 @@ async fn symlinks_in_the_ai_folder_are_never_followed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn smart_folders_are_listed_for_agents() {
+    let (engine, _fake, _account, dir) = setup().await;
+    let folder = SmartFolder { name: "Vendors".into(), query: "from:bill".into(), ..Default::default() };
+    engine.handle(&Caller::User, Command::SaveSmartFolder { folder }).await.unwrap();
+    engine.mirror_pass(true).unwrap();
+    let md = std::fs::read_to_string(dir.path().join("mirror/smart-folders.md")).unwrap();
+    assert!(md.contains("## Vendors") && md.contains("Query: `from:bill`"), "{md}");
+    assert!(md.contains("| Invoice |") && !md.contains("Kickoff"), "{md}");
+
+    // The link is relative to the folder's root and leads to the thread.
+    let link = md.split("](").nth(1).and_then(|l| l.split(')').next()).expect("a link").to_string();
+    let file = dir.path().join("mirror").join(&link);
+    assert!(file.is_file(), "{link}");
+
+    // A thread that has gone from disk is listed without a dead link.
+    std::fs::remove_file(&file).unwrap();
+    engine.mirror_pass(true).unwrap();
+    let md = std::fs::read_to_string(dir.path().join("mirror/smart-folders.md")).unwrap();
+    assert!(!md.contains(&link) && md.contains("(not written yet)"), "{md}");
+
+    // A folder limited to some accounts doesn't list them: their queries can
+    // describe any account's mail.
+    let mut s = engine.settings();
+    s.mirror.account_ids = Some(vec!["another".into()]);
+    engine.handle(&Caller::User, Command::UpdateSettings { settings: s }).await.unwrap();
+    engine.mirror_pass(true).unwrap();
+    assert!(!dir.path().join("mirror/smart-folders.md").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn changing_the_location_moves_the_folder() {
     let (engine, _fake, _account, dir) = setup().await;
     engine.mirror_pass(true).unwrap();

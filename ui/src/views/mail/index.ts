@@ -5,6 +5,7 @@ import { api } from '../../api';
 import { debounce, h, icon, patch } from '../../lib/dom';
 import { emptiable, emptyFolder } from '../../lib/folders';
 import { formatAddress } from '../../lib/format';
+import { smartFolderDialog } from '../../lib/smart-folders';
 import { bind, commandSource, contextMenu, errorToast, toast } from '../../lib/ui';
 import type { MenuItem } from '../../lib/ui';
 import { store } from '../../state';
@@ -20,6 +21,12 @@ import { ROW_H } from './list';
 import * as person from './person';
 import { personQuery } from './person';
 import * as reader from './reader';
+
+/** The open smart folder's search, if one is open. */
+function openSmartQuery(): string | null {
+  const s = store.state.source;
+  return s.kind === 'smart' ? store.smartFolder(s.id)?.query ?? null : null;
+}
 
 export class MailView {
   root = h('div.mail-view');
@@ -49,6 +56,8 @@ export class MailView {
   readerLoad: Promise<void> = Promise.resolve();
   generation = 0;
   /** Where clearing the search box goes back to. */
+  /** The search of the open smart folder when its list was loaded. */
+  loadedSmartQuery = openSmartQuery();
   beforeSearch: MailSource = store.state.source.kind === 'search' ? { kind: 'role', role: 'inbox', label: 'Inbox' } : store.state.source;
 
   constructor() {
@@ -88,11 +97,28 @@ export class MailView {
         images = imageSettings();
         if (this.readerThread) void this.showThread(this.readerThread, false, true);
       }
-      if (changed.has('source') && store.state.source.kind !== 'search') this.beforeSearch = store.state.source;
-      if (changed.has('source')) void this.reload();
+      // The open smart folder was deleted, here or elsewhere.
+      const s = store.state.source;
+      if (s.kind === 'smart' && (changed.has('source') || changed.has('smartFolders')) && !store.smartFolder(s.id)) {
+        store.set({ source: { kind: 'role', role: 'inbox', label: 'Inbox' }, selectedThread: null });
+        return;
+      }
+      if (changed.has('source') && s.kind !== 'search') this.beforeSearch = s;
+      if (changed.has('source')) {
+        this.loadedSmartQuery = openSmartQuery();
+        void this.reload();
+      }
       // A folder renamed here or elsewhere keeps its title current, and
       // Empty Spam/Trash knows when there's nothing left.
       else if (changed.has('mailboxes') && (store.state.source.kind === 'mailbox' || emptiable(store.state.source))) this.renderHeader();
+      else if (changed.has('smartFolders') && s.kind === 'smart') {
+        // Reloading loses the selection and scroll, so only for a new search,
+        // not a rename, a new count or another folder's change.
+        if (this.loadedSmartQuery !== openSmartQuery()) {
+          this.loadedSmartQuery = openSmartQuery();
+          void this.reload();
+        } else this.renderHeader();
+      }
       else if (changed.has('favorites') && store.state.source.kind === 'person') this.renderHeader();
     });
     const refresh = debounce(() => void this.refresh(), 300);
@@ -121,6 +147,7 @@ export class MailView {
     const q: ThreadQuery = {};
     if (s.kind === 'role') q.role = s.role;
     else if (s.kind === 'mailbox') q.mailbox_id = s.mailbox_id;
+    else if (s.kind === 'smart') q.smart_folder_id = s.id;
     else if (s.kind === 'person') q.search = personQuery(s.emails, s.filter);
     else q.search = s.query;
     return q;
@@ -138,8 +165,10 @@ export class MailView {
       this.header,
       h('div.list-title',
         s.kind === 'person' && h('button.icon-btn', { title: `Back to ${s.back?.label ?? 'Inbox'}`, 'aria-label': 'Back', on: { click: () => store.set({ source: s.back ?? { kind: 'role', role: 'inbox', label: 'Inbox' } }) } }, icon('chevronLeft')),
-        h('h1', (s.kind === 'person' && this.person?.summary?.name) || (s.kind === 'mailbox' && store.mailbox(s.mailbox_id)?.path) || s.label),
+        h('h1', (s.kind === 'person' && this.person?.summary?.name) || (s.kind === 'mailbox' && store.mailbox(s.mailbox_id)?.path) || (s.kind === 'smart' && store.smartFolder(s.id)?.name) || s.label),
         h('span.spacer'),
+        s.kind === 'search' && h('button.icon-btn', { title: 'Save this search as a smart folder', 'aria-label': 'Save as smart folder', on: { click: () => void this.saveSearch(s.query) } }, icon('smartFolder')),
+        s.kind === 'smart' && h('button.icon-btn', { title: 'Edit this smart folder', 'aria-label': 'Edit smart folder', on: { click: () => void this.editSmart(s.id) } }, icon('draft')),
         this.emptyButton(s),
         h('button.icon-btn', { title: 'Refresh (sync now)', 'aria-label': 'Sync now', on: { click: () => void api.syncNow(null).then(() => toast('Syncing…', { quiet: true })) } }, icon('refresh')),
         h('button.icon-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose'))),
@@ -158,6 +187,16 @@ export class MailView {
             : h('button', { title: 'Mark as spam: these senders always go to Spam (!)', on: { click: () => void this.act('spam') } }, icon('junk', 16), 'Spam'),
           h('button.link', { title: 'Clear the selection', on: { click: () => { this.selected.clear(); this.renderHeader(); this.renderRows(); } } }, 'Clear')),
     );
+  }
+
+  private async saveSearch(query: string) {
+    const f = await smartFolderDialog({ query });
+    if (f) store.set({ source: { kind: 'smart', id: f.id, label: f.name }, selectedThread: null });
+  }
+
+  private async editSmart(id: string) {
+    const folder = store.smartFolder(id);
+    if (folder) await smartFolderDialog({ folder });
   }
 
   /** "Empty Spam" / "Empty Trash" while one of those is open. */

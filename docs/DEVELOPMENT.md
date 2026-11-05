@@ -28,6 +28,9 @@ Contacts sync against the server is covered by an ignored end-to-end test:
 `cargo test -p satchel-providers --test carddav_live -- --ignored` (needs the
 servers running).
 
+So are smart folders, with real mail sent over SMTP and synced over IMAP:
+`cargo test -p satchel-providers --test smart_folders_live -- --ignored`.
+
 Fixtures (`scripts/seed.py`) include a four-message thread, HTML with remote
 images and a script tag, attachments, an inline image, non-ASCII headers, an
 iMIP invitation, a prompt-injection attempt, and a recurring calendar event.

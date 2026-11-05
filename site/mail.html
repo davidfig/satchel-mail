@@ -80,8 +80,11 @@
           <h2>Search on your own disk</h2>
           <p>All your mail is indexed in a database on your computer, so search doesn't wait for a server. Type words, or narrow it down:</p>
           <div class="ops">
-            <code>from:bob</code><code>to:carol@example.com</code><code>with:dana</code><code>subject:invoice</code><code>has:attachment</code><code>is:unread</code><code>is:flagged</code><code>is:favorite</code><code>before:2026-01-01</code><code>after:2025-06</code><code>in:archive</code>
+            <code>from:bob</code><code>to:carol@example.com</code><code>with:dana</code><code>subject:invoice</code><code>has:attachment</code><code>is:unread</code><code>is:flagged</code><code>is:favorite</code><code>before:2026-01-01</code><code>after:2025-06-01</code><code>newer_than:7d</code><code>older_than:1y</code><code>in:archive</code><code>in:anywhere</code><code>account:work</code><code>-from:noreply</code>
           </div>
+          <p>Every term has to match. Put <code>-</code> in front of any of them to leave out conversations that match it.</p>
+          <h3>Smart folders</h3>
+          <p>Save any search as a smart folder and it stays in the sidebar with its own count: unread from a few people, attachments from this week, whatever you keep looking for. A smart folder looks across every folder of every account and stores no mail, so deleting one leaves your messages where they are. It's kept on this computer and doesn't sync to your mail provider.</p>
           <p>Click anyone's name to see everything between you: their addresses, how often you write, the meetings you share, and every conversation, filtered by all, from them, or with attachments.</p>
         </section>
 

@@ -168,3 +168,36 @@ impl Store {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ops_run_in_order_and_a_retrying_op_holds_back_later_ones() {
+        let s = Store::open_in_memory().unwrap();
+        let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+        let kinds = |s: &Store| s.due_ops(&acc.id).unwrap().into_iter().map(|o| o.kind).collect::<Vec<_>>();
+        // Queued within the same millisecond: still in queue order.
+        let mv = s.enqueue_op(&acc.id, "move", &serde_json::json!({}), "user").unwrap();
+        let send = s.enqueue_op(&acc.id, "send", &serde_json::json!({}), "user").unwrap();
+        s.enqueue_op(&acc.id, "mailbox_delete", &serde_json::json!({}), "user").unwrap();
+        assert_eq!(kinds(&s), vec!["move", "send", "mailbox_delete"]);
+        // A send waiting to retry doesn't hold anything back...
+        s.op_retry(&send, "down", 1).unwrap();
+        assert_eq!(kinds(&s), vec!["move", "mailbox_delete"]);
+        // ...but any other op does, along with everything after it.
+        s.op_retry(&mv, "down", 1).unwrap();
+        assert!(kinds(&s).is_empty());
+    }
+
+    #[test]
+    fn only_failed_or_waiting_ops_can_be_retried() {
+        let s = Store::open_in_memory().unwrap();
+        let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+        let id = s.enqueue_op(&acc.id, "send", &serde_json::json!({}), "user").unwrap();
+        s.op_sending(&id).unwrap();
+        s.op_reset(&id).unwrap();
+        assert!(s.due_ops(&acc.id).unwrap().is_empty(), "a send in flight isn't put back in the queue");
+    }
+}
