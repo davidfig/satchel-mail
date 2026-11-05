@@ -87,6 +87,17 @@ struct TokenResponse {
     expires_in: Option<i64>,
     #[allow(dead_code)]
     id_token: Option<String>,
+    /// What the user actually granted, which can be less than we asked for.
+    scope: Option<String>,
+}
+
+/// Google's consent screen lets people untick scopes. Without mail there's no
+/// account to add; calendar and contacts can be missing and just don't sync.
+fn grants_mail(provider: ProviderKind, granted: Option<&str>) -> bool {
+    match (provider, granted) {
+        (ProviderKind::Gmail, Some(scopes)) => scopes.split_whitespace().any(|s| s == "https://mail.google.com/"),
+        _ => true,
+    }
 }
 
 fn sha256_b64(s: &str) -> String {
@@ -241,6 +252,10 @@ async fn finish(app: OAuthApp, listener: std::net::TcpListener, redirect: String
         return Err(crate::net::http_error(status, &body, "token exchange"));
     }
     let tok: TokenResponse = serde_json::from_str(&body)?;
+    if !grants_mail(app.provider, tok.scope.as_deref()) {
+        respond(&mut sock, "Gmail access is needed", "satchel.email can't add this account without access to Gmail. Sign in again from the app and leave the Gmail box checked.").await;
+        bail!("Google sign-in didn't include access to Gmail. Sign in again and leave the Gmail box checked.");
+    }
     let (email, name) = identity(&http, app.provider, &tok.access_token).await?;
     respond(&mut sock, "You're signed in", "Return to satchel.email — your account is syncing. You can close this tab.").await;
     let cred = Credential::OAuth { access_token: tok.access_token, refresh_token: tok.refresh_token, expires_at: tok.expires_in.map(|e| now() + e) };
@@ -485,6 +500,16 @@ mod tests {
         assert!(is(reqwest::Method::POST, "https://graph.microsoft.com/v1.0/me/messages/AAk%3D/send"));
         assert!(!is(reqwest::Method::POST, "https://gmail.googleapis.com/gmail/v1/users/me/messages/abc/modify"));
         assert!(!is(reqwest::Method::GET, "https://graph.microsoft.com/v1.0/me/messages/send"));
+    }
+
+    #[test]
+    fn gmail_sign_in_needs_the_mail_scope() {
+        use satchel_api::ProviderKind::{Gmail, Graph};
+        assert!(super::grants_mail(Gmail, Some("openid https://mail.google.com/ https://www.googleapis.com/auth/calendar")));
+        assert!(!super::grants_mail(Gmail, Some("openid email https://www.googleapis.com/auth/calendar")));
+        // Microsoft names its scopes differently, and a response without a list isn't a refusal.
+        assert!(super::grants_mail(Graph, Some("Mail.ReadWrite User.Read")));
+        assert!(super::grants_mail(Gmail, None));
     }
 
     #[test]
