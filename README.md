@@ -8,14 +8,14 @@ sent, moved or scheduled until you approve it in AI Proposals.
 - **Accounts:** Gmail + Google Calendar, Microsoft 365 / Outlook, any IMAP/SMTP
   server (+ CalDAV), Fastmail and other JMAP servers.
 - **A real mail client:** unified inbox, threads, fast full-text search with
-  operators, compose/reply/forward with undo-send, drafts sync, attachments,
+  operators, smart folders (saved searches), compose/reply/forward with undo-send, drafts sync, attachments,
   remote-image blocking, keyboard shortcuts, command palette, dark mode.
 - **Calendar:** day/week/month/agenda, recurring events, invitations with RSVP
   from the email itself, free-time search.
 - **Contacts:** built from the people you write to, editable and mergeable
   (one person, many addresses), synced with CardDAV, Google Contacts and
   Outlook contacts.
-- **AI surface:** MCP server (`satchel mcp`) with 27 read + propose tools, an
+- **AI surface:** MCP server (`satchel mcp`) with 29 read + propose tools, an
   AI-readable folder (`~/Satchel/`), per-agent access policies, an audit log.
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the architecture and
