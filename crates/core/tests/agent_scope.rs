@@ -5,7 +5,7 @@ mod support;
 
 use satchel_core::blobs::MemBlobStore;
 use satchel_core::secrets::MemSecretStore;
-use satchel_core::store::{MessageRef, Store};
+use satchel_core::store::Store;
 use satchel_core::{EngineOptions, Mode};
 use support::mail::*;
 
@@ -299,37 +299,6 @@ async fn agents_can_never_run_write_commands() {
         assert_eq!(err.code, ErrorCode::Forbidden, "{name}");
     }
     assert!(engine.store().list_outbox().unwrap().is_empty(), "nothing was queued");
-}
-
-/// A Gmail-style fake, where mailboxes are labels.
-struct Labels(Arc<Fake>);
-#[async_trait::async_trait]
-impl MailProvider for Labels {
-    async fn test(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
-    async fn sync(&self, ctx: &SyncCtx) -> anyhow::Result<()> {
-        self.0.sync(ctx).await
-    }
-    async fn fetch_raw(&self, ctx: &SyncCtx, msg: &MessageRef) -> anyhow::Result<Vec<u8>> {
-        self.0.fetch_raw(ctx, msg).await
-    }
-    async fn apply(&self, ctx: &SyncCtx, op: &ResolvedOp) -> anyhow::Result<ApplyOutcome> {
-        self.0.apply(ctx, op).await
-    }
-    async fn wait_for_changes(&self, ctx: &SyncCtx, max: Duration) -> anyhow::Result<bool> {
-        self.0.wait_for_changes(ctx, max).await
-    }
-    fn uses_labels(&self) -> bool {
-        true
-    }
-}
-
-struct LabelsFactory(Arc<Fake>);
-impl ProviderFactory for LabelsFactory {
-    fn create(&self, _account: &Account, _creds: CredentialHandle) -> anyhow::Result<Providers> {
-        Ok(Providers { mail: Some(Arc::new(Labels(self.0.clone()))), calendar: None, contacts: None })
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

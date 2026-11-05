@@ -204,3 +204,14 @@ impl MsgCond {
         Self { term, negate: false }
     }
 }
+
+pub type MailboxUids = Vec<(String, Option<u32>)>;
+
+/// What an op changes on this side, made along with queueing it.
+pub enum LocalChange<'a> {
+    /// (message, its mailboxes now, each with its UID if known).
+    Memberships(&'a [(String, MailboxUids)]),
+    /// (message, its flags now).
+    Flags(&'a [(String, Flags)]),
+    Delete(&'a [String]),
+}

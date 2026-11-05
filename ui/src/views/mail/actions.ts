@@ -102,26 +102,11 @@ export async function act(view: MailView, kind: Action, threads = view.targetThr
     const inTrash = threads.every((t) => t.mailbox_ids.every((m) => store.mailbox(m)?.role === 'trash'));
     if (inTrash && !(await confirmDialog('Delete forever?', 'These messages will be permanently deleted.', 'Delete', true))) return;
   }
+  // Starts reading the open thread's ids synchronously, before removeNow closes it.
+  const write = send(kind, view.messageIds(threads));
+  if (moved) removeNow(view, threads, write);
   try {
-    // Starts reading the open thread's ids synchronously, before removeNow closes it.
-    const pending = view.messageIds(threads);
-    if (moved) removeNow(view, threads);
-    const ids = await pending;
-    if (kind === 'archive') await api.archive(ids);
-    if (kind === 'trash') await api.trash(ids);
-    if (kind === 'read') await api.setFlags(ids, true, null);
-    if (kind === 'unread') await api.setFlags(ids, false, null);
-    let note = '';
-    if (kind === 'spam' || kind === 'not_spam' || kind === 'block') {
-      const r = kind === 'not_spam' ? await api.markNotSpam(ids) : await api.markSpam(ids);
-      // Spam from the Spam folder: remember the sender, then delete.
-      if (kind === 'block') await api.trash(ids);
-      const who = r.senders.length === 1 ? r.senders[0] : `${r.senders.length} senders`;
-      const removed = 'invites_removed' in r && r.invites_removed ? r.invites_removed : 0;
-      const more = (r.also_moved ? ` ${r.also_moved} more message${r.also_moved === 1 ? '' : 's'} moved.` : '')
-        + (removed ? ` Removed ${removed === 1 ? 'its invitation' : `${removed} invitations`} from your calendar; the organizer isn’t told.` : '');
-      if (r.senders.length) note = kind !== 'not_spam' ? ` Future mail from ${who} goes to Spam.${more}` : ` Mail from ${who} will stay out of Spam.${more}`;
-    }
+    const note = await write;
     if (moved) toast(moved + note, note ? { ms: 6000 } : {});
   } catch (e) {
     errorToast(e);
@@ -130,32 +115,64 @@ export async function act(view: MailView, kind: Action, threads = view.targetThr
   void view.refresh();
 }
 
-/** Take moved conversations off screen before the server answers: drop them
- *  from the list with the cursor staying at the same position, which now holds
- *  the next thread, and if the reader showed one of them, open that next thread
- *  in its place (or show the empty reader when the list is empty). */
-function removeNow(view: MailView, threads: ThreadSummary[]) {
-  const removed = new Set(threads.map((t) => t.thread_id));
-  const pos = view.cursor >= 0 ? view.cursor : view.list.indexOf(threads[0].thread_id);
-  const sel = store.state.selectedThread;
-  const wasOpen = (sel && removed.has(sel)) || (view.openThread && removed.has(view.openThread.thread_id));
-  if (wasOpen) {
-    store.set({ selectedThread: null });
-    view.renderEmptyReader();
-  }
-  view.selected.clear();
-  view.renderHeader();
-  view.list.remove(removed);
-  view.cursor = pos < 0 ? -1 : Math.min(pos, view.list.total - 1);
-  view.renderRows();
-  if (wasOpen && view.cursor >= 0) void openAtCursor(view);
+/** Tells the core. Resolves once the change is committed there, with anything
+ *  to add to the toast. */
+async function send(kind: Action, pending: Promise<string[]>): Promise<string> {
+  const ids = await pending;
+  if (kind === 'archive') await api.archive(ids);
+  if (kind === 'trash') await api.trash(ids);
+  if (kind === 'read') await api.setFlags(ids, true, null);
+  if (kind === 'unread') await api.setFlags(ids, false, null);
+  if (kind !== 'spam' && kind !== 'not_spam' && kind !== 'block') return '';
+  const r = kind === 'not_spam' ? await api.markNotSpam(ids) : await api.markSpam(ids);
+  // Spam from the Spam folder: remember the sender, then delete.
+  if (kind === 'block') await api.trash(ids);
+  if (!r.senders.length) return '';
+  const who = r.senders.length === 1 ? r.senders[0] : `${r.senders.length} senders`;
+  const removed = 'invites_removed' in r && r.invites_removed ? r.invites_removed : 0;
+  const more = (r.also_moved ? ` ${r.also_moved} more message${r.also_moved === 1 ? '' : 's'} moved.` : '')
+    + (removed ? ` Removed ${removed === 1 ? 'its invitation' : `${removed} invitations`} from your calendar; the organizer isn’t told.` : '');
+  return kind !== 'not_spam' ? ` Future mail from ${who} goes to Spam.${more}` : ` Mail from ${who} will stay out of Spam.${more}`;
 }
 
-/** Open the thread under the cursor, unless the cursor moved while its row loaded. */
-async function openAtCursor(view: MailView) {
+/** Take moved conversations off screen before the core answers, and keep them
+ *  off until it has (`write`). The cursor stays at the same place in the list,
+ *  which now holds the next conversation; if the reader showed one of them, it
+ *  moves on to that one. */
+function removeNow(view: MailView, threads: ThreadSummary[], write: Promise<unknown>) {
+  const removed = new Set(threads.map((t) => t.thread_id));
+  const open = [store.state.selectedThread, view.openThread?.thread_id, view.readerThread].find((id) => id && removed.has(id));
+  const openAt = open ? view.list.indexOf(open) : -1;
+  const pos = openAt >= 0 ? openAt : view.cursor >= 0 ? view.cursor : view.list.indexOf(threads[0].thread_id);
+  const above = threads.filter((t) => { const i = view.list.indexOf(t.thread_id); return i >= 0 && i < pos; }).length;
+  view.selected.clear();
+  view.renderHeader();
+  view.list.holdReads(write);
+  view.list.remove(removed);
+  view.cursor = pos < 0 ? -1 : Math.min(pos - above, view.list.total - 1);
+  if (open) moveReaderOn(view, openAt >= 0);
+  view.renderRows();
+}
+
+/** The reader's conversation just left the list: show the one at the cursor, or
+ *  close. The old one stays up until the next is ready, so it doesn't blink. */
+function moveReaderOn(view: MailView, wasListed: boolean) {
+  const src = store.state.source;
+  // Opening a draft from Drafts edits it, which deleting another shouldn't.
+  const onward = wasListed && !(src.kind === 'role' && src.role === 'drafts');
+  const next = onward ? view.list.at(view.cursor) : undefined;
+  if (next) {
+    void view.showThread(next.thread_id);
+    return;
+  }
+  store.set({ selectedThread: null });
+  view.renderEmptyReader();
+  if (!onward || view.cursor < 0) return;
+  // Past the rows in memory: open it when it loads, unless the user has moved on.
   const cursor = view.cursor;
-  const t = await view.list.get(cursor);
-  if (t && cursor === view.cursor && !store.state.selectedThread) void view.showThread(t.thread_id);
+  void view.list.get(cursor).then((t) => {
+    if (t && cursor === view.cursor && !store.state.selectedThread) void view.showThread(t.thread_id);
+  });
 }
 
 export async function flagThread(view: MailView, t: ThreadSummary) {

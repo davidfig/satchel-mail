@@ -15,6 +15,28 @@ impl Store {
         Ok(id)
     }
 
+    /// Queue an op and make the local change it stands for in one commit. A
+    /// sync writing at the same time then finds either neither, and is
+    /// overwritten by the change, or both, and leaves the message alone
+    /// ([`Store::change_pending`]). And the op can't run ahead of the change.
+    pub fn enqueue_change(&self, account_id: &str, kind: &str, payload: &serde_json::Value, actor: &str, change: LocalChange) -> Result<String> {
+        let id = new_id();
+        let threads = self.w(|c| {
+            let tx = c.transaction()?;
+            tx.execute(
+                "INSERT INTO ops (id, account_id, kind, payload_json, status, actor, created_at) VALUES (?,?,?,?, 'pending', ?, ?)",
+                params![id, account_id, kind, payload.to_string(), actor, now_ms()],
+            )?;
+            let threads = self.apply_change_tx(&tx, &change)?;
+            tx.commit()?;
+            Ok(threads)
+        })?;
+        for t in threads {
+            self.recompute_thread(&t)?;
+        }
+        Ok(id)
+    }
+
     /// The ops to run now, in the order they were queued (insertion order
     /// breaks ties within a millisecond). An op waiting to retry holds back
     /// everything queued after it, so a folder is never deleted before the

@@ -206,30 +206,23 @@ impl SyncCtx {
         self.store.message_id_by_remote(&self.account.id, remote_id)
     }
 
-    /// The local id of a message sync may update: not one with a change still
-    /// on its way to the server, which keeps its local state until then.
-    fn syncable(&self, remote_id: &str) -> Result<Option<String>> {
-        let Some(id) = self.message_by_remote(remote_id)? else { return Ok(None) };
-        Ok((!self.store.change_pending(&self.account.id, Some(&id), Some(remote_id))?).then_some(id))
-    }
-
     pub fn set_flags_remote(&self, remote_id: &str, flags: Flags) -> Result<()> {
-        if let Some(id) = self.syncable(remote_id)? {
-            self.store.set_flags(&id, &flags)?;
+        if let Some(id) = self.message_by_remote(remote_id)? {
+            self.store.sync_flags(&self.account.id, &id, Some(remote_id), &flags)?;
         }
         Ok(())
     }
 
     pub fn set_memberships_remote(&self, remote_id: &str, mailboxes: &[(String, Option<u32>)]) -> Result<()> {
-        if let Some(id) = self.syncable(remote_id)? {
+        if let Some(id) = self.message_by_remote(remote_id)? {
             let local: Vec<(String, Option<u32>)> = mailboxes
                 .iter()
                 .filter_map(|(r, uid)| self.mailbox_local_id(r).ok().flatten().map(|mid| (mid, *uid)))
                 .collect();
-            if local.is_empty() {
+            if !local.is_empty() {
+                self.store.sync_memberships(&self.account.id, &id, Some(remote_id), &local)?;
+            } else if !self.store.change_pending(&self.account.id, Some(&id), Some(remote_id))? {
                 self.store.delete_message(&id)?;
-            } else {
-                self.store.set_memberships(&id, &local)?;
             }
         }
         Ok(())
