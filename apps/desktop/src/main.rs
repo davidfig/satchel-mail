@@ -343,6 +343,7 @@ fn main() {
             notify::notify,
             notify::take_open_request,
             update::update_ready,
+            update::check_for_updates,
             update::install_update
         ])
         .run(tauri::generate_context!())

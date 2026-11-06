@@ -31,7 +31,9 @@ could turn it on, but nothing built a feed or used it.
   "satchel.email X is ready to install — Restart to update". Nothing
   installs without that click: restarting closes the window and stops syncs,
   so the user picks the moment. Dismissed, it isn't offered again until the
-  app restarts or a newer version comes out.
+  app restarts, a newer version comes out, or the user asks.
+- **Asking:** Help > Check for Updates (the command palette off the Mac, which
+  has no menu bar) runs the same check now and says what it found.
 - **Version check:** a tag must match `version` in `tauri.conf.json`, or the
   feed would announce a version the app never becomes and offer it forever.
 - The host owns this (`apps/desktop/src/update.rs`); it isn't an engine

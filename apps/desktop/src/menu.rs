@@ -11,7 +11,8 @@ use tauri::menu::{AboutMetadata, HELP_SUBMENU_ID, Menu, MenuItemBuilder, Submenu
 use tauri::{AppHandle, Emitter, Runtime};
 
 /// Builds the menu bar. Ids starting `key:` run the UI's binding for that key
-/// (see `bind` in `ui/src/lib/ui.ts`); the others are named actions.
+/// (see `bind` in `ui/src/lib/ui.ts`), `help:` open a page (`HELP_LINKS` in
+/// `ui/src/app/help.ts`); the others are named actions.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let item = |id: &str, label: &str, accel: Option<&str>| {
         let b = MenuItemBuilder::with_id(id, label);
@@ -103,6 +104,14 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     let help = SubmenuBuilder::with_id(app, HELP_SUBMENU_ID, "Help")
         .item(&item("key:?", "Keyboard Shortcuts", Some("Cmd+/"))?)
+        .item(&item("help:feedback", "Send Feedback", None)?)
+        .separator()
+        .item(&item("help:whats-new", "What’s New", None)?)
+        .item(&item("check-updates", "Check for Updates…", None)?)
+        .separator()
+        .item(&item("help:website", "satchel.email Website", None)?)
+        .item(&item("help:privacy", "Privacy Policy", None)?)
+        .item(&item("help:terms", "Terms of Service", None)?)
         .build()?;
 
     Menu::with_items(app, &[&app_menu, &file, &edit, &view, &mailbox, &message, &window, &help])
