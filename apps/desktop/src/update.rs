@@ -18,6 +18,31 @@ pub fn update_ready(app: tauri::AppHandle) -> Option<String> {
     }
 }
 
+/// What a check the user asked for found.
+#[derive(serde::Serialize)]
+pub struct UpdateCheck {
+    /// The version running now.
+    current: String,
+    /// The newer version downloaded and waiting to be installed, if any.
+    ready: Option<String>,
+}
+
+/// Checks the feed now, and downloads a newer version if there is one. For
+/// Help > Check for Updates; the same check runs by itself every six hours.
+#[tauri::command]
+pub async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheck, String> {
+    #[cfg(feature = "updater")]
+    {
+        feed::check(&app).await.map_err(|e| format!("{e:#}"))?;
+        Ok(UpdateCheck { current: app.package_info().version.to_string(), ready: feed::ready(&app) })
+    }
+    #[cfg(not(feature = "updater"))]
+    {
+        let _ = app;
+        Err("this build doesn't update itself".into())
+    }
+}
+
 /// Installs the downloaded update and restarts into it.
 #[tauri::command]
 pub fn install_update(app: tauri::AppHandle) -> Result<(), String> {
@@ -65,7 +90,7 @@ mod feed {
         });
     }
 
-    async fn check(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    pub async fn check(app: &tauri::AppHandle) -> anyhow::Result<()> {
         let Some(update) = app.updater()?.check().await? else { return Ok(()) };
         if ready(app).as_deref() == Some(update.version.as_str()) {
             return Ok(());

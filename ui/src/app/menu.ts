@@ -3,7 +3,9 @@ import { errorToast, toast, trigger } from '../lib/ui';
 import type { View } from '../state';
 import { transport } from '../transport';
 import { openComposer } from '../views/mail/composer';
-import { toggleTheme } from './help';
+import { openExternal } from '../views/mail/message-body';
+import { HELP_LINKS, toggleTheme } from './help';
+import { checkForUpdates } from './updates';
 
 /** What the menu bar needs from the shell. */
 export interface MenuHost {
@@ -19,10 +21,12 @@ export function installMenu(host: MenuHost) {
     'new-contact': () => { host.go('contacts'); requestAnimationFrame(() => trigger('n')); },
     sync: () => api.syncNow(null).then(() => toast('Syncing…', { quiet: true }), errorToast),
     theme: () => toggleTheme(),
+    'check-updates': () => void checkForUpdates(),
   };
   transport.onMenu((id) => {
     if (id.startsWith('key:')) trigger(id.slice(4));
     else if (id.startsWith('go:')) host.go(id.slice(3) as View);
+    else if (id.startsWith('help:')) openExternal(HELP_LINKS[id.slice(5)]);
     else actions[id]?.();
   });
 }

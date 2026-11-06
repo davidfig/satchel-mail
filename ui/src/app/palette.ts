@@ -4,9 +4,12 @@ import { fuzzy } from '../lib/fuzzy';
 import { openPerson } from '../lib/person';
 import { type Command, activeCommands, modal, trigger } from '../lib/ui';
 import { type MailSource, type SettingsSection, type View, store } from '../state';
+import { transport } from '../transport';
 import { openComposer } from '../views/mail/composer';
-import { toggleTheme } from './help';
+import { openExternal } from '../views/mail/message-body';
+import { HELP_LINKS, toggleTheme } from './help';
 import { UNIFIED, readJson, writeJson } from './location';
+import { checkForUpdates } from './updates';
 
 /** What the palette needs from the shell. */
 export interface PaletteHost {
@@ -34,6 +37,10 @@ function placesAndTools(host: PaletteHost): Command[] {
     { label: 'New contact', icon: 'user', run: () => { host.go('contacts'); requestAnimationFrame(() => trigger('n')); } },
     { label: 'Sync all accounts now', icon: 'refresh', run: () => void api.syncNow(null) },
     { label: 'Toggle dark mode', icon: 'moon', run: () => toggleTheme() },
+    // The Help menu's items, for where there's no menu bar. `satchel serve` is updated with the CLI.
+    ...(transport.kind === 'tauri' ? [{ label: 'Check for updates', icon: 'refresh', run: () => void checkForUpdates() }] : []),
+    { label: 'What’s new', icon: 'external', run: () => openExternal(HELP_LINKS['whats-new']) },
+    { label: 'Send feedback', icon: 'external', run: () => openExternal(HELP_LINKS.feedback) },
   ];
 }
 
