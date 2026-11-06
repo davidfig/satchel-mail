@@ -63,3 +63,44 @@ pub fn is_transient(e: &anyhow::Error) -> bool {
     let s = format!("{e:#}").to_lowercase();
     !PERMANENT.iter().any(|p| s.contains(p))
 }
+
+/// The account status for a failed sync pass. Only a provider's own auth error
+/// means the user must sign in again: words in an untyped error's text can't
+/// tell the user that their account was signed out.
+pub(crate) fn sync_state_for(e: &anyhow::Error) -> satchel_api::SyncState {
+    use satchel_api::SyncState;
+    let typed = e.chain().find_map(|c| c.downcast_ref::<ApiError>()).map(|a| a.code);
+    match typed {
+        Some(ErrorCode::Auth) => SyncState::SignIn,
+        Some(ErrorCode::Network) => SyncState::Offline,
+        Some(_) => SyncState::Error,
+        None => match to_api(anyhow::anyhow!("{e:#}")).code {
+            ErrorCode::Network => SyncState::Offline,
+            _ => SyncState::Error,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::{Context, anyhow};
+    use satchel_api::SyncState;
+
+    #[test]
+    fn only_a_typed_auth_error_means_signed_out() {
+        let auth = || anyhow::Error::new(ApiError::new(ErrorCode::Auth, "access was revoked; sign in again"));
+        assert_eq!(sync_state_for(&auth()), SyncState::SignIn);
+        assert_eq!(sync_state_for(&auth().context("sync mail")), SyncState::SignIn);
+        assert_eq!(sync_state_for(&anyhow!("TLS authentication tag mismatch")), SyncState::Error);
+        assert_eq!(sync_state_for(&anyhow!("parsing message: Login failed notice")), SyncState::Error);
+    }
+
+    #[test]
+    fn other_failures_keep_their_state() {
+        assert_eq!(sync_state_for(&anyhow::Error::new(ApiError::new(ErrorCode::Network, "HTTP 503"))), SyncState::Offline);
+        assert_eq!(sync_state_for(&anyhow!("connection reset")), SyncState::Offline);
+        assert_eq!(sync_state_for(&anyhow::Error::new(ApiError::new(ErrorCode::RateLimited, "slow down"))), SyncState::Error);
+        assert_eq!(sync_state_for(&Err::<(), _>(anyhow!("boom")).context("sync").unwrap_err()), SyncState::Error);
+    }
+}
