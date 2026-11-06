@@ -5,6 +5,7 @@ import { api } from '../../api';
 import { debounce, h, icon, patch } from '../../lib/dom';
 import { emptiable, emptyFolder } from '../../lib/folders';
 import { formatAddress } from '../../lib/format';
+import { smartFolderDialog } from '../../lib/smart-folders';
 import { bind, commandSource, contextMenu, errorToast, toast } from '../../lib/ui';
 import type { MenuItem } from '../../lib/ui';
 import { store } from '../../state';
@@ -21,6 +22,12 @@ import * as person from './person';
 import { personQuery } from './person';
 import * as reader from './reader';
 
+/** The open smart folder's search, if one is open. */
+function openSmartQuery(): string | null {
+  const s = store.state.source;
+  return s.kind === 'smart' ? store.smartFolder(s.id)?.query ?? null : null;
+}
+
 export class MailView {
   root = h('div.mail-view');
   listPane = h('section.list-pane', { 'aria-label': 'Conversations' });
@@ -34,6 +41,8 @@ export class MailView {
   cursor = -1;
   /** Selected threads by id (kept even if their page is evicted). */
   selected = new Map<string, ThreadSummary>();
+  /** Where a Shift+Arrow range starts, and the selection from before it. */
+  private range: { anchor: number; base: Map<string, ThreadSummary> } | null = null;
   openThread: Thread | null = null;
   /** The list row of the open conversation, kept when a refresh drops it
    *  from the list (unflagged in Flagged, read under `is:unread`). */
@@ -46,6 +55,10 @@ export class MailView {
   /** Settles when the reader has shown `readerThread`. */
   readerLoad: Promise<void> = Promise.resolve();
   generation = 0;
+  /** Where clearing the search box goes back to. */
+  /** The search of the open smart folder when its list was loaded. */
+  loadedSmartQuery = openSmartQuery();
+  beforeSearch: MailSource = store.state.source.kind === 'search' ? { kind: 'role', role: 'inbox', label: 'Inbox' } : store.state.source;
 
   constructor() {
     this.spacer.appendChild(this.rows);
@@ -66,12 +79,16 @@ export class MailView {
       if (e.key === 'Enter') {
         const q = this.searchInput.value.trim();
         if (q) store.set({ source: { kind: 'search', query: q, label: `Search: ${q}` }, selectedThread: null });
-        else store.set({ source: { kind: 'role', role: 'inbox', label: 'Inbox' } });
+        else this.clearSearch();
         this.scroller.focus();
       } else if (e.key === 'Escape') {
         this.searchInput.blur();
         this.scroller.focus();
       }
+    });
+    // Emptying the box (its clear button, or deleting the text) ends the search.
+    this.searchInput.addEventListener('input', () => {
+      if (!this.searchInput.value.trim()) this.clearSearch();
     });
     let images = imageSettings();
     store.subscribe((_, changed) => {
@@ -80,10 +97,28 @@ export class MailView {
         images = imageSettings();
         if (this.readerThread) void this.showThread(this.readerThread, false, true);
       }
-      if (changed.has('source')) void this.reload();
+      // The open smart folder was deleted, here or elsewhere.
+      const s = store.state.source;
+      if (s.kind === 'smart' && (changed.has('source') || changed.has('smartFolders')) && !store.smartFolder(s.id)) {
+        store.set({ source: { kind: 'role', role: 'inbox', label: 'Inbox' }, selectedThread: null });
+        return;
+      }
+      if (changed.has('source') && s.kind !== 'search') this.beforeSearch = s;
+      if (changed.has('source')) {
+        this.loadedSmartQuery = openSmartQuery();
+        void this.reload();
+      }
       // A folder renamed here or elsewhere keeps its title current, and
       // Empty Spam/Trash knows when there's nothing left.
       else if (changed.has('mailboxes') && (store.state.source.kind === 'mailbox' || emptiable(store.state.source))) this.renderHeader();
+      else if (changed.has('smartFolders') && s.kind === 'smart') {
+        // Reloading loses the selection and scroll, so only for a new search,
+        // not a rename, a new count or another folder's change.
+        if (this.loadedSmartQuery !== openSmartQuery()) {
+          this.loadedSmartQuery = openSmartQuery();
+          void this.reload();
+        } else this.renderHeader();
+      }
       else if (changed.has('favorites') && store.state.source.kind === 'person') this.renderHeader();
     });
     const refresh = debounce(() => void this.refresh(), 300);
@@ -103,11 +138,16 @@ export class MailView {
     this.scroller.focus({ preventScroll: true });
   }
 
+  private clearSearch() {
+    if (store.state.source.kind === 'search') store.set({ source: this.beforeSearch, selectedThread: null });
+  }
+
   private query(): ThreadQuery {
     const s = store.state.source;
     const q: ThreadQuery = {};
     if (s.kind === 'role') q.role = s.role;
     else if (s.kind === 'mailbox') q.mailbox_id = s.mailbox_id;
+    else if (s.kind === 'smart') q.smart_folder_id = s.id;
     else if (s.kind === 'person') q.search = personQuery(s.emails, s.filter);
     else q.search = s.query;
     return q;
@@ -125,8 +165,10 @@ export class MailView {
       this.header,
       h('div.list-title',
         s.kind === 'person' && h('button.icon-btn', { title: `Back to ${s.back?.label ?? 'Inbox'}`, 'aria-label': 'Back', on: { click: () => store.set({ source: s.back ?? { kind: 'role', role: 'inbox', label: 'Inbox' } }) } }, icon('chevronLeft')),
-        h('h1', (s.kind === 'person' && this.person?.summary?.name) || (s.kind === 'mailbox' && store.mailbox(s.mailbox_id)?.path) || s.label),
+        h('h1', (s.kind === 'person' && this.person?.summary?.name) || (s.kind === 'mailbox' && store.mailbox(s.mailbox_id)?.path) || (s.kind === 'smart' && store.smartFolder(s.id)?.name) || s.label),
         h('span.spacer'),
+        s.kind === 'search' && h('button.icon-btn', { title: 'Save this search as a smart folder', 'aria-label': 'Save as smart folder', on: { click: () => void this.saveSearch(s.query) } }, icon('smartFolder')),
+        s.kind === 'smart' && h('button.icon-btn', { title: 'Edit this smart folder', 'aria-label': 'Edit smart folder', on: { click: () => void this.editSmart(s.id) } }, icon('draft')),
         this.emptyButton(s),
         h('button.icon-btn', { title: 'Refresh (sync now)', 'aria-label': 'Sync now', on: { click: () => void api.syncNow(null).then(() => toast('Syncing…', { quiet: true })) } }, icon('refresh')),
         h('button.icon-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose'))),
@@ -147,6 +189,16 @@ export class MailView {
     );
   }
 
+  private async saveSearch(query: string) {
+    const f = await smartFolderDialog({ query });
+    if (f) store.set({ source: { kind: 'smart', id: f.id, label: f.name }, selectedThread: null });
+  }
+
+  private async editSmart(id: string) {
+    const folder = store.smartFolder(id);
+    if (folder) await smartFolderDialog({ folder });
+  }
+
   /** "Empty Spam" / "Empty Trash" while one of those is open. */
   private emptyButton(s: MailSource) {
     const e = emptiable(s);
@@ -161,6 +213,7 @@ export class MailView {
     ++this.generation;
     this.cursor = -1;
     this.selected.clear();
+    this.range = null;
     this.scroller.scrollTop = 0;
     this.renderHeader();
     await this.list.reset();
@@ -209,26 +262,71 @@ export class MailView {
   }
 
   toggleSelect(t: ThreadSummary) {
+    this.range = null;
     if (this.selected.has(t.thread_id)) this.selected.delete(t.thread_id);
     else this.selected.set(t.thread_id, t);
     this.renderHeader();
     this.renderRows();
   }
 
+  /** Select every conversation in the list, including ones not loaded yet. */
+  async selectAll() {
+    const gen = this.generation;
+    const rows = await this.list.all();
+    if (!rows || gen !== this.generation) return;
+    this.range = null;
+    this.selected = new Map(rows.map((t) => [t.thread_id, t]));
+    this.renderHeader();
+    this.renderRows();
+  }
+
   private async move(delta: number) {
     if (!this.list.total) return;
-    this.cursor = Math.max(0, Math.min(this.list.total - 1, this.cursor + delta));
-    const y = this.cursor * ROW_H;
-    const top = this.logicalTop();
-    if (y < top) this.scrollToIndex(this.cursor);
-    else if (y + ROW_H > top + this.scroller.clientHeight) this.scrollToIndex(this.cursor, ROW_H - this.scroller.clientHeight);
-    this.renderRows();
+    this.range = null;
+    this.moveCursor(this.cursor + delta);
     if (store.state.selectedThread) {
       const cursor = this.cursor;
       const t = await this.list.get(cursor);
       // A later keypress may have moved on while this row was fetched.
       if (t && cursor === this.cursor) void this.showThread(t.thread_id);
     }
+  }
+
+  /** Shift+Arrow or Shift+click: move the cursor to row `to` and select every
+   *  conversation from where the range started to it, on top of whatever was
+   *  selected before the range. */
+  async extendTo(to: number) {
+    if (!this.list.total) return;
+    // A cleared selection (Clear, or an action that took the rows away) starts afresh.
+    if (!this.range || !this.selected.size) {
+      if (this.cursor < 0) this.cursor = this.clamp(to);
+      this.range = { anchor: this.cursor, base: new Map(this.selected) };
+    }
+    this.moveCursor(to);
+    const { anchor, base } = this.range;
+    const cursor = this.cursor;
+    const [lo, hi] = anchor < cursor ? [anchor, cursor] : [cursor, anchor];
+    const rows = await Promise.all(Array.from({ length: hi - lo + 1 }, (_, i) => this.list.get(lo + i)));
+    // A later keypress may have moved on while rows were fetched.
+    if (cursor !== this.cursor || this.range?.base !== base) return;
+    this.selected = new Map(base);
+    for (const t of rows) if (t) this.selected.set(t.thread_id, t);
+    this.renderHeader();
+    this.renderRows();
+  }
+
+  private clamp(i: number) {
+    return Math.max(0, Math.min(this.list.total - 1, i));
+  }
+
+  /** Put the cursor on row `i`, scrolling it into view. */
+  private moveCursor(i: number) {
+    this.cursor = this.clamp(i);
+    const y = this.cursor * ROW_H;
+    const top = this.logicalTop();
+    if (y < top) this.scrollToIndex(this.cursor);
+    else if (y + ROW_H > top + this.scroller.clientHeight) this.scrollToIndex(this.cursor, ROW_H - this.scroller.clientHeight);
+    this.renderRows();
   }
 
   private async openAtCursor() {
@@ -245,6 +343,9 @@ export class MailView {
     bind('ArrowDown', 'Next conversation', () => void this.move(1), s);
     bind('k', 'Previous conversation', () => void this.move(-1), s);
     bind('ArrowUp', 'Previous conversation', () => void this.move(-1), s);
+    bind('shift+ArrowDown', 'Select next conversation too', () => void this.extendTo(this.cursor + 1), s);
+    bind('shift+ArrowUp', 'Select previous conversation too', () => void this.extendTo(this.cursor - 1), s);
+    bind('mod+a', 'Select all conversations', () => void this.selectAll(), s, () => this.list.total > 0);
     bind('Enter', 'Open conversation', () => void this.openAtCursor(), s);
     bind('o', 'Open conversation', () => void this.openAtCursor(), s);
     bind('x', 'Select conversation', () => { const t = this.list.at(this.cursor); if (t) this.toggleSelect(t); }, s);

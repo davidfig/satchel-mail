@@ -7,6 +7,7 @@ pub mod ai_folder;
 pub mod blobs;
 pub mod calendar;
 pub mod contacts;
+pub mod doc_viewer;
 mod dispatch;
 pub mod engine;
 pub mod error;

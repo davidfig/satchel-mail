@@ -1,4 +1,4 @@
-# 0060. Gmail new-mail signal over IMAP IDLE, and a check on window focus
+# 0068. Gmail new-mail signal over IMAP IDLE, and a check on window focus
 
 - **Status:** Accepted
 - **Date:** 2026-11-06

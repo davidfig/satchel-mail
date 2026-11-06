@@ -218,7 +218,7 @@ Initial sync strategy: headers + snippets for the last N months first (fast inbo
 - Keyboard-first (Gmail/Superhuman-style shortcuts), command palette.
 
 Views:
-1. **Mail** — accounts/mailboxes sidebar, unified inbox, thread list, reading pane, composer (rich text + plain), search with operators (`from: to: has:attachment before:`).
+1. **Mail** — accounts/mailboxes sidebar, unified inbox, thread list, reading pane, composer (rich text + plain), search with operators (`from: to: has:attachment before:`), smart folders (saved searches under Mail, 0065).
 2. **Calendar** — day/week/month/agenda, event editor, invite responses, free-time finder.
 3. **Review** — the proposal queue: grouped by agent and thread, inline diffs, edit-before-approve, bulk approve for low-risk ops (labels/archive), reject with note (fed back to the agent via `get_proposal_status`).
 4. **Settings** — accounts, AI agents & policies, mirror scope, privacy.
@@ -300,4 +300,4 @@ Each decision, including these, has its own record in [docs/decisions/](decision
 - **Proposal de-duplication** and **email-invite RSVP** (`RespondToEmailInvite`) were added.
 - **Large lists:** the thread list is a windowed cache addressed by offset, sized by `CountThreads`, holding at most 30 pages of 100; the scrollbar is compressed above 8M px so million-thread folders scroll. Refreshes re-read only the visible window and keep the top visible thread anchored. Agents page with keyset (`before` + `before_thread_id`).
 - **Search:** SQLite FTS5 instead of a tantivy index, so text search, filters, counts and paging are one query with no result cap; headers are searchable before bodies download.
-- **Updater:** behind the `updater` feature; `scripts/release.sh` enables it when an update URL and signing key are provided.
+- **Updater:** behind the `updater` feature; `scripts/release.sh` enables it when an update URL and signing key are provided. Release builds read `latest.json` from the newest GitHub release and offer the update with a toast (0063).

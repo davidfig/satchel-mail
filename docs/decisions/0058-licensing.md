@@ -26,7 +26,10 @@ the app.
   copied or used on their own. App files have no per-file headers.
 - **Contributions under a CLA** (`CLA.md`): contributors keep their
   copyright and license it to the project under any terms, so a hosted
-  version, a commercial license or a later relicense stay possible.
+  version, a commercial license or a later relicense stay possible. The
+  agreement can pass to a successor (CLA section 7, added 2026-10-31 before
+  anyone else had signed), so the project can move into a nonprofit or a
+  company later.
 - **History kept** as it is; the secrets scan of 2026-10-31 found nothing.
 - **Names are separate:** `TRADEMARKS.md` keeps forks from shipping as
   satchel.email (0055).

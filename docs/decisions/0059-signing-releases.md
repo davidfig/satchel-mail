@@ -30,7 +30,7 @@ from this repository.
   attestation (`gh attestation verify`) once the repository is public. Linux
   relies on these.
 - **No unsigned releases:** a `v*` tag fails unless the Mac and Windows keys
-  are set. Branch builds sign with whatever keys exist and warn about the rest.
+  are set (until Windows signing is ready, a tag leaves Windows out: 0064). Branch builds sign with whatever keys exist and warn about the rest.
 - Keys are repository secrets; names that aren't secret (the Artifact Signing
   endpoint, account and profile) are repository variables. Setup steps are in
   `docs/RELEASING.md`.
@@ -45,6 +45,5 @@ from this repository.
 - Artifact Signing's identity check has had country limits for individuals;
   if it isn't available, an OV certificate in a cloud HSM drops into the same
   `signCommand`.
-- Not covered yet: GPG-signing the AppImage or an apt repository, and the
-  Tauri updater's own update signature (`TAURI_SIGNING_PRIVATE_KEY`, already
-  supported by `scripts/release.sh`).
+- Not covered yet: GPG-signing the AppImage or an apt repository. The Tauri
+  updater's own update signature is in 0063.

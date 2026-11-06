@@ -64,8 +64,16 @@ export function renderRows(view: MailView) {
           style: { height: `${ROW_H}px` },
           dataset: { idx: String(idx) },
           on: {
+            // Shift+click selects rows, not the text between two clicks.
+            mousedown: (e: MouseEvent) => { if (e.shiftKey) e.preventDefault(); },
             click: (e: MouseEvent) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey) {
+              if (e.shiftKey) {
+                void view.extendTo(idx);
+                return;
+              }
+              if (e.metaKey || e.ctrlKey) {
+                // A later Shift+click ranges from here.
+                view.cursor = idx;
                 view.toggleSelect(t);
                 return;
               }
@@ -104,6 +112,7 @@ function emptyMessage(): string {
   const s = store.state.source;
   if (!store.state.accounts.length) return 'No accounts yet — add one in Settings.';
   if (s.kind === 'search') return 'No matching conversations.';
+  if (s.kind === 'smart') return 'Nothing in this smart folder right now.';
   if (s.kind === 'person') return s.filter === 'all' ? `No conversations with ${s.label}.` : 'No matching conversations.';
   return s.kind === 'role' && s.role === 'inbox' ? 'Inbox zero. 🎉' : 'Nothing here.';
 }

@@ -1,0 +1,94 @@
+//! Updates from the release feed (0063). Release builds with the `updater`
+//! feature check the feed at start and every six hours, download a newer
+//! version in the background and check its signature, then tell the UI
+//! (`satchel://update-ready`), which offers to restart into it. Nothing
+//! installs until the user says so. Other builds have no feed: the commands
+//! answer that there's nothing to install.
+
+/// The version downloaded and waiting to be installed, if any. For a UI that
+/// loaded after `satchel://update-ready` was sent.
+#[tauri::command]
+pub fn update_ready(app: tauri::AppHandle) -> Option<String> {
+    #[cfg(feature = "updater")]
+    return feed::ready(&app);
+    #[cfg(not(feature = "updater"))]
+    {
+        let _ = app;
+        None
+    }
+}
+
+/// Installs the downloaded update and restarts into it.
+#[tauri::command]
+pub fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(feature = "updater")]
+    return feed::install(&app);
+    #[cfg(not(feature = "updater"))]
+    {
+        let _ = app;
+        Err("this build doesn't update itself".into())
+    }
+}
+
+/// Starts checking the feed, if this build has one.
+pub fn start(app: &tauri::AppHandle) {
+    #[cfg(feature = "updater")]
+    feed::start(app);
+    #[cfg(not(feature = "updater"))]
+    let _ = app;
+}
+
+#[cfg(feature = "updater")]
+mod feed {
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    use tauri::{Emitter, Manager};
+    use tauri_plugin_updater::{Update, UpdaterExt};
+
+    const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+
+    /// A downloaded update whose signature checked out, with its bytes.
+    #[derive(Default)]
+    struct Staged(Mutex<Option<(Update, Vec<u8>)>>);
+
+    pub fn start(app: &tauri::AppHandle) {
+        app.manage(Staged::default());
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                if let Err(e) = check(&app).await {
+                    tracing::warn!("update check: {e:#}");
+                }
+                tokio::time::sleep(EVERY).await;
+            }
+        });
+    }
+
+    async fn check(app: &tauri::AppHandle) -> anyhow::Result<()> {
+        let Some(update) = app.updater()?.check().await? else { return Ok(()) };
+        if ready(app).as_deref() == Some(update.version.as_str()) {
+            return Ok(());
+        }
+        // `download` checks the signature against the public key built into the app.
+        let bytes = update.download(|_, _| {}, || {}).await?;
+        let version = update.version.clone();
+        tracing::info!("update {version} downloaded");
+        *app.state::<Staged>().0.lock().unwrap() = Some((update, bytes));
+        app.emit_to("main", "satchel://update-ready", &version)?;
+        Ok(())
+    }
+
+    pub fn ready(app: &tauri::AppHandle) -> Option<String> {
+        app.state::<Staged>().0.lock().unwrap().as_ref().map(|(u, _)| u.version.clone())
+    }
+
+    pub fn install(app: &tauri::AppHandle) -> Result<(), String> {
+        let Some((update, bytes)) = app.state::<Staged>().0.lock().unwrap().take() else {
+            return Err("no update has been downloaded".into());
+        };
+        // On Windows the installer takes over from here and quits the app itself.
+        update.install(bytes).map_err(|e| e.to_string())?;
+        app.restart()
+    }
+}

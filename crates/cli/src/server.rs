@@ -77,6 +77,8 @@ pub async fn serve(engine: Arc<Engine>, port: u16, ui: Option<PathBuf>, new_sess
         .route("/api/health", get(|| async { "ok" }));
     if let Some(dir) = ui {
         let index = dir.join("index.html");
+        // The document viewer (0062): a missing file is a 404, not the app.
+        app = app.nest_service("/golemdocs", ServeDir::new(dir.join("golemdocs")));
         app = app.fallback_service(ServeDir::new(&dir).not_found_service(ServeFile::new(index)));
     }
     let app = app
@@ -110,6 +112,18 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
     if is_api && framed(req.headers()) {
         return (StatusCode::FORBIDDEN, "no framing").into_response();
     }
+    // The document viewer (0062) gets its own headers.
+    if let Some(file) = path.strip_prefix("/golemdocs/") {
+        if !satchel_core::doc_viewer::safe_path(file) {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        let origin = format!("http://{host}");
+        let mut resp = next.run(req).await;
+        if resp.status().is_success() {
+            viewer_headers(&mut resp, file, &origin);
+        }
+        return resp;
+    }
     // The printed `#session=` link is read by the page itself, which keeps the
     // token in its own storage and drops it from the address bar.
     let mut resp = next.run(req).await;
@@ -125,6 +139,18 @@ async fn guard(State(st): State<AppState>, req: Request, next: Next) -> Response
         );
     }
     resp
+}
+
+/// The document viewer's headers (see `satchel_core::doc_viewer`): its page
+/// may be framed by our own page only, and its files read from the sandbox.
+fn viewer_headers(resp: &mut Response, file: &str, origin: &str) {
+    let h = resp.headers_mut();
+    for (name, value) in satchel_core::doc_viewer::headers(file, origin, Some(origin)) {
+        if let Ok(v) = HeaderValue::from_str(&value) {
+            h.insert(name, v);
+        }
+    }
+    h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("SAMEORIGIN"));
 }
 
 /// Whether the browser says this request loads into a frame.

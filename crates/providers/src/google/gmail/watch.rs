@@ -1,4 +1,4 @@
-//! Gmail's new-mail signal: IMAP IDLE on the inbox (0060).
+//! Gmail's new-mail signal: IMAP IDLE on the inbox (0068).
 //!
 //! The Gmail API's own push needs a Cloud Pub/Sub topic, which a local app
 //! doesn't have. This connection only says when to look: it opens the inbox

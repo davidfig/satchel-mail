@@ -8,6 +8,7 @@ import { store } from './state';
 import { restoreLocation } from './app/location';
 import { Shell } from './app/shell';
 import { installAlerts } from './app/alerts';
+import { installUpdates } from './app/updates';
 import { followPage } from './app/follow';
 import { catchHostLinks, followLink } from './views/mail/message-body';
 import { followTarget, linkScheme } from './lib/thread';
@@ -32,6 +33,7 @@ async function boot(): Promise<boolean> {
   if (store.state.accounts.length) restoreLocation();
   new Shell();
   installAlerts();
+  installUpdates();
   if (!store.state.accounts.length) store.set({ view: 'settings' });
   return true;
 }

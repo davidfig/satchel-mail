@@ -3,11 +3,13 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod doc_viewer;
 #[cfg(target_os = "macos")]
 mod mac_alerts;
 #[cfg(target_os = "macos")]
 mod menu;
 mod notify;
+mod update;
 
 use std::sync::Arc;
 
@@ -45,11 +47,12 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
 }
 
 /// Whether a navigation stays in the app: its own pages (and the dev server's
-/// in a dev build), IPC, and the in-memory documents frames show (message
-/// bodies, attachments).
+/// in a dev build), IPC, the in-memory documents frames show (message
+/// bodies, attachments), and the document viewer's page (0062).
 fn stays_in_app(url: &tauri::Url, dev_url: Option<&tauri::Url>) -> bool {
     match url.scheme() {
         "tauri" | "ipc" | "about" | "blob" | "data" => true,
+        _ if doc_viewer::is_viewer(url) => true,
         // Windows serves the app and IPC from these hosts.
         "http" | "https" if matches!(url.host_str(), Some("tauri.localhost" | "ipc.localhost")) => true,
         _ => cfg!(debug_assertions) && dev_url.is_some_and(|d| d.origin() == url.origin()),
@@ -237,7 +240,8 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         // Reopen the window where and at the size the user last left it.
-        .plugin(tauri_plugin_window_state::Builder::default().build());
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .register_asynchronous_uri_scheme_protocol(doc_viewer::SCHEME, doc_viewer::handle);
     #[cfg(feature = "updater")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(target_os = "macos")]
@@ -318,6 +322,7 @@ fn main() {
                 })
                 .build()?;
             save_window_state_on_change(&window);
+            update::start(app.handle());
             #[cfg(target_os = "macos")]
             window.on_window_event(|e| {
                 if let tauri::WindowEvent::Focused(f) = e {
@@ -336,7 +341,9 @@ fn main() {
             notify::os_alerts,
             notify::can_notify,
             notify::notify,
-            notify::take_open_request
+            notify::take_open_request,
+            update::update_ready,
+            update::install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running satchel.email");

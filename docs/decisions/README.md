@@ -58,10 +58,18 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0051 | [One sidebar: fixed mode rows, each view's own section below](0051-one-sidebar.md) | Accepted |
 | 0052 | [All credentials in one keychain item](0052-one-keychain-item.md) | Accepted |
 | 0053 | [Favorite senders: a local list of addresses, highlighted everywhere](0053-favorite-senders.md) | Accepted |
-| 0054 | [View attachments in the app; Open and Save beside it](0054-attachment-viewer.md) | Accepted |
+| 0054 | [View attachments in the app; Open and Save beside it](0054-attachment-viewer.md) | Partly superseded by 0062 |
 | 0055 | [Name: satchel.email](0055-name-satchel-email.md) | Accepted |
 | 0056 | [Calendar alerts: VALARMs in the stored event, fired by the core](0056-calendar-alerts.md) | Accepted |
 | 0057 | [Calendar alerts scheduled with macOS](0057-calendar-alerts-in-macos.md) | Accepted |
 | 0058 | [Licensing: AGPL app, MIT/Apache libraries, a CLA](0058-licensing.md) | Accepted |
 | 0059 | [Signed releases from CI: Developer ID, Artifact Signing, attestations](0059-signing-releases.md) | Accepted |
-| 0060 | [Gmail new-mail signal over IMAP IDLE, and a check on window focus](0060-gmail-idle-and-sync-on-focus.md) | Accepted |
+| 0060 | [Full Google verification, with a yearly CASA assessment](0060-google-verification-and-casa.md) | Accepted |
+| 0061 | [Check DKIM ourselves when no server is trusted](0061-checking-dkim-ourselves.md) | Accepted |
+| 0062 | [Documents and web pages through golemdocs' sandboxed viewer](0062-golemdocs-viewer.md) | Accepted |
+| 0063 | [Automatic updates from GitHub Releases, offered with a toast](0063-automatic-updates.md) | Accepted |
+| 0064 | [Release Mac and Linux first; Windows joins when it's signed](0064-mac-and-linux-first.md) | Accepted |
+| 0065 | [Smart folders: saved searches under Mail](0065-smart-folders.md) | Accepted |
+| 0066 | [A change on screen stays there: commit it with its op, and hold list reads](0066-changes-that-stick.md) | Accepted |
+| 0067 | [A verified sender's link mismatch asks on click, not with a banner](0067-link-mismatches-ask-on-click.md) | Accepted |
+| 0068 | [Gmail new-mail signal over IMAP IDLE, and a check on window focus](0068-gmail-idle-and-sync-on-focus.md) | Accepted |

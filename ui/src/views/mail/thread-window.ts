@@ -16,6 +16,8 @@ export class ThreadWindow {
   private pages = new Map<number, ThreadSummary[]>();
   private inflight = new Map<number, Promise<void>>();
   private gen = 0;
+  /** Writes under way that take rows out of the list (see `holdReads`). */
+  private writes = new Set<Promise<void>>();
 
   private base: () => ThreadQuery;
   private onChange: () => void;
@@ -27,6 +29,17 @@ export class ThreadWindow {
     this.onError = onError;
   }
 
+  /** Reads of the list wait for `write`: until it's committed the core still
+   *  lists the rows just taken off screen, and they'd come back. */
+  holdReads(write: Promise<unknown>) {
+    const done: Promise<void> = write.then(() => {}, () => {}).then(() => { this.writes.delete(done); });
+    this.writes.add(done);
+  }
+
+  private async settled() {
+    while (this.writes.size) await Promise.all(this.writes);
+  }
+
   /** Start over (new mailbox or search). */
   async reset() {
     const g = ++this.gen;
@@ -36,6 +49,8 @@ export class ThreadWindow {
     this.loaded = false;
     this.onChange();
     try {
+      await this.settled();
+      if (g !== this.gen) return;
       const [count, first] = await Promise.all([api.countThreads(this.base()), api.listThreads({ ...this.base(), limit: PAGE, offset: 0 })]);
       if (g !== this.gen) return;
       this.total = count.total;
@@ -72,12 +87,16 @@ export class ThreadWindow {
 
   /** Row i, loading its page if needed. */
   async get(i: number): Promise<ThreadSummary | undefined> {
-    if (i < 0 || i >= this.total) return undefined;
-    const hit = this.at(i);
-    if (hit) return hit;
-    const n = Math.floor(i / PAGE);
-    await (this.inflight.get(n) ?? this.fetch(n));
-    return this.at(i);
+    // Again if a refresh or removal dropped the page being read.
+    for (;;) {
+      if (i < 0 || i >= this.total) return undefined;
+      const hit = this.at(i);
+      if (hit) return hit;
+      const n = Math.floor(i / PAGE);
+      const g = this.gen;
+      await (this.inflight.get(n) ?? this.fetch(n));
+      if (g === this.gen) return this.at(i);
+    }
   }
 
   private fetch(n: number): Promise<void> {
@@ -89,6 +108,8 @@ export class ThreadWindow {
   private async load(n: number) {
     const g = this.gen;
     try {
+      await this.settled();
+      if (g !== this.gen) return;
       const rows = await api.listThreads({ ...this.base(), limit: PAGE, offset: n * PAGE });
       if (g !== this.gen) return;
       this.pages.set(n, rows);
@@ -99,6 +120,18 @@ export class ThreadWindow {
     } finally {
       this.inflight.delete(n);
     }
+  }
+
+  /** Every row in the list, for Select all. Pages outside the cache are read
+   *  without caching them, so a long list doesn't evict the visible window.
+   *  Null if the list changed (new folder or search) meanwhile. */
+  async all(): Promise<ThreadSummary[] | null> {
+    const g = this.gen;
+    await this.settled();
+    if (g !== this.gen) return null;
+    const pages = await Promise.all(Array.from({ length: Math.ceil(this.total / PAGE) }, (_, n) =>
+      this.pages.get(n) ?? api.listThreads({ ...this.base(), limit: PAGE, offset: n * PAGE })));
+    return g === this.gen ? pages.flat() : null;
   }
 
   indexOf(threadId: string): number {
@@ -159,6 +192,8 @@ export class ThreadWindow {
     const g = ++this.gen;
     this.inflight.clear();
     try {
+      await this.settled();
+      if (g !== this.gen) return;
       const count = await api.countThreads(this.base());
       const total = count.total;
       const firstPage = Math.floor(Math.max(0, Math.min(first, total - 1)) / PAGE);

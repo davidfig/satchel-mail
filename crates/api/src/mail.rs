@@ -167,6 +167,9 @@ pub struct MessageDetail {
     /// Signs this message may be phishing or unsafe, computed by the core.
     #[serde(default)]
     pub warnings: Vec<MessageWarning>,
+    /// Links to ask about when clicked, because their text names another domain.
+    #[serde(default)]
+    pub deceptive_links: Vec<DeceptiveLink>,
     /// How to unsubscribe, from the List-Unsubscribe header.
     #[serde(default)]
     pub unsubscribe: Option<Unsubscribe>,
@@ -200,6 +203,17 @@ pub enum WarningKind {
 pub struct MessageWarning {
     pub kind: WarningKind,
     pub message: String,
+}
+
+/// A link whose text shows one domain but which goes to another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeceptiveLink {
+    /// The link's address, as a click on it reports it.
+    pub url: String,
+    /// The host its text shows.
+    pub shown: String,
+    /// The host it really goes to.
+    pub actual: String,
 }
 
 /// Unsubscribe methods a message offers (RFC 2369 / RFC 8058).
@@ -276,9 +290,15 @@ pub struct ThreadQuery {
     /// Unified view across accounts by role (e.g. all inboxes).
     pub role: Option<MailboxRole>,
     pub account_id: Option<Id>,
+    /// A smart folder: its saved search, narrowed by `search` if given.
+    #[serde(default)]
+    pub smart_folder_id: Option<Id>,
     /// Search query (supports from:, to:, with:, subject:, has:attachment,
-    /// is:unread, is:flagged, is:favorite, before:, after:, in:). from:, to: and with: take a
-    /// comma-separated list; a full address matches exactly.
+    /// is:unread/read, is:flagged/unflagged, is:favorite, before:, after:,
+    /// newer_than:7d, older_than:1y, in:, in:anywhere, account:). from:, to:,
+    /// with:, in: and account: take a comma-separated list; a full address
+    /// matches exactly. Every term must hold; a leading `-` leaves out threads
+    /// with any message matching it.
     pub search: Option<String>,
     pub limit: Option<u32>,
     /// Keyset paging: threads older than this `last_date`...
@@ -321,4 +341,33 @@ pub struct OutgoingAttachment {
     pub mime_type: String,
     /// Base64 content.
     pub data_base64: String,
+}
+
+/// A saved search shown under Mail in the sidebar. It searches every folder
+/// of every account (Trash and Junk only with `in:anywhere`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SmartFolder {
+    /// Empty when creating one.
+    #[serde(default)]
+    pub id: Id,
+    pub name: String,
+    /// A search in the search box's language (see [`ThreadQuery::search`]).
+    pub query: String,
+    #[serde(default)]
+    pub badge: SmartBadge,
+    /// The number the badge shows (filled in by `ListSmartFolders`).
+    #[serde(default)]
+    pub count: u32,
+}
+
+/// What a smart folder's sidebar badge counts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SmartBadge {
+    /// Conversations with unread mail.
+    #[default]
+    Unread,
+    /// All matching conversations.
+    Total,
+    None,
 }

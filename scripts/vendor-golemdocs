@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Vendor golemdocs' read-only document viewer (0062).
+#
+#   scripts/vendor-golemdocs            rebuild the pinned commit
+#   scripts/vendor-golemdocs REF        pin REF (a commit, tag or branch) and build it
+#
+# Clones golemdocs into a temporary folder, checks out the pinned commit, builds
+# its viewer (`build:viewer`, with the default font set) and copies the result
+# into ui/public/golemdocs/<build>/, replacing the previous build. The pin lives
+# in ui/src/lib/golemdocs.ts, which the UI reads to find the folder.
+#
+#   GOLEMDOCS_REPO   where to clone from (default the GitHub repository; a local
+#                    checkout is faster and is never modified)
+#   VIEWER_FONTS     passed to the build to change the font set (see golemdocs'
+#                    docs/architecture/viewer.md); the default is Satchel's choice
+#
+# Needs git, node and pnpm. The output is committed, so building Satchel never
+# needs golemdocs or its toolchain.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="${GOLEMDOCS_REPO:-https://github.com/davidfig/golemdocs.git}"
+PIN="$ROOT/ui/src/lib/golemdocs.ts"
+OUT="$ROOT/ui/public/golemdocs"
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+src="$work/golemdocs"
+
+echo "Cloning $REPO"
+git clone --quiet --no-checkout "$REPO" "$src"
+if [[ $# -gt 0 ]]; then
+  git -C "$src" fetch --quiet origin "$1" 2>/dev/null || true
+  commit="$(git -C "$src" rev-parse --verify "$1^{commit}" 2>/dev/null || git -C "$src" rev-parse --verify "origin/$1^{commit}" 2>/dev/null || git -C "$src" rev-parse --verify FETCH_HEAD)"
+else
+  commit="$(sed -n "s/^export const GOLEMDOCS_COMMIT = '\([0-9a-f]\{40\}\)';$/\1/p" "$PIN")"
+fi
+[[ ${#commit} -eq 40 ]] || { echo "no commit to build" >&2; exit 1; }
+build="${commit:0:12}"
+git -C "$src" checkout --quiet --detach "$commit"
+echo "Building golemdocs $build"
+
+(cd "$src" && pnpm install --frozen-lockfile --silent && pnpm --filter @golemdocs/client build:viewer)
+
+dist="$src/client/dist-viewer"
+[[ -f "$dist/viewer.html" && -f "$dist/fonts/manifest.json" ]] || { echo "build has no viewer.html or fonts" >&2; exit 1; }
+
+rm -rf "$OUT"
+mkdir -p "$OUT"
+cp -R "$dist" "$OUT/$build"
+cp "$src/LICENSE" "$OUT/$build/LICENSE" 2>/dev/null || true
+cat > "$OUT/$build/SOURCE.md" <<NOTE
+# golemdocs viewer $build
+
+Built by \`scripts/vendor-golemdocs\` from golemdocs commit
+\`$commit\` (https://github.com/davidfig/golemdocs/commit/$commit),
+\`pnpm --filter @golemdocs/client build:viewer\`. AGPL-3.0, like Satchel; the
+fonts carry their own licenses beside them in \`fonts/\`. Don't edit these
+files: rebuild them with the script. See docs/decisions/0062-golemdocs-viewer.md.
+NOTE
+
+sed -i.bak -e "s/^export const GOLEMDOCS_COMMIT = '.*';$/export const GOLEMDOCS_COMMIT = '$commit';/" \
+  -e "s/^export const GOLEMDOCS_BUILD = '.*';$/export const GOLEMDOCS_BUILD = '$build';/" "$PIN"
+rm "$PIN.bak"
+grep -q "GOLEMDOCS_BUILD = '$build'" "$PIN" || { echo "couldn't record the pin in $PIN" >&2; exit 1; }
+
+echo "Vendored golemdocs $build: $(du -sh "$OUT/$build" | cut -f1) in $(find "$OUT/$build" -type f | wc -l | tr -d ' ') files"

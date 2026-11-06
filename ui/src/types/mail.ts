@@ -56,6 +56,16 @@ export interface MessageWarning {
   message: string;
 }
 
+/** A link whose text shows one domain but which goes to another. */
+export interface DeceptiveLink {
+  /** The link's address, as a click on it reports it. */
+  url: string;
+  /** The host its text shows. */
+  shown: string;
+  /** The host it really goes to. */
+  actual: string;
+}
+
 export interface Unsubscribe {
   url: string | null;
   /** Only set when it names exactly one valid address. */
@@ -109,6 +119,8 @@ export interface MessageDetail {
   body_pending: boolean;
   invite?: Invite | null;
   warnings?: MessageWarning[];
+  /** Links to ask about when clicked, because their text names another domain. */
+  deceptive_links?: DeceptiveLink[];
   unsubscribe?: Unsubscribe | null;
   /** List or machine-sent mail nobody expects a reply to (headers or a no-reply/tokenized reply address), unless it has a helpdesk "reply above this line" marker. */
   bulk?: boolean;
@@ -139,6 +151,8 @@ export interface ThreadQuery {
   mailbox_id?: Id | null;
   role?: MailboxRole | null;
   account_id?: Id | null;
+  /** A smart folder: its saved search, narrowed by `search` if given. */
+  smart_folder_id?: Id | null;
   search?: string | null;
   limit?: number | null;
   before?: ISODate | null;
@@ -167,3 +181,17 @@ export interface Draft {
 }
 
 export type ReplyMode = 'reply' | 'reply_all' | 'forward';
+
+/** What a smart folder's sidebar badge counts. */
+export type SmartBadge = 'unread' | 'total' | 'none';
+
+/** A saved search shown under Mail in the sidebar, across every account. */
+export interface SmartFolder {
+  /** Empty when creating one. */
+  id: Id;
+  name: string;
+  query: string;
+  badge: SmartBadge;
+  /** The number the badge shows. */
+  count: number;
+}

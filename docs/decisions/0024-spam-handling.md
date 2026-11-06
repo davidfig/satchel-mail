@@ -1,6 +1,6 @@
 # 0024. Spam: sender rules outrank the server, and the core warns about phishing
 
-- **Status:** Accepted (enforcement narrowed by 0034)
+- **Status:** Accepted (enforcement narrowed by 0034; link warnings changed by 0067)
 - **Date:** 2026-10-24
 
 ## Context
@@ -44,7 +44,12 @@ message is read, so the UI, CLI and agents all see the same signals:
   through a known newsletter click tracker (SendGrid, Mailchimp, …;
   `crates/mime/src/trackers.rs`) don't count: the tracker hides the
   destination rather than naming a wrong one, and flagging them put the
-  warning on nearly every newsletter.
+  warning on nearly every newsletter. Nor do links whose text shows the
+  sender's own domain when the sender is verified (by the user's server,
+  or by Satchel's own DKIM check where no server is trusted, 0061):
+  companies link through second brand domains and their own trackers
+  (`fidelity.com` → `click.fidelityinvestments.com`), and a phisher
+  can't pass verification for the brand they imitate.
 - an attachment can run code or imitate a sign-in page (HTML, executables,
   macro documents, disk images).
 - an invitation comes from an organizer the user has never written to.

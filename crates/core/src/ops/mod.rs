@@ -14,7 +14,7 @@ use tracing::{info, warn};
 use crate::engine::Engine;
 use crate::error::is_transient;
 use crate::provider::{CalendarOp, ContactOp, Providers, ResolvedOp, SyncCtx};
-use crate::store::{MessageRef, OpRow};
+use crate::store::{LocalChange, MessageRef, OpRow};
 
 const MAX_ATTEMPTS: u32 = 8;
 
@@ -36,6 +36,16 @@ impl Engine {
 
     pub(crate) fn enqueue(&self, account_id: &str, kind: &str, payload: Value, actor: &str) -> Result<String> {
         let id = self.store.enqueue_op(account_id, kind, &payload, actor)?;
+        self.emit(CoreEvent::OutboxChanged);
+        self.wake_account(account_id);
+        Ok(id)
+    }
+
+    /// Queue an op together with the local change it stands for (see
+    /// [`crate::store::Store::enqueue_change`]). Every optimistic change goes
+    /// through here, or a sync can undo it before the op exists.
+    pub(crate) fn enqueue_change(&self, account_id: &str, kind: &str, payload: Value, actor: &str, change: LocalChange) -> Result<String> {
+        let id = self.store.enqueue_change(account_id, kind, &payload, actor, change)?;
         self.emit(CoreEvent::OutboxChanged);
         self.wake_account(account_id);
         Ok(id)

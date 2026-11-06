@@ -2,6 +2,7 @@ import { api } from '../api';
 import { transport } from '../transport';
 import { h, icon, patch, replace } from '../lib/dom';
 import { deleteFolder, emptiable, emptyFolder, folderDialog, folderTree } from '../lib/folders';
+import { deleteSmartFolder, moveSmartFolder, smartFolderDialog } from '../lib/smart-folders';
 import { fullDate, relative, relativeShort, shortProgress } from '../lib/format';
 import { throttled } from '../lib/throttle';
 import { bind, contextMenu, errorToast, setScope, toast, trigger } from '../lib/ui';
@@ -48,7 +49,7 @@ export class Shell {
     store.subscribe((_, changed) => {
       if (changed.has('view')) this.showView();
       if (changed.has('view') || changed.has('source')) writeJson(LOCATION_KEY, { view: store.state.view, source: store.state.source });
-      if (['view', 'accounts', 'mailboxes', 'pendingProposals', 'source', 'favorites'].some((k) => changed.has(k as never))) this.renderSidebar();
+      if (['view', 'accounts', 'mailboxes', 'smartFolders', 'pendingProposals', 'source', 'favorites'].some((k) => changed.has(k as never))) this.renderSidebar();
     });
     this.renderSidebar();
     this.showView();
@@ -219,6 +220,7 @@ export class Shell {
           // Kept out of the nav so the mode rows above never move. With one
           // account its own section says it all.
           combined ? h('div.nav-sub', this.unifiedItems(favorites || null, unread)) : favorites && h('div.nav-sub', favorites),
+          this.smartFolders(),
           accounts.map((a) => this.accountSection(a, mailboxes.filter((m) => m.account_id === a.id)))),
       // Another view's own section (Calendar's month and calendar list); the
       // view keeps it up to date.
@@ -250,6 +252,38 @@ export class Shell {
   /** The sidebar's primary button for a view whose `n` shortcut creates something. */
   private newButton(label: string) {
     return h('button.primary.compose-btn', { title: `${label} (n)`, 'aria-label': label, on: { click: () => trigger('n') } }, icon('plus', 16), h('span', label));
+  }
+
+  /** Smart folders, above the accounts: each searches every account's folders. */
+  private smartFolders() {
+    const s = store.state.source;
+    const folders = store.state.smartFolders;
+    return h('div.smart-folders',
+      folders.map((f, i) => {
+        const active = s.kind === 'smart' && s.id === f.id;
+        const open = () => this.go('mail', { kind: 'smart', id: f.id, label: f.name });
+        const el = h(`button.mb-item.smart-item${active ? '.active' : ''}`, {
+          title: `${f.name}: ${f.query}`,
+          on: { click: open, dblclick: () => void smartFolderDialog({ folder: f }) },
+        }, icon('smartFolder', 16), h('span.mb-name', f.name), f.badge !== 'none' && f.count > 0 && h('span.mb-count', String(f.count)));
+        contextMenu(el, () => [
+          { label: 'Open', icon: 'mailOpen', run: open },
+          { label: 'Edit…', icon: 'draft', run: () => void smartFolderDialog({ folder: f }) },
+          { label: 'Move up', disabled: i === 0, run: () => moveSmartFolder(f, -1) },
+          { label: 'Move down', disabled: i === folders.length - 1, run: () => moveSmartFolder(f, 1) },
+          '-',
+          { label: 'New smart folder…', icon: 'plus', run: () => void this.newSmartFolder() },
+          { label: 'Delete smart folder…', icon: 'trash', danger: true, run: () => void deleteSmartFolder(f) },
+        ]);
+        return el;
+      }),
+      h('button.mb-item.smart-item.smart-add', { title: 'New smart folder: a saved search across all your mail', on: { click: () => void this.newSmartFolder() } },
+        icon('plus', 16), h('span.mb-name', folders.length ? 'New smart folder' : 'Add a smart folder')));
+  }
+
+  async newSmartFolder(query?: string) {
+    const f = await smartFolderDialog({ query });
+    if (f) this.go('mail', { kind: 'smart', id: f.id, label: f.name });
   }
 
   private accountSection(a: Account, boxes: Mailbox[]) {

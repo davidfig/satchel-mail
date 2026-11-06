@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS messages (
     -- authserv-id of the topmost Authentication-Results header, for learning
     -- which server to trust: NULL not read yet, '' none or unusable.
     auth_serv        TEXT,
+    -- Space-separated domains whose DKIM signatures Satchel verified itself,
+    -- for accounts with no trusted server: NULL not checked yet, '' none.
+    dkim_pass        TEXT,
     -- Local version, bumped on every change (used for proposal staleness).
     version          INTEGER NOT NULL DEFAULT 1,
     indexed          INTEGER NOT NULL DEFAULT 0,
@@ -293,6 +296,16 @@ CREATE TABLE IF NOT EXISTS sender_rules (
 -- the thread list and found with `is:favorite` (0053). Local only.
 CREATE TABLE IF NOT EXISTS favorite_senders (
     email       TEXT PRIMARY KEY,
+    created_at  INTEGER NOT NULL
+);
+
+-- Saved searches shown under Mail in the sidebar (0065). Local only.
+CREATE TABLE IF NOT EXISTS smart_folders (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    query       TEXT NOT NULL,
+    badge       TEXT NOT NULL DEFAULT 'unread',
+    position    INTEGER NOT NULL,
     created_at  INTEGER NOT NULL
 );
 

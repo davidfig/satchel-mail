@@ -6,7 +6,7 @@ import type { ApiError, CoreEvent } from './types';
 
 export interface Transport {
   invoke<T>(cmd: string, args?: unknown): Promise<T>;
-  /** Calls a desktop-host command (`open_url`, `save_file`, `open_file`, `choose_folder`, `cli_path`), not the engine. The web has none. */
+  /** Calls a desktop-host command (`open_url`, `save_file`, `open_file`, `choose_folder`, `cli_path`, `install_update`, …), not the engine. The web has none. */
   host<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
   subscribe(fn: (e: CoreEvent) => void): () => void;
   /** Links the host caught opening as popups (desktop: the message iframe's). The web has none. */
@@ -25,6 +25,11 @@ export interface Transport {
   osAlerts(): Promise<boolean>;
   /** Events an alert's notification asked to open (the Mac app). The web has none. */
   onOpenEvent(fn: (e: { id: string; start: string }) => void): void;
+  /** A newer version the desktop app has downloaded and can restart into (0063), once per version. The web has none. */
+  onUpdateReady(fn: (version: string) => void): void;
+  /** Where the host serves the vendored document viewer (`ui/public/golemdocs/`, 0062):
+   *  the desktop's own `golemdocs:` scheme, or this server. */
+  docViewerBase(): string;
   readonly kind: 'tauri' | 'http';
 }
 
@@ -70,8 +75,20 @@ class TauriTransport implements Transport {
     return () => this.listeners.delete(fn);
   }
 
+  docViewerBase() {
+    // How Tauri names a custom scheme's origin: Windows' WebView2 can't use
+    // custom schemes, so they are served as http://<scheme>.localhost there.
+    return navigator.userAgent.includes('Windows') ? 'http://golemdocs.localhost/' : 'golemdocs://localhost/';
+  }
+
   onOpenLink(fn: (url: string) => void) {
     void import('@tauri-apps/api/event').then(({ listen }) => listen<string>('satchel://open-link', (msg) => fn(msg.payload)));
+  }
+
+  onUpdateReady(fn: (version: string) => void) {
+    void import('@tauri-apps/api/event').then(({ listen }) => listen<string>('satchel://update-ready', (msg) => fn(msg.payload)));
+    // One downloaded before this was listening.
+    void this.host<string | null>('update_ready').then((v) => { if (v) fn(v); });
   }
 
   onMenu(fn: (id: string) => void) {
@@ -149,12 +166,20 @@ class HttpTransport implements Transport {
     return Promise.reject(new Error(`${cmd} is only available in the desktop app`));
   }
 
+  docViewerBase() {
+    return `${location.origin}/golemdocs/`;
+  }
+
   onOpenLink() {
     // Browsers open the iframe's popups themselves.
   }
 
   onMenu() {
     // No menu bar on the web.
+  }
+
+  onUpdateReady() {
+    // `satchel serve` is updated with the CLI.
   }
 
   onFullscreen() {

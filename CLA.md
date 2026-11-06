@@ -1,6 +1,6 @@
 # Contributor License Agreement
 
-This agreement is between you and David Figatner ("the Maintainer") and covers every contribution you submit to satchel.email: code, documentation, tests, translations or any other material, in a pull request, patch or issue ("Contribution").
+This agreement is between you and David Figatner, or whoever later holds the project under section 7 ("the Maintainer"), and covers every contribution you submit to satchel.email: code, documentation, tests, translations or any other material, in a pull request, patch or issue ("Contribution").
 
 You sign it once, by commenting on your first pull request as the CLA bot asks. It then applies to all your Contributions to this project.
 
@@ -33,3 +33,7 @@ The Maintainer doesn't have to accept or use your Contribution. Unless you say o
 ## 6. Companies
 
 If you are contributing on behalf of a company, ask in an issue before you open a pull request so the company can sign instead.
+
+## 7. If the project changes hands
+
+The Maintainer may transfer this agreement, and the licenses you grant in it, to a successor that takes over the project, such as a nonprofit or company the Maintainer forms or chooses to look after it. The successor then becomes the Maintainer, and the agreement continues as before. The project will say publicly who the Maintainer is.

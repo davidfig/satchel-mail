@@ -179,6 +179,10 @@ impl SyncCtx {
                 snippet: rec.snippet.clone(),
             });
         }
+        if id.is_empty() {
+            // Being deleted: the server hasn't caught up yet.
+            self.store.blobs_freed(rec.blob_hash);
+        }
         Ok(id)
     }
 
@@ -204,7 +208,7 @@ impl SyncCtx {
 
     pub fn set_flags_remote(&self, remote_id: &str, flags: Flags) -> Result<()> {
         if let Some(id) = self.message_by_remote(remote_id)? {
-            self.store.set_flags(&id, &flags)?;
+            self.store.sync_flags(&self.account.id, &id, Some(remote_id), &flags)?;
         }
         Ok(())
     }
@@ -215,10 +219,10 @@ impl SyncCtx {
                 .iter()
                 .filter_map(|(r, uid)| self.mailbox_local_id(r).ok().flatten().map(|mid| (mid, *uid)))
                 .collect();
-            if local.is_empty() {
+            if !local.is_empty() {
+                self.store.sync_memberships(&self.account.id, &id, Some(remote_id), &local)?;
+            } else if !self.store.change_pending(&self.account.id, Some(&id), Some(remote_id))? {
                 self.store.delete_message(&id)?;
-            } else {
-                self.store.set_memberships(&id, &local)?;
             }
         }
         Ok(())

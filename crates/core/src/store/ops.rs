@@ -15,6 +15,28 @@ impl Store {
         Ok(id)
     }
 
+    /// Queue an op and make the local change it stands for in one commit. A
+    /// sync writing at the same time then finds either neither, and is
+    /// overwritten by the change, or both, and leaves the message alone
+    /// ([`Store::change_pending`]). And the op can't run ahead of the change.
+    pub fn enqueue_change(&self, account_id: &str, kind: &str, payload: &serde_json::Value, actor: &str, change: LocalChange) -> Result<String> {
+        let id = new_id();
+        let threads = self.w(|c| {
+            let tx = c.transaction()?;
+            tx.execute(
+                "INSERT INTO ops (id, account_id, kind, payload_json, status, actor, created_at) VALUES (?,?,?,?, 'pending', ?, ?)",
+                params![id, account_id, kind, payload.to_string(), actor, now_ms()],
+            )?;
+            let threads = self.apply_change_tx(&tx, &change)?;
+            tx.commit()?;
+            Ok(threads)
+        })?;
+        for t in threads {
+            self.recompute_thread(&t)?;
+        }
+        Ok(id)
+    }
+
     /// The ops to run now, in the order they were queued (insertion order
     /// breaks ties within a millisecond). An op waiting to retry holds back
     /// everything queued after it, so a folder is never deleted before the
@@ -50,6 +72,25 @@ impl Store {
             }
             Ok(out)
         })
+    }
+
+    /// Whether a queued change to this message (by local or remote id) hasn't
+    /// reached the server yet. Sync leaves such a message as the user left it:
+    /// the server still shows it the old way until the op runs, and copying
+    /// that back would undo the change on screen until the next sync.
+    pub fn change_pending(&self, account_id: &str, id: Option<&str>, remote_id: Option<&str>) -> Result<bool> {
+        self.r(|c| Ok(Self::change_pending_tx(c, account_id, id, remote_id)?))
+    }
+
+    pub(super) fn change_pending_tx(c: &rusqlite::Connection, account_id: &str, id: Option<&str>, remote_id: Option<&str>) -> rusqlite::Result<bool> {
+        c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM ops o WHERE o.account_id=?1 AND o.status IN ('pending','sending') AND (
+               EXISTS(SELECT 1 FROM json_each(o.payload_json, '$.refs') j
+                      WHERE json_extract(j.value, '$.id')=?2 OR json_extract(j.value, '$.remote_id')=?3)
+               OR EXISTS(SELECT 1 FROM json_each(o.payload_json, '$.message_ids') j WHERE j.value=?2)))",
+            params![account_id, id, remote_id],
+            |r| r.get(0),
+        )
     }
 
     pub fn has_pending_ops(&self, account_id: &str) -> Result<bool> {
@@ -147,5 +188,38 @@ impl Store {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ops_run_in_order_and_a_retrying_op_holds_back_later_ones() {
+        let s = Store::open_in_memory().unwrap();
+        let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+        let kinds = |s: &Store| s.due_ops(&acc.id).unwrap().into_iter().map(|o| o.kind).collect::<Vec<_>>();
+        // Queued within the same millisecond: still in queue order.
+        let mv = s.enqueue_op(&acc.id, "move", &serde_json::json!({}), "user").unwrap();
+        let send = s.enqueue_op(&acc.id, "send", &serde_json::json!({}), "user").unwrap();
+        s.enqueue_op(&acc.id, "mailbox_delete", &serde_json::json!({}), "user").unwrap();
+        assert_eq!(kinds(&s), vec!["move", "send", "mailbox_delete"]);
+        // A send waiting to retry doesn't hold anything back...
+        s.op_retry(&send, "down", 1).unwrap();
+        assert_eq!(kinds(&s), vec!["move", "mailbox_delete"]);
+        // ...but any other op does, along with everything after it.
+        s.op_retry(&mv, "down", 1).unwrap();
+        assert!(kinds(&s).is_empty());
+    }
+
+    #[test]
+    fn only_failed_or_waiting_ops_can_be_retried() {
+        let s = Store::open_in_memory().unwrap();
+        let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+        let id = s.enqueue_op(&acc.id, "send", &serde_json::json!({}), "user").unwrap();
+        s.op_sending(&id).unwrap();
+        s.op_reset(&id).unwrap();
+        assert!(s.due_ops(&acc.id).unwrap().is_empty(), "a send in flight isn't put back in the queue");
     }
 }

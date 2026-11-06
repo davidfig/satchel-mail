@@ -1,6 +1,6 @@
 # 0054. View attachments in the app; Open and Save beside it
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [0062](0062-golemdocs-viewer.md) (documents, and HTML/MHTML/SVG, now shown through golemdocs)
 - **Date:** 2026-10-30
 
 ## Context

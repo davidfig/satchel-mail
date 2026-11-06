@@ -8,6 +8,8 @@ interface ToastOpts {
   kind?: 'info' | 'error' | 'success';
   action?: { label: string; run: () => void };
   ms?: number;
+  /** Stays until it's dismissed or its action runs, in a slot of its own that other toasts don't replace. */
+  sticky?: boolean;
   /** Only confirms what the screen already shows: flashes briefly and never replaces an error. */
   quiet?: boolean;
 }
@@ -23,11 +25,12 @@ interface Slot {
 
 // At most two toasts show: one with an action (Undo and the like), which only another action
 // toast replaces, and one plain toast, which any new plain toast replaces. Repeats of the same
-// message count up instead of stacking.
+// message count up instead of stacking. A sticky toast (an update waiting) has a third slot of its own.
 let toastHost: HTMLElement | null = null;
-const slots: { action: Slot | null; plain: Slot | null } = { action: null, plain: null };
+type SlotKey = 'action' | 'plain' | 'sticky';
+const slots: Record<SlotKey, Slot | null> = { action: null, plain: null, sticky: null };
 
-function clearSlot(key: 'action' | 'plain') {
+function clearSlot(key: SlotKey) {
   const s = slots[key];
   if (!s) return;
   s.timers.forEach(clearTimeout);
@@ -37,7 +40,7 @@ function clearSlot(key: 'action' | 'plain') {
 
 export function toast(message: string, opts: ToastOpts = {}) {
   const kind = opts.kind ?? 'info';
-  const key = opts.action ? 'action' : 'plain';
+  const key: SlotKey = opts.sticky ? 'sticky' : opts.action ? 'action' : 'plain';
   const ms = opts.ms ?? (opts.quiet ? 1800 : 4500);
   const cur = slots[key];
   if (key === 'plain' && opts.quiet && cur?.kind === 'error') return;
@@ -45,6 +48,7 @@ export function toast(message: string, opts: ToastOpts = {}) {
   const arm = (s: Slot) => {
     s.timers.forEach(clearTimeout);
     s.el.classList.remove('leaving');
+    if (opts.sticky) return void (s.timers = []);
     s.timers = [window.setTimeout(() => s.el.classList.add('leaving'), ms - 300), window.setTimeout(() => clearSlot(key), ms)];
   };
 
@@ -76,8 +80,9 @@ export function toast(message: string, opts: ToastOpts = {}) {
   );
   const slot: Slot = { el, message, kind, count: 1, label, timers: [] };
   slots[key] = slot;
-  // The action toast sits below the plain one, nearest the edge.
-  if (key === 'action') toastHost.appendChild(el);
+  // The action toast sits below the plain one, nearest the edge; a sticky one below both.
+  if (key === 'sticky') toastHost.appendChild(el);
+  else if (key === 'action') toastHost.insertBefore(el, slots.sticky?.el ?? null);
   else toastHost.insertBefore(el, toastHost.firstChild);
   arm(slot);
 }
@@ -151,6 +156,26 @@ export function confirmDialog(title: string, message: string | Node, okLabel = '
       h(`button.primary${danger ? '.danger' : ''}`, { on: { click: () => finish(true) } }, okLabel),
     );
     const m = modal(title, typeof message === 'string' ? h('p', message) : message, { footer, onClose: () => finish(false) });
+  });
+}
+
+/** Like `confirmDialog`, with several ways forward: resolves to the chosen
+ *  value, or null for Cancel. The last choice is the primary button. */
+export function chooseDialog<T>(title: string, message: string | Node, choices: { label: string; title: string; value: T }[]): Promise<T | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v: T | null) => {
+      if (done) return;
+      done = true;
+      m.close();
+      resolve(v);
+    };
+    const footer = h(
+      'div.row.end.wrap',
+      h('button', { title: 'Don’t open anything', on: { click: () => finish(null) } }, 'Cancel'),
+      choices.map((c, i) => h(`button${i === choices.length - 1 ? '.primary' : ''}`, { title: c.title, on: { click: () => finish(c.value) } }, c.label)),
+    );
+    const m = modal(title, typeof message === 'string' ? h('p', message) : message, { footer, onClose: () => finish(null) });
   });
 }
 
@@ -264,7 +289,7 @@ export function commandSource(fn: CommandSource, scope = 'global') {
 }
 
 /** Keys that move around a list or close things; not worth a palette entry. */
-const NOT_COMMANDS = new Set(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Backspace', 'Delete', 'j', 'k', 'o', 'x', 'mod+k']);
+const NOT_COMMANDS = new Set(['ArrowDown', 'ArrowUp', 'shift+ArrowDown', 'shift+ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Backspace', 'Delete', 'j', 'k', 'o', 'x', 'mod+k']);
 
 /** What the palette offers now: the current view's shortcuts and commands,
  *  then the global ones. A shortcut's command shows its key. */
@@ -306,7 +331,7 @@ function keyName(e: KeyboardEvent): string {
   if (e.metaKey || e.ctrlKey) mods.push('mod');
   if (e.altKey) mods.push('alt');
   let k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  if (e.shiftKey && e.key.length === 1 && /[a-z]/i.test(e.key)) mods.push('shift');
+  if (e.shiftKey && ((e.key.length === 1 && /[a-z]/i.test(e.key)) || e.key.startsWith('Arrow'))) mods.push('shift');
   if (k === ' ') k = 'space';
   return [...mods, k].join('+');
 }
@@ -329,6 +354,8 @@ export function installShortcuts() {
     const typing = t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName);
     const k = keyName(e);
     if (typing && !k.startsWith('mod+') && k !== 'Escape') return;
+    // Select all in a text field selects its text.
+    if (typing && k === 'mod+a') return;
     if (document.querySelector('.modal-backdrop') && !k.startsWith('mod+')) return;
     const full = pendingPrefix ? `${pendingPrefix} ${k}` : k;
     const run = (key: string) => {

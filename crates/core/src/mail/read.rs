@@ -10,7 +10,39 @@ use serde_json::{Value, json};
 use crate::engine::{Caller, Engine, Mode};
 use crate::error::{err, forbidden, not_found};
 use crate::provider::priority;
-use crate::store::{StoredMessage, ThreadFilter};
+use crate::store::{MsgCond, MsgTerm, Store, StoredMessage, ThreadFilter};
+
+/// Add a search (the search box's language) to a filter. Unless it names a
+/// mailbox, or the filter already has one, Trash and Junk are left out.
+pub(crate) fn apply_search(store: &Store, f: &mut ThreadFilter, search: &str) -> Result<()> {
+    let p = crate::mail::search::parse_query(search);
+    if !p.names_mailbox() && f.mailbox_id.is_none() && f.role.is_none() {
+        f.exclude_trash_junk = true;
+    }
+    if !p.accounts.is_empty() {
+        f.account_ids = Some(search_accounts(store, f.account_ids.take(), &p.accounts)?);
+    }
+    f.conds.extend(p.conds);
+    Ok(())
+}
+
+/// Narrow `allowed` (None = every account) by `account:` terms: each value
+/// matches part of an account's address or name.
+fn search_accounts(store: &Store, allowed: Option<Vec<String>>, terms: &[(Vec<String>, bool)]) -> Result<Vec<String>> {
+    Ok(store
+        .list_accounts()?
+        .iter()
+        .filter(|a| allowed.as_ref().is_none_or(|ids| ids.contains(&a.id)))
+        .filter(|a| {
+            let (email, name) = (a.email.to_lowercase(), a.display_name.to_lowercase());
+            terms.iter().all(|(values, negate)| {
+                let hit = values.iter().map(|v| v.to_lowercase()).any(|v| email.contains(&v) || name.contains(&v));
+                hit != *negate
+            })
+        })
+        .map(|a| a.id.clone())
+        .collect())
+}
 
 impl Engine {
     pub(crate) fn list_threads(&self, caller: &Caller, q: &ThreadQuery) -> Result<Vec<ThreadSummary>> {
@@ -46,10 +78,15 @@ impl Engine {
             limit: q.limit.unwrap_or(50).min(500),
             ..Default::default()
         };
+        let mut listed = q.role;
         if let Some(mb) = &q.mailbox_id {
             let m = self.store.get_mailbox(mb)?.ok_or_else(|| not_found("mailbox"))?;
             self.check_account(caller, &m.account_id, "mailbox")?;
+            listed = Some(m.role);
         }
+        // Gmail keeps the other labels of a message in Trash or Spam, and hides it
+        // under them. Mail in a folder is in nothing else, so the rest skip the check.
+        f.exclude_trash_junk = listed.is_some_and(|r| matches!(r, MailboxRole::Custom | MailboxRole::Sent | MailboxRole::Flagged | MailboxRole::Important | MailboxRole::All));
         let mut accounts = q.account_id.clone().map(|a| vec![a]);
         if let Some(allowed) = self.allowed_accounts(caller) {
             accounts = Some(match accounts {
@@ -59,27 +96,17 @@ impl Engine {
         }
         f.account_ids = accounts;
         f.after = self.cutoff(caller);
-        if let Some(s) = q.search.as_deref().filter(|s| !s.trim().is_empty()) {
-            let p = crate::mail::search::parse_query(s);
-            f.from = p.from;
-            f.to = p.to;
-            f.with = p.with;
-            f.subject = p.subject;
-            f.has_attachment = p.has_attachment;
-            f.unread = p.unread;
-            f.flagged = p.flagged;
-            f.favorite = p.favorite;
-            f.after = match (f.after, p.after) {
-                (Some(a), Some(b)) => Some(a.max(b)),
-                (a, b) => a.or(b),
-            };
-            f.msg_before = p.before;
-            if let Some(m) = p.in_mailbox {
-                f.in_mailbox_names = Some(vec![m]);
-            } else if q.mailbox_id.is_none() && q.role.is_none() {
-                f.exclude_trash_junk = true;
+        // A smart folder is its saved query; a search inside it narrows it further.
+        let folder_query = match &q.smart_folder_id {
+            Some(id) => {
+                let folder = self.store.get_smart_folder(id)?.filter(|_| self.may_see_smart_folders(caller).unwrap_or(false));
+                Some(folder.ok_or_else(|| not_found("smart folder"))?.query)
             }
-            f.fts = crate::mail::search::fts_query(&p.text);
+            None => None,
+        };
+        let search = [folder_query.as_deref(), q.search.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" ");
+        if folder_query.is_some() || !search.trim().is_empty() {
+            apply_search(&self.store, &mut f, &search)?;
         }
         Ok(f)
     }
@@ -152,18 +179,22 @@ impl Engine {
         let mut allow_remote = force_remote;
         let mut invite = None;
         let mut warnings = vec![];
+        let mut deceptive_links = vec![];
         let mut unsubscribe = None;
         let (mut bulk_headers, mut reply_marker) = (false, false);
         let (text, html, blocked, attachments) = match &raw {
             Some(r) => {
                 let p = satchel_mime::parse(r).unwrap_or_default();
                 invite = self.invite_from(&m.summary.account_id, &p);
-                warnings = self.message_warnings(&m, &p, invite.as_ref());
+                self.check_dkim(&m.summary.id, &m.summary.account_id, r).await;
+                let verified = self.sender_verified(&m.summary.id, &m.summary.account_id, &p);
+                deceptive_links = self.deceptive_links(&m, &p, verified);
+                warnings = self.message_warnings(&m, &p, invite.as_ref(), verified, &deceptive_links);
                 unsubscribe = p.unsubscribe.clone();
                 (bulk_headers, reply_marker) = (p.bulk_headers, p.reply_marker);
                 // Anyone can put a trusted sender's address in From, so the
                 // sender's allowance only counts for mail that isn't forged.
-                allow_remote = force_remote || load_all || (sender_allowed && self.sender_verified(&m.summary.account_id, &p));
+                allow_remote = force_remote || load_all || (sender_allowed && verified);
                 let (html, blocked) = match &p.html {
                     Some(h) => {
                         let inline = satchel_mime::inline_data_urls(r);
@@ -195,6 +226,7 @@ impl Engine {
             body_pending: raw.is_none(),
             invite,
             warnings,
+            deceptive_links,
             unsubscribe,
             bulk,
             sender_verdict,
@@ -283,8 +315,9 @@ impl Engine {
             }
             p.contact_id = Some(c.id);
         }
-        let f = ThreadFilter { with: p.addresses.iter().map(|a| a.email.clone()).collect(), exclude_trash_junk: true, ..Default::default() };
-        if !f.with.is_empty() {
+        if !p.addresses.is_empty() {
+            let with = MsgTerm::With(p.addresses.iter().map(|a| a.email.clone()).collect());
+            let f = ThreadFilter { conds: vec![MsgCond::new(with)], exclude_trash_junk: true, ..Default::default() };
             p.threads = self.store.count_threads(&f)?;
         }
         Ok(p)

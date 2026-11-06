@@ -1,4 +1,6 @@
-import { defineConfig } from 'vite';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { defineConfig, type Plugin } from 'vite';
 
 // In dev, API calls are proxied to `satchel serve` (default port 7781).
 const api = process.env.SATCHEL_API ?? 'http://127.0.0.1:7781';
@@ -28,8 +30,37 @@ function authorize(proxyReq: ProxyReq, req: IncomingReq) {
 // No other page may frame ours (clickjacking); the same as `satchel serve`.
 const noFraming = { 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' };
 
+const TYPES: Record<string, string> = { html: 'text/html', js: 'text/javascript', css: 'text/css', json: 'application/json', webp: 'image/webp' };
+
+// The document viewer (0062) with the headers `satchel serve` and the desktop
+// app give it (satchel_core::doc_viewer): framed by our page only, its files
+// readable from its sandbox, its page allowed nothing but its own origin.
+function docViewer(): Plugin {
+  const root = path.resolve(import.meta.dirname, 'public/golemdocs');
+  return {
+    name: 'satchel-doc-viewer',
+    configureServer(server) {
+      server.middlewares.use('/golemdocs', (req, res, next) => {
+        const file = decodeURIComponent((req.url ?? '').split('?')[0]).replace(/^\//, '');
+        if (!/^[\w.-]+(\/[\w-][\w.-]*)*$/.test(file) || file.includes('..')) return next();
+        readFile(path.join(root, file)).then((body) => {
+          res.setHeader('Content-Type', TYPES[path.extname(file).slice(1)] ?? 'text/plain');
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          if (file.endsWith('viewer.html')) {
+            const o = devOrigin;
+            res.setHeader('Content-Security-Policy', `default-src 'none'; script-src ${o}; worker-src ${o} data:; connect-src ${o}; style-src ${o}; img-src ${o} blob: data:; font-src ${o}; base-uri 'none'; form-action 'none'; frame-ancestors ${o}`);
+            res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+          } else res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(body);
+        }, () => next());
+      });
+    },
+  };
+}
+
 export default defineConfig({
   clearScreen: false,
+  plugins: [docViewer()],
   server: {
     host: '127.0.0.1',
     port: 7780,

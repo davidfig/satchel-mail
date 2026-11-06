@@ -85,7 +85,7 @@ impl ImapProvider {
         for (uid, flags) in &remote_flags {
             if let Some((id, lf)) = local.get(uid)
                 && lf != flags {
-                    ctx.store.set_flags(id, flags)?;
+                    ctx.store.sync_flags(ctx.account_id(), id, None, flags)?;
                 }
         }
         let mut new_uids: Vec<u32> = all_uids.iter().filter(|u| !local.contains_key(u)).copied().collect();

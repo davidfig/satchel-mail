@@ -34,6 +34,7 @@ Current third-party dependencies and why:
 | lettre | SMTP submission |
 | reqwest, rustls, tokio-rustls, rustls-native-certs, url | HTTP/TLS for JMAP, CalDAV, Gmail, Graph, OAuth, and place lookups (0050) |
 | quick-xml | WebDAV/CalDAV XML |
+| mail-auth (aws-lc-rs only), hickory-resolver | DKIM verification and the DNS lookups it needs, for accounts whose server's Authentication-Results can't be trusted (0061). Security-critical crypto and a wire protocol; uses our mail-parser and aws-lc-rs |
 | libc (unix core, macOS desktop) | `openat`/`renameat`/`unlinkat` so the AI folder can't be tricked by symlinks swapped in mid-walk, and `setxattr` to quarantine saved attachments (0040) |
 | windows-sys (Windows core; `Win32_Foundation`, `Win32_Storage_FileSystem` only) | the Windows side of the same AI-folder safety: link counts, a handle's final path, and renaming and deleting by handle, none of which stable std exposes. Already in the tree through tokio and others, so it adds no new code |
 | objc2, objc2-foundation, objc2-map-kit (macOS only; `MKLocalSearchCompleter` and the Foundation types it uses) | Apple Maps place suggestions in the Mac app (0050). objc2 and objc2-foundation are already in the tree through Tauri, at the same versions; objc2-map-kit is the generated MapKit binding from the same project |
@@ -42,6 +43,7 @@ Current third-party dependencies and why:
 | tauri + plugins (opener, dialog, notification, single-instance, window-state, updater) | desktop shell; notification shows new-mail alerts in the macOS, Windows and Linux notification centers (0025); window-state reopens the window at its last position and size, including which monitor and whether it was maximized |
 | objc2-user-notifications, block2 (macOS desktop; the request, trigger, category, response and settings types only) | calendar alerts scheduled with macOS, with Snooze and Dismiss actions, that show while the app is quit (0057). The generated User Notifications binding from the same project as objc2; both were already in the lockfile, at the same versions |
 | mac-notification-sys (macOS desktop) | sets which app new-mail notifications are posted as, so dev builds post as Satchel rather than Terminal. Already in the tree through the notification plugin, at the same version |
+| golemdocs viewer (vendored build, `ui/public/golemdocs/`, pinned by `scripts/vendor-golemdocs`) | drawing Word, OpenDocument, Markdown, HTML, MHTML and SVG attachments from a document model, in a sandboxed frame (0062). Not a package: a reviewed, reproducible build of one golemdocs commit, with its fonts (38 MB), committed so building Satchel never needs golemdocs |
 | @tauri-apps/api; dev: vite, typescript, @tauri-apps/cli, linkedom | UI ↔ Tauri bridge; build tools; linkedom gives `node --test` a DOM for the UI's quote-detection tests (small, no native code; a test-only stand-in for the browser's DOMParser) |
 
 Removed: tantivy (see 0014), rand, urlencoding, bytes, thiserror.

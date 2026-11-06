@@ -28,6 +28,7 @@ tokio.workspace = true
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws-lc-rs"] }
 tracing.workspace = true
 url = "2"
+mail-auth = { version = "=0.13.3", default-features = false, features = ["aws-lc-rs"] }
 
 # Apple Maps place suggestions in the Mac app (0050).
 [target.'cfg(target_os = "macos")'.dependencies]

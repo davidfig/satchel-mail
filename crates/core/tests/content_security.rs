@@ -214,3 +214,48 @@ async fn an_unknown_servers_authserv_id_is_learned_from_recent_mail() {
     sync_until(&engine, &account, "l21").await;
     assert!(get(&engine, &account, "l21").await.remote_images_blocked);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_a_trusted_server_dkim_is_checked_here() {
+    let (engine, fake, account, _dir) = setup().await;
+    // An IMAP account whose server's id hasn't been learned.
+    let config: AccountConfig = serde_json::from_value(json!({
+        "kind": "imap", "email": "me@x.test", "display_name": "Me", "username": "me", "imap_host": "mail.x.test", "imap_port": 993,
+        "imap_security": "tls", "smtp_host": "mail.x.test", "smtp_port": 465, "smtp_security": "tls"
+    }))
+    .unwrap();
+    engine.store().update_account_config(&account, &config).unwrap();
+    let mail = |id: &str, from: &str, dkim: &str| {
+        format!(
+            "X-Test-Dkim-Pass: {dkim}\r\nFrom: {from}\r\nTo: me@x.test\r\nSubject: News {id}\r\nMessage-ID: <{id}@x.test>\r\n\
+             Date: Tue, 20 Oct 2026 10:00:00 +0000\r\nContent-Type: text/html\r\n\r\n\
+             <p><a href=\"https://click.brandinvestments.test/x\">brand.test</a></p>\r\n"
+        )
+        .into_bytes()
+    };
+    deliver(&fake, "k1", mail("k1", "Brand <news@mail.brand.test>", "brand.test"), "INBOX");
+    deliver(&fake, "k2", mail("k2", "Brand <news@mail.brand.test>", "other.test"), "INBOX");
+    deliver(&fake, "k3", mail("k3", "Brand <news@mail.brand.test>", "offline"), "INBOX");
+    sync_until(&engine, &account, "k3").await;
+    let deceptive = |m: &MessageDetail| m.warnings.iter().any(|w| w.kind == WarningKind::DeceptiveLink);
+
+    assert!(!deceptive(&get(&engine, &account, "k1").await), "a signature from the sender's domain verifies it");
+    assert!(deceptive(&get(&engine, &account, "k2").await), "another domain's signature doesn't");
+    assert!(deceptive(&get(&engine, &account, "k3").await), "unchecked is unverified");
+    // A result is kept; an unchecked message is tried again.
+    let checks = || fake.dkim_checks.load(std::sync::atomic::Ordering::SeqCst);
+    let before = checks();
+    get(&engine, &account, "k1").await;
+    assert_eq!(checks(), before);
+    get(&engine, &account, "k3").await;
+    assert_eq!(checks(), before + 1);
+
+    // Back on Gmail, whose own header is trusted, nothing is checked here.
+    let gmail = AccountConfig::Gmail { email: "me@x.test".into(), display_name: "Me".into() };
+    engine.store().update_account_config(&account, &gmail).unwrap();
+    deliver(&fake, "k4", mail("k4", "Brand <news@mail.brand.test>", "brand.test"), "INBOX");
+    sync_until(&engine, &account, "k4").await;
+    let before = checks();
+    assert!(deceptive(&get(&engine, &account, "k4").await));
+    assert_eq!(checks(), before);
+}

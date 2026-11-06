@@ -4,10 +4,28 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { DOMParser } from 'linkedom';
-import { followHref, followTarget, linkScheme, looksDesigned, planFold, routeLinks, stripHtmlQuotes, threadMarkdown, trimUrl } from '../src/lib/thread.ts';
+import { findDeceptiveLink, followHref, followTarget, linkScheme, looksDesigned, planFold, routeLinks, stripHtmlQuotes, threadMarkdown, trimUrl } from '../src/lib/thread.ts';
 import type { MessageDetail } from '../src/types/index.ts';
 
 globalThis.DOMParser = DOMParser as unknown as typeof globalThis.DOMParser;
+
+describe('findDeceptiveLink', () => {
+  const link = { url: 'https://Click.Evil.test/a b?x=1', shown: 'bank.com', actual: 'click.evil.test' };
+
+  test('matches the address a click reports, however the browser normalized it', () => {
+    assert.equal(findDeceptiveLink('https://click.evil.test/a%20b?x=1', [link]), link);
+  });
+
+  test('another link on the same host is not it', () => {
+    assert.equal(findDeceptiveLink('https://click.evil.test/other', [link]), undefined);
+    assert.equal(findDeceptiveLink('https://click.evil.test/a%20b?x=1', []), undefined);
+  });
+
+  test('a malformed address only matches itself', () => {
+    assert.equal(findDeceptiveLink('not a url', [{ ...link, url: 'not a url' }])?.shown, 'bank.com');
+    assert.equal(findDeceptiveLink('not a url', [link]), undefined);
+  });
+});
 
 /** Asserts the reply text survives, the history is gone, and the original is kept for "show quoted text". */
 function expectStripped(html: string, kept: string[], gone: string[]) {

@@ -239,6 +239,13 @@ pub trait ProviderFactory: Send + Sync {
     async fn one_click_unsubscribe(&self, _url: &str) -> Result<()> {
         anyhow::bail!("unsubscribing is not supported by this host")
     }
+    /// The domains whose DKIM signatures on a raw message verify, for
+    /// accounts with no trusted Authentication-Results. Here because the
+    /// check needs DNS. None when it couldn't be checked (offline, a DNS
+    /// error), so it is tried again later.
+    async fn dkim_pass(&self, _raw: &[u8]) -> Option<Vec<String>> {
+        None
+    }
     /// The service that looks up places for event locations, if the host has one.
     fn places(&self) -> Option<Arc<dyn PlaceSearch>> {
         None

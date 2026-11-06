@@ -2,6 +2,7 @@
 //! instances for the core.
 
 pub mod dav;
+pub mod dkim;
 pub mod google;
 pub mod imap;
 pub mod jmap;
@@ -109,6 +110,10 @@ impl ProviderFactory for Factory {
 
     fn places(&self) -> Option<Arc<dyn PlaceSearch>> {
         Some(self.places.clone())
+    }
+
+    async fn dkim_pass(&self, raw: &[u8]) -> Option<Vec<String>> {
+        dkim::passing_domains(raw).await
     }
 
     async fn one_click_unsubscribe(&self, url: &str) -> Result<()> {

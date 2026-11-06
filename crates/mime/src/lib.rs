@@ -28,7 +28,7 @@ pub use html::*;
 pub use html_text::html_to_text;
 pub use parse::*;
 pub use rebuild::{Body, Part, Slim, header_block, keeps_contents, rebuild};
-pub use auth::{AuthServers, auth_failure, auth_verified, authserv_id};
+pub use auth::{AuthServers, auth_failure, auth_verified, authserv_id, dkim_aligned};
 pub use safety::{base_domain, clean_filename, deceptive_links, email_domain, is_archive, is_hidden_char, is_risky_attachment, parse_mailto, parse_unsubscribe};
 pub use slim::{KEEP_INLINE_BYTES, SLIM_FROM_BYTES, strip_attachments};
 pub use text::*;

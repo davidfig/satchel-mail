@@ -95,7 +95,7 @@ A second review on 2026-10-30, after 0040, found the following problems:
 - **CLI:** `satchel agents create`, `satchel agents revoke` and similar commands fail while the app is running.
 - **JMAP:** servers that put their API on another site, and remote plaintext logins, now fail with an error.
 - **Skipped messages:** a message that can't be stored is skipped, so it won't appear in Satchel.
-- **No trust until learned:** IMAP and JMAP accounts on servers that aren't built in trust no sender until about 20 recent messages show the same authserv-id. A server that adds no Authentication-Results header never earns trust.
+- **No trust until learned:** IMAP and JMAP accounts on servers that aren't built in trust no sender until about 20 recent messages show the same authserv-id. A server that adds no Authentication-Results header never earns trust. (Closed by 0061: Satchel now checks DKIM itself for these accounts.)
 - **iCloud:** iCloud puts each check in its own header. Only the topmost header is read, so some iCloud mail stays unverified.
 - **Windows:** the AI folder refuses every reparse point, so it can't sit in a OneDrive Files On-Demand folder. The Windows code type-checks against `windows-sys` but hasn't been run on Windows.
 - **Agent thread lists:** a filtered page can hold fewer threads than its limit.

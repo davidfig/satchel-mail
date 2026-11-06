@@ -20,7 +20,9 @@ impl Store {
     }
 
     /// Insert or update a message and its mailbox memberships. Returns
-    /// (local id, inserted?).
+    /// (local id, inserted?). A message with a change still queued for the
+    /// server keeps its local flags and mailboxes ([`Store::change_pending`]),
+    /// and one being deleted isn't stored again: its id is "".
     pub fn upsert_message(&self, account_id: &str, rec: &MessageRecord, mailboxes: &[(String, Option<u32>)]) -> Result<(String, bool)> {
         let (id, inserted, threads) = self.w(|c| {
             let tx = c.transaction()?;
@@ -29,20 +31,26 @@ impl Store {
                     Ok((r.get(0)?, r.get(1)?, r.get(2)?))
                 })
                 .optional()?;
+            let held = Self::change_pending_tx(&tx, account_id, existing.as_ref().map(|e| e.0.as_str()), Some(&rec.remote_id))?;
+            if existing.is_none() && held {
+                return Ok((String::new(), false, vec![]));
+            }
+            let flag = |v: bool| (!held).then_some(v);
             let mut affected_threads: Vec<String> = vec![];
             let (id, inserted) = if let Some((id, thread_id, old_blob)) = existing {
                 if rec.blob_hash.is_some() && old_blob != rec.blob_hash {
                     self.blobs_freed(old_blob);
                 }
                 tx.execute(
-                    "UPDATE messages SET seen=?, flagged=?, answered=?, draft=?, remote_thread_id=COALESCE(?, remote_thread_id),
+                    "UPDATE messages SET seen=COALESCE(?, seen), flagged=COALESCE(?, flagged), answered=COALESCE(?, answered),
+                       draft=COALESCE(?, draft), remote_thread_id=COALESCE(?, remote_thread_id),
                        blob_hash=COALESCE(?, blob_hash), snippet=CASE WHEN ?='' THEN snippet ELSE ? END,
                        partial=CASE WHEN ? IS NULL THEN partial ELSE ? END, blob_size=CASE WHEN ? IS NULL THEN blob_size ELSE ? END,
                        attachments_json=CASE WHEN ?='[]' THEN attachments_json ELSE ? END,
                        has_attachments=MAX(has_attachments, ?), version=version+1, mirrored=0
                      WHERE id=?",
                     params![
-                        rec.flags.seen, rec.flags.flagged, rec.flags.answered, rec.flags.draft, rec.remote_thread_id,
+                        flag(rec.flags.seen), flag(rec.flags.flagged), flag(rec.flags.answered), flag(rec.flags.draft), rec.remote_thread_id,
                         rec.blob_hash, rec.snippet, rec.snippet, rec.blob_hash, rec.partial, rec.blob_hash, rec.blob_size as i64,
                         to_json(&rec.attachments), to_json(&rec.attachments),
                         rec.attachments.iter().any(|a| !a.inline), id
@@ -82,7 +90,9 @@ impl Store {
                 affected_threads.push(thread_id);
                 (id, true)
             };
-            Self::set_memberships_tx(&tx, &id, mailboxes)?;
+            if !held {
+                Self::set_memberships_tx(&tx, &id, mailboxes)?;
+            }
             tx.commit()?;
             Ok((id, inserted, affected_threads))
         })?;
@@ -137,6 +147,84 @@ impl Store {
         }
         let first = found.remove(0);
         Ok((first, found))
+    }
+
+    /// Makes a [`LocalChange`]. Returns the threads it touched, to recompute
+    /// after the commit.
+    pub(super) fn apply_change_tx(&self, tx: &rusqlite::Transaction, change: &LocalChange) -> Result<Vec<String>> {
+        let mut threads = vec![];
+        let mut touched = |id: &str| -> Result<()> {
+            let t: Option<String> = tx.query_row("SELECT thread_id FROM messages WHERE id=?", [id], |r| r.get(0)).optional()?;
+            threads.extend(t.filter(|t| !threads.contains(t)));
+            Ok(())
+        };
+        match change {
+            LocalChange::Memberships(rows) => {
+                for (id, mailboxes) in rows.iter() {
+                    touched(id)?;
+                    Self::set_memberships_tx(tx, id, mailboxes)?;
+                    tx.execute("UPDATE messages SET version=version+1, mirrored=0 WHERE id=?", [id])?;
+                }
+            }
+            LocalChange::Flags(rows) => {
+                for (id, flags) in rows.iter() {
+                    touched(id)?;
+                    Self::set_flags_tx(tx, id, flags)?;
+                }
+            }
+            LocalChange::Delete(ids) => {
+                for id in ids.iter() {
+                    touched(id)?;
+                    self.blobs_freed(Self::blob_hashes_tx(tx, "id=?", [id])?);
+                    tx.execute("DELETE FROM messages WHERE id=?", [id])?;
+                }
+            }
+        }
+        Ok(threads)
+    }
+
+    /// Record the mailboxes the server reports, unless a change to this message
+    /// is on its way there: checked in the write, so one queued a moment ago counts.
+    pub fn sync_memberships(&self, account_id: &str, message_id: &str, remote_id: Option<&str>, mailboxes: &[(String, Option<u32>)]) -> Result<()> {
+        let wrote = self.w(|c| {
+            let tx = c.transaction()?;
+            if Self::change_pending_tx(&tx, account_id, Some(message_id), remote_id)? {
+                return Ok(false);
+            }
+            Self::set_memberships_tx(&tx, message_id, mailboxes)?;
+            tx.execute("UPDATE messages SET version=version+1, mirrored=0 WHERE id=?", [message_id])?;
+            tx.commit()?;
+            Ok(true)
+        })?;
+        if wrote && let Some(t) = self.thread_of(message_id)? {
+            self.recompute_thread(&t)?;
+        }
+        Ok(())
+    }
+
+    /// Record the flags the server reports; see [`Store::sync_memberships`].
+    pub fn sync_flags(&self, account_id: &str, message_id: &str, remote_id: Option<&str>, flags: &Flags) -> Result<()> {
+        let wrote = self.w(|c| {
+            let tx = c.transaction()?;
+            if Self::change_pending_tx(&tx, account_id, Some(message_id), remote_id)? {
+                return Ok(false);
+            }
+            Self::set_flags_tx(&tx, message_id, flags)?;
+            tx.commit()?;
+            Ok(true)
+        })?;
+        if wrote && let Some(t) = self.thread_of(message_id)? {
+            self.recompute_thread(&t)?;
+        }
+        Ok(())
+    }
+
+    fn set_flags_tx(c: &Connection, message_id: &str, flags: &Flags) -> Result<()> {
+        c.execute(
+            "UPDATE messages SET seen=?, flagged=?, answered=?, draft=?, version=version+1, mirrored=0 WHERE id=?",
+            params![flags.seen, flags.flagged, flags.answered, flags.draft, message_id],
+        )?;
+        Ok(())
     }
 
     fn set_memberships_tx(tx: &rusqlite::Transaction, message_id: &str, mailboxes: &[(String, Option<u32>)]) -> Result<()> {
@@ -200,13 +288,7 @@ impl Store {
     }
 
     pub fn set_flags(&self, message_id: &str, flags: &Flags) -> Result<()> {
-        self.w(|c| {
-            c.execute(
-                "UPDATE messages SET seen=?, flagged=?, answered=?, draft=?, version=version+1, mirrored=0 WHERE id=?",
-                params![flags.seen, flags.flagged, flags.answered, flags.draft, message_id],
-            )?;
-            Ok(())
-        })?;
+        self.w(|c| Self::set_flags_tx(c, message_id, flags))?;
         if let Some(t) = self.thread_of(message_id)? {
             self.recompute_thread(&t)?;
         }

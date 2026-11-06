@@ -1,8 +1,9 @@
-//! Writing the AI folder: one Markdown file per thread, indexes, contacts,
-//! the agenda and `sync.json`.
+//! Writing the AI folder: one Markdown file per thread, indexes, smart
+//! folders, contacts, the agenda and `sync.json`.
 
 mod calendar;
 mod contacts;
+mod smart_folders;
 mod status;
 mod threads;
 mod visible;

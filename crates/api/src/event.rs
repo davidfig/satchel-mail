@@ -12,6 +12,7 @@ pub enum CoreEvent {
     MessagesChanged { account_id: Id },
     CalendarChanged { account_id: Id },
     ContactsChanged,
+    SmartFoldersChanged,
     /// The favorite senders changed (0053).
     FavoritesChanged,
     ProposalsChanged,

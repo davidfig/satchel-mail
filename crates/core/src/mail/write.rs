@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::engine::Engine;
 use crate::error::{forbidden, invalid, not_found};
-use crate::store::MessageRef;
+use crate::store::{LocalChange, MessageRef};
 
 impl Engine {
     pub(crate) fn group_by_account(&self, ids: &[String]) -> Result<HashMap<String, Vec<MessageRef>>> {
@@ -40,7 +40,7 @@ impl Engine {
 
     pub(crate) fn set_flags(&self, ids: &[String], seen: Option<bool>, flagged: Option<bool>, actor: &str) -> Result<()> {
         for (account, refs) in self.group_by_account(&self.with_copies(ids)?)? {
-            let mut changed = vec![];
+            let mut changes = vec![];
             for r in &refs {
                 let mut f = r.flags.clone();
                 if let Some(s) = seen {
@@ -50,12 +50,12 @@ impl Engine {
                     f.flagged = fl;
                 }
                 if f != r.flags {
-                    self.store.set_flags(&r.id, &f)?;
-                    changed.push(r.id.clone());
+                    changes.push((r.id.clone(), f));
                 }
             }
-            if !changed.is_empty() {
-                self.enqueue(&account, "flags", json!({ "message_ids": changed, "seen": seen, "flagged": flagged }), actor)?;
+            if !changes.is_empty() {
+                let changed: Vec<&String> = changes.iter().map(|(id, _)| id).collect();
+                self.enqueue_change(&account, "flags", json!({ "message_ids": changed, "seen": seen, "flagged": flagged }), actor, LocalChange::Flags(&changes))?;
                 self.store.recount_mailboxes(&account)?;
                 self.emit(CoreEvent::MessagesChanged { account_id: account });
             }
@@ -84,10 +84,8 @@ impl Engine {
             if refs.is_empty() {
                 continue;
             }
-            for r in &refs {
-                self.store.set_memberships(&r.id, &[(mailbox_id.to_string(), None)])?;
-            }
-            self.enqueue(&account, "move", json!({ "refs": refs, "to_remote_mailbox": target_remote, "to_mailbox": mailbox_id }), actor)?;
+            let change: Vec<_> = refs.iter().map(|r| (r.id.clone(), vec![(mailbox_id.to_string(), None)])).collect();
+            self.enqueue_change(&account, "move", json!({ "refs": refs, "to_remote_mailbox": target_remote, "to_mailbox": mailbox_id }), actor, LocalChange::Memberships(&change))?;
             self.store.recount_mailboxes(&account)?;
             self.emit(CoreEvent::MessagesChanged { account_id: account });
         }
@@ -109,6 +107,7 @@ impl Engine {
         };
         let add_r = to_remote(add)?;
         let remove_r = to_remote(remove)?;
+        let mut change = vec![];
         for r in &refs {
             let mut mbs: Vec<(String, Option<u32>)> = r.mailboxes.iter().filter(|(m, _, _)| !remove.contains(m)).map(|(m, _, u)| (m.clone(), *u)).collect();
             for a in add {
@@ -116,9 +115,9 @@ impl Engine {
                     mbs.push((a.clone(), None));
                 }
             }
-            self.store.set_memberships(&r.id, &mbs)?;
+            change.push((r.id.clone(), mbs));
         }
-        self.enqueue(account, "labels", json!({ "refs": refs, "add": add_r, "remove": remove_r, "add_ids": add, "remove_ids": remove }), actor)?;
+        self.enqueue_change(account, "labels", json!({ "refs": refs, "add": add_r, "remove": remove_r, "add_ids": add, "remove_ids": remove }), actor, LocalChange::Memberships(&change))?;
         self.store.recount_mailboxes(account)?;
         self.emit(CoreEvent::MessagesChanged { account_id: account.to_string() });
         Ok(())
@@ -182,14 +181,13 @@ impl Engine {
                 if actor != "user" {
                     return Err(forbidden("permanent deletion requires the user"));
                 }
-                for r in &in_trash {
-                    self.store.delete_message(&r.id)?;
-                }
-                self.enqueue(&account, "expunge", json!({ "refs": in_trash }), actor)?;
+                let ids: Vec<String> = in_trash.iter().map(|r| r.id.clone()).collect();
+                self.enqueue_change(&account, "expunge", json!({ "refs": in_trash }), actor, LocalChange::Delete(&ids))?;
             }
             if !elsewhere.is_empty() {
                 if self.uses_labels(&account) {
-                    let remove: Vec<String> = self.store.list_mailboxes(Some(&account))?.into_iter().filter(|m| m.role == MailboxRole::Inbox).map(|m| m.id).collect();
+                    // Out of Spam as well as the Inbox: Trash is where it is now.
+                    let remove: Vec<String> = self.store.list_mailboxes(Some(&account))?.into_iter().filter(|m| matches!(m.role, MailboxRole::Inbox | MailboxRole::Junk)).map(|m| m.id).collect();
                     self.labels_inner(&account, elsewhere, std::slice::from_ref(&trash.id), &remove, actor)?;
                 } else {
                     let ids: Vec<String> = elsewhere.iter().map(|r| r.id.clone()).collect();
@@ -235,11 +233,9 @@ impl Engine {
             let here: Vec<String> = folders.iter().filter(|m| m.account_id == account).map(|m| m.id.clone()).collect();
             let (only_here, elsewhere): (Vec<MessageRef>, Vec<MessageRef>) = refs.into_iter().partition(|r| r.mailboxes.iter().all(|(m, _, _)| here.contains(m)));
             if !only_here.is_empty() {
-                for r in &only_here {
-                    self.store.delete_message(&r.id)?;
-                }
-                deleted += only_here.len();
-                self.enqueue(&account, "expunge", json!({ "refs": only_here }), actor)?;
+                let ids: Vec<String> = only_here.iter().map(|r| r.id.clone()).collect();
+                deleted += ids.len();
+                self.enqueue_change(&account, "expunge", json!({ "refs": only_here }), actor, LocalChange::Delete(&ids))?;
             }
             if !elsewhere.is_empty() && self.uses_labels(&account) {
                 self.labels_inner(&account, elsewhere, &[], &here, actor)?;

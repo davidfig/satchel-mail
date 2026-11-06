@@ -22,7 +22,7 @@ fn a_database_from_before_versioning_counts_as_version_1() {
     let c = Connection::open(&path).unwrap();
     c.execute_batch(include_str!("schema.sql")).unwrap();
     // Back to the version 1 shape, so the migrations since run on it.
-    c.execute_batch("ALTER TABLE messages DROP COLUMN partial; ALTER TABLE messages DROP COLUMN blob_size; ALTER TABLE proposals DROP COLUMN processed_file; ALTER TABLE messages DROP COLUMN auth_serv; ALTER TABLE events DROP COLUMN location;").unwrap();
+    c.execute_batch("ALTER TABLE messages DROP COLUMN partial; ALTER TABLE messages DROP COLUMN blob_size; ALTER TABLE proposals DROP COLUMN processed_file; ALTER TABLE messages DROP COLUMN auth_serv; ALTER TABLE messages DROP COLUMN dkim_pass; ALTER TABLE events DROP COLUMN location; DROP TABLE smart_folders;").unwrap();
     // An event from then gets its location read out of its iCalendar.
     c.pragma_update(None, "foreign_keys", false).unwrap();
     let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u1\r\nDTSTART:20261105T160000Z\r\nSUMMARY:Lunch\r\nLOCATION:Rose Cafe\\, Main St\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
@@ -35,8 +35,10 @@ fn a_database_from_before_versioning_counts_as_version_1() {
     c.query_row("SELECT partial, blob_size FROM messages", [], |_| Ok(())).optional().unwrap();
     c.query_row("SELECT processed_file FROM proposals", [], |_| Ok(())).optional().unwrap();
     c.query_row("SELECT auth_serv FROM messages", [], |_| Ok(())).optional().unwrap();
+    c.query_row("SELECT dkim_pass FROM messages", [], |_| Ok(())).optional().unwrap();
     let location: String = c.query_row("SELECT location FROM events WHERE id='e1'", [], |r| r.get(0)).unwrap();
     assert_eq!(location, "Rose Cafe, Main St");
+    c.query_row("SELECT id, name, query, badge, position FROM smart_folders", [], |_| Ok(())).optional().unwrap();
 }
 
 #[test]
@@ -109,7 +111,7 @@ fn favorite_senders_mark_and_filter_threads() {
     let all = s.list_threads(&ThreadFilter { mailbox_id: Some(mb.clone()), limit: 10, ..Default::default() }).unwrap();
     assert_eq!(all.iter().filter(|t| t.favorite).map(|t| t.thread_id.clone()).collect::<Vec<_>>(), vec![bob.clone()]);
     assert!(s.get_thread_summary(&bob).unwrap().unwrap().favorite);
-    let fav = ThreadFilter { favorite: true, limit: 10, ..Default::default() };
+    let fav = ThreadFilter { conds: vec![MsgCond::new(MsgTerm::Favorite)], limit: 10, ..Default::default() };
     assert_eq!(s.list_threads(&fav).unwrap().len(), 1);
     assert_eq!(s.count_threads(&fav).unwrap(), 1);
 
@@ -167,24 +169,6 @@ fn paging_with_identical_timestamps() {
 }
 
 #[test]
-fn ops_run_in_order_and_a_retrying_op_holds_back_later_ones() {
-    let s = Store::open_in_memory().unwrap();
-    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
-    let kinds = |s: &Store| s.due_ops(&acc.id).unwrap().into_iter().map(|o| o.kind).collect::<Vec<_>>();
-    // Queued within the same millisecond: still in queue order.
-    let mv = s.enqueue_op(&acc.id, "move", &serde_json::json!({}), "user").unwrap();
-    let send = s.enqueue_op(&acc.id, "send", &serde_json::json!({}), "user").unwrap();
-    s.enqueue_op(&acc.id, "mailbox_delete", &serde_json::json!({}), "user").unwrap();
-    assert_eq!(kinds(&s), vec!["move", "send", "mailbox_delete"]);
-    // A send waiting to retry doesn't hold anything back...
-    s.op_retry(&send, "down", 1).unwrap();
-    assert_eq!(kinds(&s), vec!["move", "mailbox_delete"]);
-    // ...but any other op does, along with everything after it.
-    s.op_retry(&mv, "down", 1).unwrap();
-    assert!(kinds(&s).is_empty());
-}
-
-#[test]
 fn unread_ids_by_mailbox_or_role() {
     let s = Store::open_in_memory().unwrap();
     let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
@@ -219,11 +203,14 @@ fn with_search_and_person_summary() {
     for (r, m) in [(&from_bob, &mb), (&to_bob, &sent), (&other, &mb)] {
         s.upsert_message(&acc.id, r, &[(m.clone(), None)]).unwrap();
     }
-    let with = |v: &[&str]| s.count_threads(&ThreadFilter { with: v.iter().map(|x| x.to_string()).collect(), ..Default::default() }).unwrap();
-    assert_eq!(with(&["bob@x.test"]), 1);
-    assert_eq!(with(&["bob@x.test", "bob@work.test"]), 2);
-    assert_eq!(with(&["bob"]), 3);
-    assert_eq!(s.count_threads(&ThreadFilter { from: vec!["bob@x.test".into()], ..Default::default() }).unwrap(), 1);
+    let count = |term: MsgTerm, negate: bool| s.count_threads(&ThreadFilter { conds: vec![MsgCond { term, negate }], ..Default::default() }).unwrap();
+    let list = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    assert_eq!(count(MsgTerm::With(list(&["bob@x.test"])), false), 1);
+    assert_eq!(count(MsgTerm::With(list(&["bob@x.test", "bob@work.test"])), false), 2);
+    assert_eq!(count(MsgTerm::With(list(&["bob"])), false), 3);
+    assert_eq!(count(MsgTerm::From(list(&["bob@x.test"])), false), 1);
+    assert_eq!(count(MsgTerm::From(list(&["bob@x.test"])), true), 2);
+    assert_eq!(count(MsgTerm::From(vec![]), false), 3);
 
     let p = s.person_summary(&["bob@x.test".into(), "BOB@work.test".into()]).unwrap();
     assert_eq!((p.received, p.sent, p.attachments), (1, 1, 1));
@@ -348,16 +335,6 @@ fn deleted_messages_free_their_stored_copies() {
 }
 
 #[test]
-fn only_failed_or_waiting_ops_can_be_retried() {
-    let s = Store::open_in_memory().unwrap();
-    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
-    let id = s.enqueue_op(&acc.id, "send", &serde_json::json!({}), "user").unwrap();
-    s.op_sending(&id).unwrap();
-    s.op_reset(&id).unwrap();
-    assert!(s.due_ops(&acc.id).unwrap().is_empty(), "a send in flight isn't put back in the queue");
-}
-
-#[test]
 fn data_errors_are_told_apart_from_database_failures() {
     let c = Connection::open_in_memory().unwrap();
     c.execute_batch("CREATE TABLE t (x TEXT UNIQUE)").unwrap();
@@ -370,4 +347,33 @@ fn data_errors_are_told_apart_from_database_failures() {
     let busy = anyhow::Error::from(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY), None)).context("upsert");
     assert!(!is_data_error(&busy));
     assert!(!is_data_error(&anyhow!("store poisoned")));
+}
+
+#[test]
+fn sync_leaves_messages_with_queued_changes_alone() {
+    let s = Store::open_in_memory().unwrap();
+    let acc = s.insert_account(&AccountConfig::Gmail { email: "a@x.test".into(), display_name: "A".into() }).unwrap();
+    let junk = s.upsert_mailbox(&acc.id, "SPAM", "Spam", "SPAM", MailboxRole::Junk, false).unwrap();
+    let trash = s.upsert_mailbox(&acc.id, "TRASH", "Trash", "TRASH", MailboxRole::Trash, false).unwrap();
+    let (a, _) = s.upsert_message(&acc.id, &rec("1", "m1", None, "spam", 0), &[(junk.clone(), None)]).unwrap();
+    // Deleted locally; the move hasn't reached the server.
+    s.set_memberships(&a, &[(trash.clone(), None)]).unwrap();
+    let r = s.message_ref(&a).unwrap().unwrap();
+    let op = s.enqueue_op(&acc.id, "labels", &serde_json::json!({ "refs": [r] }), "user").unwrap();
+    // A sync that read the server before the move doesn't put it back in Spam.
+    let mut stale = rec("1", "m1", None, "spam", 0);
+    stale.flags.flagged = true;
+    s.upsert_message(&acc.id, &stale, &[(junk.clone(), None)]).unwrap();
+    assert_eq!(s.memberships(&a).unwrap(), vec![(trash.clone(), None)]);
+    assert!(!s.message_ref(&a).unwrap().unwrap().flags.flagged);
+    // Once the server has it, sync is in charge again.
+    s.op_done(&op).unwrap();
+    s.upsert_message(&acc.id, &stale, &[(junk.clone(), None)]).unwrap();
+    assert_eq!(s.memberships(&a).unwrap(), vec![(junk, None)]);
+    // A message being deleted for good isn't stored again meanwhile.
+    let r = s.message_ref(&a).unwrap().unwrap();
+    s.delete_message(&a).unwrap();
+    s.enqueue_op(&acc.id, "expunge", &serde_json::json!({ "refs": [r] }), "user").unwrap();
+    assert_eq!(s.upsert_message(&acc.id, &stale, &[(trash, None)]).unwrap(), (String::new(), false));
+    assert!(s.message_id_by_remote(&acc.id, "1").unwrap().is_none());
 }

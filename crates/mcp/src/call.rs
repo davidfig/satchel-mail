@@ -39,6 +39,7 @@ impl SatchelMcp {
                 Ok(json!(accounts.iter().map(|a| json!({ "account_id": a.id, "email": a.email, "name": a.display_name, "kind": a.kind })).collect::<Vec<_>>()))
             }
             "list_mailboxes" => self.run(Command::ListMailboxes { account_id: s("account_id") }).await,
+            "list_smart_folders" => self.run(Command::ListSmartFolders).await,
             "search_threads" => {
                 let role = s("role").map(|r| serde_json::from_value::<MailboxRole>(json!(r))).transpose().map_err(|_| "unknown role")?;
                 let before = match s("before") {
@@ -49,6 +50,7 @@ impl SatchelMcp {
                     mailbox_id: s("mailbox_id"),
                     role,
                     account_id: s("account_id"),
+                    smart_folder_id: s("smart_folder_id"),
                     search: s("query"),
                     limit: a.get("limit").and_then(Value::as_u64).map(|n| n.min(200) as u32).or(Some(25)),
                     before,

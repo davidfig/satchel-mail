@@ -38,7 +38,7 @@
       <article class="msg legal">
         <p class="crumb"><a href="./">satchel.email</a> &rsaquo; Privacy</p>
         <h1>Privacy policy</h1>
-        <p class="muted">Last updated October 31, 2026</p>
+        <p class="muted">Last updated November 4, 2026</p>
         <p class="lede">The short version: satchel.email runs on your computer and keeps your mail there. There is no satchel.email server, so we never receive your mail, calendars, contacts or passwords. We don't collect analytics, telemetry or crash reports, and there are no ads.</p>
 
         <section>
@@ -59,12 +59,14 @@
           <h3>Who it connects to</h3>
           <ul class="plain">
             <li><b>Your email providers,</b> such as Google, Microsoft, Fastmail, iCloud or your own mail server, to sync your mail, calendars and contacts and to send what you send. Your data goes directly between your computer and them.</li>
-            <li><b>Only when you ask:</b> images in a message after you choose to load them, a mailing list's unsubscribe address when you use one-click unsubscribe, and place suggestions for event locations if you turn on Settings &rsaquo; Privacy &rsaquo; Places (off by default). Place lookups send what you type in the location field to OpenStreetMap's Photon service, or to Apple Maps on a Mac.</li>
+            <li><b>GitHub, to check for updates.</b> The desktop app checks GitHub Releases for a new version when it starts and every six hours, and downloads it from there. GitHub sees your IP address. None of your mail, calendars or contacts are part of this.</li>
+            <li><b>Your system's DNS resolver,</b> to look up senders' domains when the app checks that a message's signature is genuine. Your DNS provider can see which domains those lookups are for.</li>
+            <li><b>Only when you ask:</b> images in a message after you choose to load them, or in all mail except spam if you turn on Settings &rsaquo; Privacy &rsaquo; Always load remote images (off by default); a mailing list's unsubscribe address when you use one-click unsubscribe; and place suggestions for event locations if you turn on Settings &rsaquo; Privacy &rsaquo; Places (off by default). Place lookups send what you type in the location field to OpenStreetMap's Photon service, or to Apple Maps on a Mac.</li>
             <li><b>Nothing else.</b> The app doesn't contact any satchel.email server, because there isn't one.</li>
           </ul>
 
           <h3>AI agents</h3>
-          <p>satchel.email has no AI built in and never sends your data to an AI service. If you point an AI agent at the AI folder, or connect one over MCP, that agent can read what you've allowed it to read and propose changes for you to approve. What the agent does with what it reads, including sending it to its own provider, is up to that agent and its provider's terms, not satchel.email.</p>
+          <p>satchel.email has no AI built in and never sends your data to an AI service. If you point an AI agent at the AI folder, or connect one over MCP, that agent can read what you've allowed it to read and propose changes. By default each one waits for you to approve it; you can choose in Settings to let an agent's proposals of a given kind apply on their own. What the agent does with what it reads, including sending it to its own provider, is up to that agent and its provider's terms, not satchel.email.</p>
         </section>
 
         <section id="google">
@@ -72,6 +74,7 @@
           <p>When you sign in with Google, satchel.email asks for access to your Gmail, Google Calendar and Google Contacts so it can work as your mail, calendar and contacts app: to read, organize, search and send mail, and to show and change your events and contacts.</p>
           <ul class="plain">
             <li>Data from Google goes only to your computer, where it's stored as described above. It is never sent to satchel.email or to anyone else, except the services you ask the app to contact.</li>
+            <li>The AI folder's copy on your computer includes it unless you leave that account out or turn the folder off. No AI tool can read it until you connect one yourself, and satchel.email doesn't send it to one.</li>
             <li>It isn't used for advertising, isn't sold, and isn't used to train AI or machine-learning models.</li>
             <li>No person at satchel.email can read it, because it never leaves your computer.</li>
             <li>You can remove satchel.email's access at any time in your <a href="https://myaccount.google.com/permissions">Google account's third-party access settings</a>, and remove the account from the app to delete its data from your computer.</li>
@@ -109,6 +112,7 @@
         <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
         <a href="security.html">Security</a>
         <a href="trademarks.html">Trademarks</a>
+        <a href="support.html">Support</a>
       </span>
     </footer>
   </body>

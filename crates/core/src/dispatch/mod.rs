@@ -84,6 +84,10 @@ impl Engine {
 
             // ---------------------------------------------------------- mail reads
             Command::ListMailboxes { account_id } => ok(self.list_mailboxes(caller, account_id)?),
+            Command::ListSmartFolders => ok(self.list_smart_folders(caller)?),
+            Command::SaveSmartFolder { folder } => ok(self.save_smart_folder(caller, folder)?),
+            Command::DeleteSmartFolder { id } => ok(self.delete_smart_folder(caller, &id).map(|_| json!({ "ok": true }))?),
+            Command::ReorderSmartFolders { ids } => ok(self.reorder_smart_folders(caller, &ids).map(|_| json!({ "ok": true }))?),
             Command::ListThreads { query } => ok(self.list_threads(caller, &query)?),
             Command::CountThreads { query } => {
                 let f = self.thread_filter(caller, &query)?;
