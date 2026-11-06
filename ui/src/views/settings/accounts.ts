@@ -3,8 +3,10 @@
 import { api } from '../../api';
 import { h, icon, patch } from '../../lib/dom';
 import { relative } from '../../lib/format';
+import { signOutMessage } from '../../lib/signouts';
 import { confirmDialog, errorToast, modal, toast } from '../../lib/ui';
 import { store } from '../../state';
+import { RpcError } from '../../transport';
 import type { Account, AccountConfig, Credential, ProviderKind, Security } from '../../types';
 import { openExternal } from '../mail/message-body';
 import { field } from './form';
@@ -43,10 +45,14 @@ export function accounts(el: HTMLElement) {
           a.sync.state === 'sign_in' && isOAuth(a)
             ? h('div.small.error', `${a.kind === 'gmail' ? 'Google' : 'Microsoft'} signed Satchel out of this account, so it can’t sync. `,
               h('button.link', { title: 'Sign in again in your browser to resume syncing', on: { click: () => void reconnect(a) } }, 'Sign in again'))
-            : a.sync.error && h('div.small.error', a.sync.error),
+            : a.sync.state === 'sign_in'
+              ? h('div.small.error', `${signOutMessage(a)} `,
+                h('button.link', { title: 'Enter this account’s new password to resume syncing', on: { click: () => changePassword(a) } }, 'Update password'))
+              : a.sync.error && h('div.small.error', a.sync.error),
           a.contacts_need_reconnect && a.sync.state !== 'sign_in' && h('div.small.muted', 'Contacts don’t sync yet: this sign-in predates contacts access. ',
             h('button.link', { title: 'Sign in again to allow Satchel to sync your contacts', on: { click: () => void reconnect(a) } }, 'Reconnect to sync contacts'))),
         h('button', { title: 'Check this account for new mail now', on: { click: () => void api.syncNow(a.id).then(() => toast('Syncing…', { quiet: true })) } }, 'Sync now'),
+        !isOAuth(a) && a.sync.state !== 'sign_in' && h('button', { title: 'Change the password Satchel uses for this account', on: { click: () => changePassword(a) } }, 'Update password'),
         h('button.danger', {
           title: 'Remove this account from Satchel; nothing is deleted on the server',
           on: {
@@ -184,11 +190,45 @@ export async function reconnect(a: Account) {
   }
 }
 
+/** Enter a password account's new password. The server checks it before it's saved. */
+export function changePassword(a: Account) {
+  const password = h('input', { type: 'password', placeholder: 'Password', autocomplete: 'current-password', on: { keydown: (e: KeyboardEvent) => e.key === 'Enter' && void save() } });
+  const status = h('p.small');
+  const save = async () => {
+    if (btn.disabled) return;
+    if (!password.value) {
+      status.className = 'small error';
+      status.textContent = 'Enter the password.';
+      return;
+    }
+    const now = store.state.accounts.find((x) => x.id === a.id);
+    if (!now) return m.close();
+    status.className = 'small';
+    status.textContent = 'Checking…';
+    btn.disabled = true;
+    try {
+      await api.updateAccount(now.id, now.config, { type: 'password', password: password.value });
+      m.close();
+      toast('Password updated. Syncing…', { quiet: true });
+      await store.refreshAccounts();
+    } catch (e) {
+      status.className = 'small error';
+      status.textContent = e instanceof RpcError && e.code === 'auth' ? 'The server didn’t accept that password.' : e instanceof Error ? e.message : String(e);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  const btn = h('button.primary', { title: 'Check this password with the server and save it', on: { click: () => void save() } }, 'Update password');
+  const m = modal(`Update password for ${a.email}`, h('div.form',
+    field('Password', password, 'Some providers, such as iCloud and Fastmail, need an app password.'),
+    status), { footer: h('div.row.end', h('button', { title: 'Keep the current password', on: { click: () => m.close() } }, 'Cancel'), btn) });
+}
+
 function secSelect(v: Security) {
   return h('select', [['tls', 'SSL/TLS'], ['start_tls', 'STARTTLS'], ['none', 'None']].map(([val, l]) => h('option', { value: val, selected: v === val }, l)));
 }
 
-function isOAuth(a: Account) {
+export function isOAuth(a: Account) {
   return a.kind === 'gmail' || a.kind === 'graph';
 }
 

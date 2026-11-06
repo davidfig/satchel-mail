@@ -4,6 +4,7 @@ import { h, icon, patch, replace } from '../lib/dom';
 import { deleteFolder, emptiable, emptyFolder, folderDialog, folderTree } from '../lib/folders';
 import { deleteSmartFolder, moveSmartFolder, smartFolderDialog } from '../lib/smart-folders';
 import { fullDate, relative, relativeShort, shortProgress } from '../lib/format';
+import { watchSignOuts } from '../lib/notify';
 import { throttled } from '../lib/throttle';
 import { bind, contextMenu, errorToast, setScope, toast, trigger } from '../lib/ui';
 import type { MenuItem } from '../lib/ui';
@@ -19,6 +20,7 @@ import { showShortcuts } from './help';
 import { COLLAPSED_KEY, FAVORITES, LOCATION_KEY, SECTIONS_KEY, UNIFIED, readCollapsed, readJson, writeJson } from './location';
 import { installMenu } from './menu';
 import { palette } from './palette';
+import { signInAgain, signInBanners } from './sign-in';
 
 /** Each account's built-in folders, in sidebar order: the ones the
  *  combined list under Mail shows, then Gmail's Important and All Mail. */
@@ -36,7 +38,9 @@ const SYNC_ON_FOCUS_EVERY_MS = 30_000;
 export class Shell {
   private sidebar = h('nav.sidebar', { 'aria-label': 'Navigation' });
   private content = h('main.content');
-  private app = h('div.app', this.sidebar, this.content);
+  /** Above every view: accounts that were signed out. */
+  private banners = h('div.signin-banners');
+  private app = h('div.app', this.sidebar, h('div.main-column', this.banners, this.content));
   /** Each view, and what it adds to the sidebar under the nav. `side` is an
    *  `<aside>`, so patching the sidebar never reuses it as another node. */
   private views: Partial<Record<View, { root: HTMLElement; show?: () => void; side?: HTMLElement }>> = {};
@@ -49,12 +53,15 @@ export class Shell {
     store.subscribe((_, changed) => {
       if (changed.has('view')) this.showView();
       if (changed.has('view') || changed.has('source')) writeJson(LOCATION_KEY, { view: store.state.view, source: store.state.source });
+      if (changed.has('accounts')) patch(this.banners, ...signInBanners(store.state.accounts));
       if (['view', 'accounts', 'mailboxes', 'smartFolders', 'pendingProposals', 'source', 'favorites'].some((k) => changed.has(k as never))) this.renderSidebar();
     });
+    patch(this.banners, ...signInBanners(store.state.accounts));
     this.renderSidebar();
     this.showView();
     this.bindKeys();
     installMenu(this);
+    watchSignOuts();
     window.addEventListener('focus', throttled(() => void api.syncNow(null).catch(() => {}), SYNC_ON_FOCUS_EVERY_MS));
   }
 
@@ -185,6 +192,8 @@ export class Shell {
     const syncing = accounts.filter((a) => a.sync.state === 'syncing');
     const collapsed = this.app.classList.contains('collapsed');
     const errors = accounts.filter((a) => a.sync.state === 'error' || a.sync.state === 'offline' || a.sync.state === 'sign_in');
+    // The one problem, if it's a sign-out: the footer can fix it directly.
+    const loneSignOut = errors.length === 1 && errors[0].sync.state === 'sign_in' ? errors[0] : null;
     const combined = store.state.view === 'mail' && !collapsed && accounts.length > 1;
     const inboxUnread = unread('inbox');
     // Shown once there's a favorite (and while it's open, so removing the
@@ -227,7 +236,10 @@ export class Shell {
       store.state.view !== 'mail' && !collapsed && this.view(store.state.view).side,
       h('div.sidebar-foot',
         errors.length
-          ? h('button.sync-status.error', { title: errors.map((a) => `${a.email}: ${a.sync.error}`).join('\n'), on: { click: () => store.set({ view: 'settings', settingsSection: 'accounts' }) } }, icon('warning', 14), `${errors.length} account${errors.length > 1 ? 's' : ''} need attention`)
+          ? h('button.sync-status.error', {
+              title: errors.map((a) => `${a.email}: ${a.sync.error}`).join('\n'),
+              on: { click: () => (loneSignOut ? signInAgain(loneSignOut) : store.set({ view: 'settings', settingsSection: 'accounts' })) },
+            }, icon('warning', 14), loneSignOut ? 'Sign in again' : errors.length > 1 ? `${errors.length} accounts need attention` : '1 account needs attention')
           : syncing.length
             // One row per syncing account, marked with its color.
             ? syncing.map((a) => h('div.sync-status', { title: `${a.email}: ${a.sync.detail ?? 'Syncing…'}` },
@@ -288,14 +300,17 @@ export class Shell {
 
   private accountSection(a: Account, boxes: Mailbox[]) {
     const err = a.sync.state === 'error' || a.sync.state === 'offline' || a.sync.state === 'sign_in';
+    const signedOut = a.sync.state === 'sign_in';
     const open = this.openSections.has(a.id);
     const labels = boxes.some((m) => m.is_label);
     return h('div.account-section',
       h('div.mb-section-row',
         this.sectionHeader(a.id, h(`span.acct-dot${a.sync.state === 'syncing' ? '.busy' : ''}`, { style: { background: a.color } }), h('span.acct-email', a.email),
-          h('span.acct-synced', { title: a.sync.last_success ? `Last synced ${fullDate(a.sync.last_success)}` : 'Not synced yet' }, relativeShort(a.sync.last_success)),
-          err ? h('span.state-dot.err', { title: a.sync.state === 'offline' ? 'Offline' : a.sync.state === 'sign_in' ? 'Sign in again' : 'Sync error' }) : null),
-        h('button.icon-btn.mb-add', { title: labels ? 'New label' : 'New folder', on: { click: () => void this.newFolder(a.id, null) } }, icon('plus', 14))),
+          signedOut ? null : h('span.acct-synced', { title: a.sync.last_success ? `Last synced ${fullDate(a.sync.last_success)}` : 'Not synced yet' }, relativeShort(a.sync.last_success)),
+          err && !signedOut ? h('span.state-dot.err', { title: a.sync.state === 'offline' ? 'Offline' : 'Sync error' }) : null),
+        signedOut
+          ? h('button.acct-signin', { title: `Sign in again to ${a.email} to resume syncing`, on: { click: () => signInAgain(a) } }, icon('warning', 12), 'Sign in')
+          : h('button.icon-btn.mb-add', { title: labels ? 'New label' : 'New folder', on: { click: () => void this.newFolder(a.id, null) } }, icon('plus', 14))),
       open && BUILT_IN.flatMap(({ role, icon: ic }) => boxes.filter((m) => m.role === role).map((m) =>
         this.sourceItem({ kind: 'mailbox', mailbox_id: m.id, label: m.name }, ic, role === 'drafts' ? m.total : role === 'all' || role === 'sent' || role === 'trash' ? 0 : m.unread))),
       open && folderTree(boxes).map(({ box, depth }) =>

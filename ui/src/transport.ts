@@ -19,8 +19,9 @@ export interface Transport {
   setTitle(title: string): void;
   /** Whether we may show system notifications; `ask` prompts the user if undecided. */
   canNotify(ask: boolean): Promise<boolean>;
-  /** Shows a system notification. `onClick` runs only where the platform reports clicks (the web). */
-  notify(title: string, body: string, onClick?: () => void): void;
+  /** Shows a system notification. `onClick` runs only where the platform reports clicks (the web).
+   *  On the web, a notification replaces the last one with the same `tag`. */
+  notify(title: string, body: string, onClick?: () => void, tag?: string): void;
   /** Whether the host schedules calendar alerts with the OS (the Mac app), so the UI shouldn't notify for them (0057). */
   osAlerts(): Promise<boolean>;
   /** Events an alert's notification asked to open (the Mac app). The web has none. */
@@ -248,8 +249,8 @@ class HttpTransport implements Transport {
     return Notification.permission === 'granted';
   }
 
-  notify(title: string, body: string, onClick?: () => void) {
-    const n = new Notification(title, { body, tag: 'satchel-new-mail' });
+  notify(title: string, body: string, onClick?: () => void, tag = 'satchel-new-mail') {
+    const n = new Notification(title, { body, tag });
     n.onclick = () => {
       window.focus();
       onClick?.();
