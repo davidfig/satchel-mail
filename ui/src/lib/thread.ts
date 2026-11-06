@@ -1,7 +1,7 @@
 // Pure thread helpers: quote detection and which messages to fold. No app imports,
 // so they run under `node --test` (see ui/test/).
 
-import type { Address, MessageDetail } from '../types';
+import type { Address, DeceptiveLink, MessageDetail } from '../types';
 
 /** Show the first message, a fold, then this many before the first new one. */
 const CONTEXT_BEFORE_NEW = 1;
@@ -142,6 +142,20 @@ export function routeLinks(html: string, origin: string, cautious: boolean): str
     changed = true;
   }
   return changed ? doc.body.innerHTML : html;
+}
+
+/** The deceptive link a click on `url` followed, if any. Clicks report a
+ *  browser-normalized address, so both sides are normalized to compare. */
+export function findDeceptiveLink(url: string, links: DeceptiveLink[]): DeceptiveLink | undefined {
+  const norm = (u: string) => {
+    try {
+      return new URL(u.trim()).href;
+    } catch {
+      return u.trim();
+    }
+  };
+  const clicked = norm(url);
+  return links.find((l) => norm(l.url) === clicked);
 }
 
 /**

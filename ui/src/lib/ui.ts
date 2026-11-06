@@ -159,6 +159,26 @@ export function confirmDialog(title: string, message: string | Node, okLabel = '
   });
 }
 
+/** Like `confirmDialog`, with several ways forward: resolves to the chosen
+ *  value, or null for Cancel. The last choice is the primary button. */
+export function chooseDialog<T>(title: string, message: string | Node, choices: { label: string; title: string; value: T }[]): Promise<T | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v: T | null) => {
+      if (done) return;
+      done = true;
+      m.close();
+      resolve(v);
+    };
+    const footer = h(
+      'div.row.end.wrap',
+      h('button', { title: 'Don’t open anything', on: { click: () => finish(null) } }, 'Cancel'),
+      choices.map((c, i) => h(`button${i === choices.length - 1 ? '.primary' : ''}`, { title: c.title, on: { click: () => finish(c.value) } }, c.label)),
+    );
+    const m = modal(title, typeof message === 'string' ? h('p', message) : message, { footer, onClose: () => finish(null) });
+  });
+}
+
 // ---------------------------------------------------------------- menus
 
 export interface MenuItem {

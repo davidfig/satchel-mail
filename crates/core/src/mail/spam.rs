@@ -270,8 +270,18 @@ impl Engine {
         self.correspondents().emails.contains(&e) || self.store.sender_rule(&e).ok().flatten() == Some(SenderVerdict::NotSpam)
     }
 
+    /// Links to ask about when clicked. A verified sender naming its own
+    /// domain is the brand vouching for its own link (a second brand domain,
+    /// its click tracker), not someone borrowing the brand, so those are left out.
+    pub(crate) fn deceptive_links(&self, m: &StoredMessage, p: &satchel_mime::Parsed, verified: bool) -> Vec<DeceptiveLink> {
+        let Some(html) = &p.html else { return vec![] };
+        let from = m.summary.from.as_ref().map(|f| satchel_mime::email_domain(&f.email)).unwrap_or_default();
+        let own = |shown: &str| satchel_mime::base_domain(shown) == satchel_mime::base_domain(&from);
+        satchel_mime::deceptive_links(html).into_iter().filter(|l| !(verified && own(&l.shown))).collect()
+    }
+
     /// Phishing and safety signals for one message, worst first.
-    pub(crate) fn message_warnings(&self, m: &StoredMessage, p: &satchel_mime::Parsed, invite: Option<&Invite>) -> Vec<MessageWarning> {
+    pub(crate) fn message_warnings(&self, m: &StoredMessage, p: &satchel_mime::Parsed, invite: Option<&Invite>, verified: bool, links: &[DeceptiveLink]) -> Vec<MessageWarning> {
         let mut out = vec![];
         let warn = |out: &mut Vec<MessageWarning>, kind, message: String| out.push(MessageWarning { kind, message });
         let from = m.summary.from.as_ref();
@@ -295,15 +305,12 @@ impl Engine {
             let domain = if from_domain.is_empty() { "the sender".to_string() } else { from_domain.clone() };
             warn(&mut out, WarningKind::AuthFailed, format!("This message {why}, so it may not really be from {domain}."));
         }
-        if let Some(h) = &p.html {
-            // A verified sender naming its own domain is the brand vouching
-            // for its own link (a second brand domain, its click tracker),
-            // not someone borrowing the brand.
-            let own = |shown: &str| satchel_mime::base_domain(shown) == satchel_mime::base_domain(&from_domain);
-            let verified = !from_domain.is_empty() && self.sender_verified(&m.summary.id, &m.summary.account_id, p);
-            let links = satchel_mime::deceptive_links(h).into_iter().filter(|(shown, _)| !(verified && own(shown)));
-            for (shown, actual) in links.take(2) {
-                warn(&mut out, WarningKind::DeceptiveLink, format!("A link shows {shown} but goes to {actual}."));
+        // Real companies do this all the time, so from a verified sender the
+        // link is asked about only when clicked (0067).
+        if !verified {
+            let mut seen = HashSet::new();
+            for l in links.iter().filter(|l| seen.insert((&l.shown, &l.actual))).take(2) {
+                warn(&mut out, WarningKind::DeceptiveLink, format!("A link shows {} but goes to {}.", l.shown, l.actual));
             }
         }
         if let Some(rt) = m.reply_to.first() {
