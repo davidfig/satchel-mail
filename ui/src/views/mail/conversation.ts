@@ -199,14 +199,15 @@ export class Conversation {
     if (warned) card.append(warned);
     if (m.invite) card.append(inviteCard(m, !!this.opts.spam));
     const cautious = this.cautious(m);
-    const frameHost = h('div', htmlFrame(formatted.html, cautious, m.remote_images_allowed));
+    const links = m.deceptive_links ?? [];
+    const frameHost = h('div', htmlFrame(formatted.html, cautious, m.remote_images_allowed, links));
     card.append(frameHost);
     if (formatted.quoted) {
       const full = formatted.quoted;
       card.append(h('button.quote-toggle', {
         title: 'Show quoted text',
         'aria-label': 'Show quoted text',
-        on: { click: (e: MouseEvent) => { replace(frameHost, htmlFrame(full, cautious, m.remote_images_allowed)); (e.currentTarget as HTMLElement).remove(); } },
+        on: { click: (e: MouseEvent) => { replace(frameHost, htmlFrame(full, cautious, m.remote_images_allowed, links)); (e.currentTarget as HTMLElement).remove(); } },
       }, '•••'));
     }
     const atts = attachments(m);

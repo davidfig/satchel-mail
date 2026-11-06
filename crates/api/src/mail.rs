@@ -167,6 +167,9 @@ pub struct MessageDetail {
     /// Signs this message may be phishing or unsafe, computed by the core.
     #[serde(default)]
     pub warnings: Vec<MessageWarning>,
+    /// Links to ask about when clicked, because their text names another domain.
+    #[serde(default)]
+    pub deceptive_links: Vec<DeceptiveLink>,
     /// How to unsubscribe, from the List-Unsubscribe header.
     #[serde(default)]
     pub unsubscribe: Option<Unsubscribe>,
@@ -200,6 +203,17 @@ pub enum WarningKind {
 pub struct MessageWarning {
     pub kind: WarningKind,
     pub message: String,
+}
+
+/// A link whose text shows one domain but which goes to another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeceptiveLink {
+    /// The link's address, as a click on it reports it.
+    pub url: String,
+    /// The host its text shows.
+    pub shown: String,
+    /// The host it really goes to.
+    pub actual: String,
 }
 
 /// Unsubscribe methods a message offers (RFC 2369 / RFC 8058).

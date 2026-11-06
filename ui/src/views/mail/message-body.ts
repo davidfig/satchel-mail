@@ -3,10 +3,10 @@
 import { api } from '../../api';
 import { h, icon, patch } from '../../lib/dom';
 import { timeRange } from '../../lib/format';
-import { confirmDialog, errorToast, modal, toast } from '../../lib/ui';
+import { chooseDialog, confirmDialog, errorToast, modal, toast } from '../../lib/ui';
 import { transport } from '../../transport';
-import type { MessageDetail, PartStat } from '../../types';
-import { followTarget, isAttribution, linkScheme, routeLinks, trimUrl } from '../../lib/thread';
+import type { DeceptiveLink, MessageDetail, PartStat } from '../../types';
+import { findDeceptiveLink, followTarget, isAttribution, linkScheme, routeLinks, trimUrl } from '../../lib/thread';
 import { editDraft, openComposer } from './composer';
 
 /** The core's phishing and safety warnings for one message. A different
@@ -63,9 +63,21 @@ export function inviteCard(m: MessageDetail, inSpam: boolean): HTMLElement {
   return card;
 }
 
-/** Open a link from a message; `cautious` ones show where they really go first. */
-async function openLink(url: string, cautious: boolean) {
-  if (await confirmLink(url, cautious)) openExternal(url);
+/** Open a link from a message. One whose text names another domain asks which
+ *  to go to; other `cautious` ones show where they really go first. */
+async function openLink(url: string, cautious: boolean, links: DeceptiveLink[]) {
+  const link = findDeceptiveLink(url, links);
+  if (link) {
+    const go = await chooseDialog('Check this link',
+      h('div',
+        h('p', `This link shows ${link.shown} but goes to ${link.actual}.`),
+        h('p.muted', 'Companies often do this to count clicks. Scammers do it to hide where a link leads.')),
+      [
+        { label: 'Continue anyway', title: `Open the link, which goes to ${link.actual}`, value: url },
+        { label: `Go to ${link.shown}`, title: `Open ${link.shown} instead of this link`, value: `https://${link.shown}/` },
+      ]);
+    if (go) openExternal(go);
+  } else if (await confirmLink(url, cautious)) openExternal(url);
 }
 
 /** Asks before opening `url` when `cautious` or `always`, saying where it really goes.
@@ -91,7 +103,7 @@ function linkified(line: string, cautious: boolean): HTMLElement {
   for (const p of line.split(/(https?:\/\/[^\s<>"]+)/g)) {
     if (/^https?:\/\//.test(p)) {
       const [url, rest] = trimUrl(p);
-      div.appendChild(h('a', { href: url, rel: 'noopener noreferrer', target: '_blank', on: { click: (e: MouseEvent) => { e.preventDefault(); void openLink(url, cautious); } } }, url));
+      div.appendChild(h('a', { href: url, rel: 'noopener noreferrer', target: '_blank', on: { click: (e: MouseEvent) => { e.preventDefault(); void openLink(url, cautious, []); } } }, url));
       if (rest) div.appendChild(document.createTextNode(rest));
     } else if (p) div.appendChild(document.createTextNode(p));
   }
@@ -134,6 +146,8 @@ export function textBody(text: string, cautious: boolean): HTMLElement {
 /** About ten seconds of frames to wait for a message to parse before leaving it to `load`. */
 const SIZE_POLLS = 600;
 const framesSized = new WeakMap<HTMLIFrameElement, Promise<void>>();
+/** Each frame's deceptive links, for clicks that reach us from the host. */
+const frameLinks = new WeakMap<HTMLIFrameElement, DeceptiveLink[]>();
 
 /** Resolves once `frame` (from `htmlFrame`) has its message parsed and is sized to fit. */
 export function frameSized(frame: HTMLIFrameElement): Promise<void> {
@@ -143,7 +157,7 @@ export function frameSized(frame: HTMLIFrameElement): Promise<void> {
 /** Sanitized HTML (from the core) in a script-less sandboxed iframe with a CSP.
  *  Without `allowRemote` the CSP itself blocks remote images: CSS escapes
  *  and `image-set()` can slip past the sanitizer's checks. */
-export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean): HTMLElement {
+export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean, links: DeceptiveLink[]): HTMLElement {
   const img = allowRemote ? 'data: https: http:' : 'data:';
   const csp = `default-src 'none'; img-src ${img}; style-src 'unsafe-inline'; font-src data:`;
   const doc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>
@@ -159,6 +173,7 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
   const sandbox = transport.kind === 'tauri' ? 'allow-same-origin allow-popups' : 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
   const frame = h('iframe.html-body', { sandbox, referrerpolicy: 'no-referrer', title: 'Message content', dataset: { cautious: String(cautious) } }) as HTMLIFrameElement;
   frame.srcdoc = doc;
+  frameLinks.set(frame, links);
   // Size the frame as soon as the message is parsed, not on `load`, which
   // waits for every remote image; the observer grows it as they arrive.
   let sized: (() => void) | undefined;
@@ -195,7 +210,7 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
       if (!a?.href || a.href.startsWith('about:srcdoc#')) return;
       e.preventDefault();
       // On the web the link was routed through `#follow`; check what it carries.
-      followLink(followTarget(a.href, location.origin)?.url ?? a.href, cautious);
+      followLink(followTarget(a.href, location.origin)?.url ?? a.href, cautious, links);
     };
     d.addEventListener('click', onLink);
     // Middle-click opens a tab without a `click`; it gets the same check.
@@ -207,13 +222,13 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean)
 }
 
 /** Opens a link from a message body; false if it isn't one we follow. */
-export function followLink(href: string, cautious: boolean): boolean {
+export function followLink(href: string, cautious: boolean, links: DeceptiveLink[] = []): boolean {
   const scheme = linkScheme(href);
   if (scheme === 'mail') {
     const email = mailtoAddress(href);
     if (email) openComposer({ to: [{ email }] });
     else toast('This email link is malformed, so Satchel didn’t open it.');
-  } else if (scheme === 'web') void openLink(href, cautious);
+  } else if (scheme === 'web') void openLink(href, cautious, links);
   else return false;
   return true;
 }
@@ -235,7 +250,7 @@ export function catchHostLinks() {
   transport.onOpenLink((url) => {
     const frame = document.activeElement;
     const cautious = !(frame instanceof HTMLIFrameElement && frame.dataset.cautious === 'false');
-    followLink(url, cautious);
+    followLink(url, cautious, frame instanceof HTMLIFrameElement ? frameLinks.get(frame) : []);
   });
 }
 

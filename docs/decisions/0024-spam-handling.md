@@ -1,6 +1,6 @@
 # 0024. Spam: sender rules outrank the server, and the core warns about phishing
 
-- **Status:** Accepted (enforcement narrowed by 0034)
+- **Status:** Accepted (enforcement narrowed by 0034; link warnings changed by 0067)
 - **Date:** 2026-10-24
 
 ## Context
