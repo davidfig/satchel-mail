@@ -60,3 +60,114 @@ fn downloads_without_attachments() {
     let plain = json!({ "mimeType": "text/plain", "headers": [], "body": { "size": 5, "data": b64url(b"hello") } });
     assert!(!parts::skips_any(&plain, false));
 }
+
+/// A tiny IMAP server for the watcher: signs in (or refuses), opens the inbox
+/// with `exists` messages, and sends `event` during IDLE. Returns the port
+/// and, once the client leaves, the commands it sent.
+async fn fake_imap(exists: u32, event: Option<&'static str>, refuse: bool) -> (u16, tokio::task::JoinHandle<Vec<String>>) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let (read, mut write) = socket.into_split();
+        let mut lines = BufReader::new(read).lines();
+        let mut seen = vec![];
+        write.write_all(b"* OK ready\r\n").await.unwrap();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let (tag, cmd) = line.split_once(' ').unwrap_or(("", &line));
+            let (tag, cmd) = (tag.to_string(), cmd.to_string());
+            seen.push(cmd.clone());
+            if cmd.starts_with("AUTHENTICATE") {
+                write.write_all(b"+ \r\n").await.unwrap();
+                let answer = lines.next_line().await.unwrap().unwrap();
+                seen.push(String::from_utf8(base64::engine::general_purpose::STANDARD.decode(answer).unwrap()).unwrap());
+                if refuse {
+                    // Google's error challenge, which the client must answer empty.
+                    write.write_all(b"+ eyJzdGF0dXMiOiI0MDAifQ==\r\n").await.unwrap();
+                    seen.push(lines.next_line().await.unwrap().unwrap());
+                    write.write_all(format!("{tag} NO [AUTHENTICATIONFAILED] Invalid credentials\r\n").as_bytes()).await.unwrap();
+                } else {
+                    write.write_all(format!("{tag} OK signed in\r\n").as_bytes()).await.unwrap();
+                }
+            } else if cmd.starts_with("EXAMINE") {
+                write.write_all(format!("* {exists} EXISTS\r\n{tag} OK [READ-ONLY] opened\r\n").as_bytes()).await.unwrap();
+            } else if cmd == "IDLE" {
+                write.write_all(b"+ idling\r\n").await.unwrap();
+                if let Some(event) = event {
+                    write.write_all(format!("{event}\r\n").as_bytes()).await.unwrap();
+                }
+                let done = lines.next_line().await.unwrap().unwrap();
+                seen.push(done);
+                write.write_all(format!("{tag} OK idle done\r\n").as_bytes()).await.unwrap();
+            } else if cmd == "LOGOUT" {
+                write.write_all(format!("* BYE\r\n{tag} OK bye\r\n").as_bytes()).await.unwrap();
+                break;
+            }
+        }
+        seen
+    });
+    (port, task)
+}
+
+async fn fake_client(port: u16) -> crate::imap::Client {
+    crate::imap::open_client("127.0.0.1", port, Security::None, false, None).await.unwrap()
+}
+
+#[tokio::test]
+async fn watcher_signs_in_read_only_and_wakes_on_new_mail() {
+    let (port, server) = fake_imap(5, Some("* 6 EXISTS"), false).await;
+    let (session, exists) = watch::open_inbox(fake_client(port).await, "me@x.test", "tok").await.unwrap();
+    assert_eq!(exists, 5);
+    let last = std::sync::Mutex::new(Some(5));
+    let started = std::time::Instant::now();
+    assert!(watch::wait_on_inbox(session, exists, &last, std::time::Duration::from_secs(30)).await.unwrap());
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    let seen = server.await.unwrap();
+    assert_eq!(seen[0], "AUTHENTICATE XOAUTH2");
+    assert_eq!(seen[1], "user=me@x.test\x01auth=Bearer tok\x01\x01");
+    assert!(seen.iter().any(|c| c == "EXAMINE \"INBOX\""), "{seen:?}");
+    assert!(!seen.iter().any(|c| c.starts_with("SELECT")), "{seen:?}");
+    assert!(seen.iter().any(|c| c == "DONE"), "{seen:?}");
+}
+
+#[tokio::test]
+async fn watcher_keeps_waiting_through_keepalives_until_the_deadline() {
+    let (port, server) = fake_imap(5, Some("* OK Still here"), false).await;
+    let (session, exists) = watch::open_inbox(fake_client(port).await, "me@x.test", "tok").await.unwrap();
+    let last = std::sync::Mutex::new(None);
+    assert!(!watch::wait_on_inbox(session, exists, &last, std::time::Duration::from_millis(200)).await.unwrap());
+    assert_eq!(*last.lock().unwrap(), Some(5));
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn watcher_returns_at_once_for_mail_that_came_between_waits() {
+    let (port, server) = fake_imap(6, None, false).await;
+    let (session, exists) = watch::open_inbox(fake_client(port).await, "me@x.test", "tok").await.unwrap();
+    let last = std::sync::Mutex::new(Some(5));
+    assert!(watch::wait_on_inbox(session, exists, &last, std::time::Duration::from_secs(30)).await.unwrap());
+    assert_eq!(*last.lock().unwrap(), Some(6));
+    let seen = server.await.unwrap();
+    assert!(!seen.iter().any(|c| c == "IDLE"), "{seen:?}");
+}
+
+#[tokio::test]
+async fn watcher_answers_a_refused_sign_in_without_resending_the_token() {
+    let (port, server) = fake_imap(5, None, true).await;
+    assert!(watch::open_inbox(fake_client(port).await, "me@x.test", "tok").await.is_err());
+    let seen = server.await.unwrap();
+    assert_eq!(seen[2], "", "{seen:?}");
+}
+
+#[tokio::test]
+async fn a_failed_watch_falls_back_to_waiting_out_the_poll() {
+    let wait = std::time::Duration::from_millis(200);
+    let started = std::time::Instant::now();
+    watch::or_poll(async { anyhow::bail!("IMAP is turned off") }, wait).await;
+    assert!(started.elapsed() >= wait);
+    // A watch that saw mail doesn't wait.
+    let started = std::time::Instant::now();
+    watch::or_poll(async { Ok(true) }, std::time::Duration::from_secs(30)).await;
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+}

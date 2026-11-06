@@ -125,7 +125,7 @@ export function general(view: SettingsView, el: HTMLElement) {
       field('Download messages from the last (days) first', days, 'These come first; older mail lists right away and its content follows in the background.'),
       field('Keep downloading in the background', background, 'Older mail downloads when you open it. Attachments always download only when you open them.'),
       field('Storage limit per account', limit, 'Over the limit, the content of the oldest mail is removed (it stays listed and searchable, and downloads again when opened).'),
-      field('Check for new mail every (seconds)', poll, 'Accounts with push (IMAP IDLE, JMAP) update instantly.'),
+      field('Check for new mail every (seconds)', poll, 'Gmail and accounts with push (IMAP IDLE, JMAP) update when new mail reaches the inbox. Outlook accounts check at this interval. All accounts also check when you come back to the app.'),
       h('label.row.inline', notify, 'Show a notification when new mail arrives in an inbox (only while you’re in another app)'),
       h('label.row.inline', alertsOn, 'Show calendar alerts (and a notification while you’re in another app)'),
       field('Default alert for new events', defaultAlert, 'For events you create here. Alerts are saved with each event, so your other devices use them too.')));

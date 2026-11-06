@@ -4,6 +4,7 @@ import { h, icon, patch, replace } from '../lib/dom';
 import { deleteFolder, emptiable, emptyFolder, folderDialog, folderTree } from '../lib/folders';
 import { deleteSmartFolder, moveSmartFolder, smartFolderDialog } from '../lib/smart-folders';
 import { fullDate, relative, relativeShort, shortProgress } from '../lib/format';
+import { throttled } from '../lib/throttle';
 import { bind, contextMenu, errorToast, setScope, toast, trigger } from '../lib/ui';
 import type { MenuItem } from '../lib/ui';
 import { type MailSource, type View, store } from '../state';
@@ -26,6 +27,10 @@ const BUILT_IN: { role: MailboxRole; icon: string }[] = [
   { role: 'important', icon: 'label' },
   { role: 'all', icon: 'archive' },
 ];
+
+/** Coming back to the app checks for mail, but not on every quick app switch
+ *  (a check also syncs address books). */
+const SYNC_ON_FOCUS_EVERY_MS = 30_000;
 
 /** The app frame: sidebar navigation and the current view. */
 export class Shell {
@@ -50,6 +55,7 @@ export class Shell {
     this.showView();
     this.bindKeys();
     installMenu(this);
+    window.addEventListener('focus', throttled(() => void api.syncNow(null).catch(() => {}), SYNC_ON_FOCUS_EVERY_MS));
   }
 
   toggleSidebar() {

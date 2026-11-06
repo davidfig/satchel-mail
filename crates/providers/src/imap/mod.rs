@@ -32,11 +32,61 @@ use tracing::{debug, warn};
 
 use crate::net::{MaybeTls, Timed, tcp, tls_wrap};
 
-type Session = async_imap::Session<Timed<MaybeTls>>;
+pub(crate) type Session = async_imap::Session<Timed<MaybeTls>>;
+pub(crate) type Client = async_imap::Client<Timed<MaybeTls>>;
 
 /// How long the server may stay silent while we wait on it before the
 /// connection counts as dead.
 const STALL: Duration = Duration::from_secs(180);
+
+/// Connect and read the greeting, ready to sign in; `stall` as in [`Timed`].
+/// The greeting and STARTTLS are always bounded.
+pub(crate) async fn open_client(host: &str, port: u16, security: Security, allow_invalid_certs: bool, stall: Option<Duration>) -> Result<Client> {
+    if security == Security::None {
+        crate::net::plaintext_allowed(host, "IMAP")?;
+    }
+    let stream = tcp(host, port).await?;
+    let greet = Some(stall.unwrap_or(STALL));
+    Ok(match security {
+        Security::Tls => {
+            let tls = tls_wrap(stream, host, allow_invalid_certs).await?;
+            let mut cl = async_imap::Client::new(Timed::new(MaybeTls::Tls(Box::new(tls)), greet));
+            cl.read_response().await?.context("server closed connection before greeting")?;
+            let inner = cl.into_inner().into_inner();
+            async_imap::Client::new(Timed::new(inner, stall))
+        }
+        Security::StartTls => {
+            let mut plain = async_imap::Client::new(Timed::new(MaybeTls::Plain(stream), greet));
+            plain.read_response().await?.context("server closed connection before greeting")?;
+            plain.run_command_and_check_ok("STARTTLS", None).await.context("STARTTLS rejected")?;
+            let MaybeTls::Plain(inner) = plain.into_inner().into_inner() else { unreachable!() };
+            let tls = tls_wrap(inner, host, allow_invalid_certs).await?;
+            async_imap::Client::new(Timed::new(MaybeTls::Tls(Box::new(tls)), stall))
+        }
+        Security::None => {
+            let mut cl = async_imap::Client::new(Timed::new(MaybeTls::Plain(stream), greet));
+            cl.read_response().await?.context("server closed connection before greeting")?;
+            let inner = cl.into_inner().into_inner();
+            async_imap::Client::new(Timed::new(inner, stall))
+        }
+    })
+}
+
+/// IDLE on the selected mailbox for up to `max_wait`, then end the session.
+/// Returns whether the server reported a change.
+pub(crate) async fn idle_until_change(s: Session, max_wait: Duration) -> Result<bool> {
+    let mut idle = s.idle();
+    tokio::time::timeout(STALL, idle.init()).await.map_err(|_| anyhow!("IMAP IDLE timed out"))??;
+    let (fut, _stop) = idle.wait_with_timeout(max_wait);
+    let res = fut.await;
+    let changed = matches!(res, Ok(async_imap::extensions::idle::IdleResponse::NewData(_)));
+    debug!("IDLE returned (changed={changed})");
+    if let Ok(Ok(mut s)) = tokio::time::timeout(Duration::from_secs(30), idle.done()).await {
+        let _ = tokio::time::timeout(Duration::from_secs(10), s.logout()).await;
+    }
+    res?;
+    Ok(changed)
+}
 
 #[derive(Clone)]
 pub struct ImapSettings {
@@ -89,42 +139,14 @@ impl ImapProvider {
         self.connect_with(Some(STALL)).await
     }
 
-    /// Connect and sign in; `stall` as in [`Timed`]. The greeting and STARTTLS
-    /// are always bounded.
+    /// Connect and sign in; `stall` as in [`Timed`].
     async fn connect_with(&self, stall: Option<Duration>) -> Result<Session> {
         let c = &self.cfg;
-        if c.security == Security::None {
-            crate::net::plaintext_allowed(&c.host, "IMAP")?;
-        }
-        let stream = tcp(&c.host, c.port).await?;
-        let greet = Some(stall.unwrap_or(STALL));
-        let client = match c.security {
-            Security::Tls => {
-                let tls = tls_wrap(stream, &c.host, c.allow_invalid_certs).await?;
-                let mut cl = async_imap::Client::new(Timed::new(MaybeTls::Tls(Box::new(tls)), greet));
-                cl.read_response().await?.context("server closed connection before greeting")?;
-                let inner = cl.into_inner().into_inner();
-                async_imap::Client::new(Timed::new(inner, stall))
-            }
-            Security::StartTls => {
-                let mut plain = async_imap::Client::new(Timed::new(MaybeTls::Plain(stream), greet));
-                plain.read_response().await?.context("server closed connection before greeting")?;
-                plain.run_command_and_check_ok("STARTTLS", None).await.context("STARTTLS rejected")?;
-                let MaybeTls::Plain(inner) = plain.into_inner().into_inner() else { unreachable!() };
-                let tls = tls_wrap(inner, &c.host, c.allow_invalid_certs).await?;
-                async_imap::Client::new(Timed::new(MaybeTls::Tls(Box::new(tls)), stall))
-            }
-            Security::None => {
-                let mut cl = async_imap::Client::new(Timed::new(MaybeTls::Plain(stream), greet));
-                cl.read_response().await?.context("server closed connection before greeting")?;
-                let inner = cl.into_inner().into_inner();
-                async_imap::Client::new(Timed::new(inner, stall))
-            }
-        };
+        let client = open_client(&c.host, c.port, c.security, c.allow_invalid_certs, stall).await?;
         self.login(client).await
     }
 
-    async fn login(&self, client: async_imap::Client<Timed<MaybeTls>>) -> Result<Session> {
+    async fn login(&self, client: Client) -> Result<Session> {
         let c = &self.cfg;
         let password = self.password()?;
         let mut session = tokio::time::timeout(Duration::from_secs(30), client.login(&c.username, &password))
@@ -312,16 +334,7 @@ impl MailProvider for ImapProvider {
         // timeout; the wait itself is bounded, and so is everything after it.
         let mut s = self.connect_with(None).await?;
         tokio::time::timeout(STALL, s.select("INBOX")).await.map_err(|_| anyhow!("IMAP SELECT timed out"))??;
-        let mut idle = s.idle();
-        tokio::time::timeout(STALL, idle.init()).await.map_err(|_| anyhow!("IMAP IDLE timed out"))??;
-        let (fut, _stop) = idle.wait_with_timeout(max_wait);
-        let res = fut.await;
-        let changed = matches!(res, Ok(async_imap::extensions::idle::IdleResponse::NewData(_)));
-        debug!("IDLE returned (changed={changed})");
-        if let Ok(Ok(mut s)) = tokio::time::timeout(Duration::from_secs(30), idle.done()).await {
-            let _ = tokio::time::timeout(Duration::from_secs(10), s.logout()).await;
-        }
-        res?;
+        idle_until_change(s, max_wait).await?;
         Ok(true)
     }
 }
