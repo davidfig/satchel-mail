@@ -1,10 +1,12 @@
-//! Gmail API mail provider: labels, history-based deltas.
+//! Gmail API mail provider: labels, history-based deltas, and an IMAP IDLE
+//! signal for new mail (`watch`).
 
 mod apply;
 mod parts;
 mod sync;
 #[cfg(test)]
 mod tests;
+mod watch;
 
 use std::collections::{HashMap, HashSet};
 
@@ -116,11 +118,14 @@ pub struct GmailProvider {
     api: ApiClient,
     /// Label ids from the last sync, for [`MailProvider::backfill`].
     labels: std::sync::Mutex<HashSet<String>>,
+    /// The inbox's message count at the last IDLE, to catch mail that arrived
+    /// between waits.
+    inbox_exists: std::sync::Mutex<Option<u32>>,
 }
 
 impl GmailProvider {
     pub fn new(creds: CredentialHandle) -> Result<Self> {
-        Ok(Self { api: api_client(creds)?, labels: Default::default() })
+        Ok(Self { api: api_client(creds)?, labels: Default::default(), inbox_exists: Default::default() })
     }
 
     async fn get(&self, url: &str, what: &str) -> Result<Value> {
@@ -245,5 +250,10 @@ impl MailProvider for GmailProvider {
 
     async fn apply(&self, _ctx: &SyncCtx, op: &ResolvedOp) -> Result<ApplyOutcome> {
         self.apply_op(op).await
+    }
+
+    async fn wait_for_changes(&self, ctx: &SyncCtx, max_wait: std::time::Duration) -> Result<bool> {
+        watch::or_poll(self.wait_for_inbox(&ctx.account.email, max_wait), max_wait).await;
+        Ok(true)
     }
 }
