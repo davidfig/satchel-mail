@@ -14,6 +14,15 @@ pub enum Command {
     RemoveAccount { account_id: Id },
     /// Change server settings (and optionally the credential) of an account.
     UpdateAccount { account_id: Id, config: AccountConfig, credential: Option<Credential> },
+    /// Replace an account's send-as addresses (0072). `smtp_credentials`
+    /// holds new passwords for their SMTP servers, keyed by address; an
+    /// address left out keeps its saved one.
+    SetSendAs {
+        account_id: Id,
+        send_as: Vec<SendAs>,
+        #[serde(default)]
+        smtp_credentials: std::collections::BTreeMap<String, Credential>,
+    },
     /// Begin an OAuth flow; returns {auth_url}. The host completes it.
     StartOAuth { provider: ProviderKind },
     SyncNow { account_id: Option<Id> },

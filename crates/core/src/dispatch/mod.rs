@@ -71,6 +71,11 @@ impl Engine {
                 self.require_full()?;
                 ok(self.update_account(&account_id, config, credential).await?)
             }
+            Command::SetSendAs { account_id, send_as, smtp_credentials } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                ok(self.set_send_as(&account_id, send_as, smtp_credentials).await?)
+            }
             Command::StartOAuth { provider } => {
                 self.require_user(caller)?;
                 self.require_full()?;

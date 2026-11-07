@@ -36,6 +36,8 @@ impl Store {
                 detail: r.get("detail")?,
             },
             contacts_need_reconnect: r.get("contacts_reconnect")?,
+            // A list that doesn't parse is dropped rather than hiding the account.
+            send_as: serde_json::from_str(&r.get::<_, String>("send_as_json")?).unwrap_or_default(),
         })
     }
 
@@ -71,6 +73,14 @@ impl Store {
                 "UPDATE accounts SET sync_state=?, last_success=?, error=?, detail=? WHERE id=?",
                 params![sync_state_str(st.state), st.last_success.map(|d| d.timestamp_millis()), st.error, st.detail, id],
             )?;
+            Ok(())
+        })
+    }
+
+    /// Replace an account's send-as addresses (0072).
+    pub fn set_send_as(&self, id: &str, send_as: &[SendAs]) -> Result<()> {
+        self.w(|c| {
+            c.execute("UPDATE accounts SET send_as_json=? WHERE id=?", params![to_json(&send_as), id])?;
             Ok(())
         })
     }

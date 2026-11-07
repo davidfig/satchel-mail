@@ -44,15 +44,12 @@ impl JmapProvider {
         Ok(self.mailboxes(acc).await?.1.get(&role).cloned())
     }
 
-    pub(super) async fn identity(&self, acc: &str, from: &str) -> Result<String> {
+    /// The identity to send `from` as. The account's own address falls back
+    /// to the first identity; a send-as address must have its own (0072).
+    pub(super) async fn identity(&self, acc: &str, from: &str, send_as: bool) -> Result<String> {
         let r = self.call(vec![json!(["Identity/get", { "accountId": acc }, "id"])]).await?;
         let list = r["id"]["list"].as_array().cloned().unwrap_or_default();
-        let pick = list
-            .iter()
-            .find(|i| i["email"].as_str().is_some_and(|e| e.eq_ignore_ascii_case(from)))
-            .or(list.first())
-            .context("no sending identity on this account")?;
-        Ok(pick["id"].as_str().unwrap_or_default().to_string())
+        pick_identity(&list, from, send_as).map(String::from)
     }
 
     pub(super) fn update_all(&self, acc: &str, messages: &[MessageRef], patch: Value) -> Value {
@@ -141,7 +138,7 @@ impl JmapProvider {
                 let r = self.call(vec![json!(["Mailbox/set", { "accountId": acc, "destroy": [remote_id], "onDestroyRemoveEmails": false }, "m"])]).await?;
                 Self::check_set(&r, "m")?;
             }
-            ResolvedOp::Send { raw, from, rcpts, sent_remote_mailbox, replaces_draft, .. } => {
+            ResolvedOp::Send { raw, from, rcpts, sent_remote_mailbox, replaces_draft, send_as, .. } => {
                 let drafts = self.role_mailbox(&acc, MailboxRole::Drafts).await?;
                 let sent = match sent_remote_mailbox {
                     Some(s) => Some(s.clone()),
@@ -149,7 +146,7 @@ impl JmapProvider {
                 };
                 let staging = drafts.clone().or(sent.clone()).context("no Drafts or Sent mailbox to stage the message")?;
                 let email_id = self.import(&acc, raw, &staging, json!({ "$draft": true, "$seen": true })).await?;
-                let identity = self.identity(&acc, from).await?;
+                let identity = self.identity(&acc, from, *send_as).await?;
                 let mut on_success = serde_json::Map::new();
                 on_success.insert("keywords/$draft".into(), Value::Null);
                 if let Some(s) = &sent {
@@ -180,5 +177,30 @@ impl JmapProvider {
             }
         }
         Ok(out)
+    }
+}
+
+fn pick_identity<'a>(list: &'a [Value], from: &str, send_as: bool) -> Result<&'a str> {
+    let exact = list.iter().find(|i| i["email"].as_str().is_some_and(|e| e.eq_ignore_ascii_case(from)));
+    let pick = match exact {
+        Some(i) => i,
+        None if send_as => {
+            return Err(ApiError::new(ErrorCode::InvalidInput, format!("{from} isn't a sending identity on this account; add it in your mail provider's settings first")).into());
+        }
+        None => list.first().context("no sending identity on this account")?,
+    };
+    Ok(pick["id"].as_str().unwrap_or_default())
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn send_as_addresses_need_their_own_identity() {
+        let list = vec![json!({ "id": "i1", "email": "me@x.test" }), json!({ "id": "i2", "email": "hello@y.test" })];
+        assert_eq!(pick_identity(&list, "HELLO@y.test", true).unwrap(), "i2");
+        assert_eq!(pick_identity(&list, "login@x.test", false).unwrap(), "i1");
+        assert!(pick_identity(&list, "other@y.test", true).is_err());
     }
 }

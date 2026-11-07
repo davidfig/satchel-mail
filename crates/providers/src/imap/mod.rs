@@ -12,6 +12,7 @@ mod sync;
 #[cfg(test)]
 mod tests;
 
+pub use smtp::test_relay;
 pub use names::{decode_mutf7, encode_mutf7, parse_remote_id, remote_id};
 use names::*;
 

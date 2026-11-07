@@ -14,7 +14,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     last_success  INTEGER,
     error         TEXT,
     detail        TEXT,
-    created_at    INTEGER NOT NULL
+    created_at    INTEGER NOT NULL,
+    -- Other addresses the account sends as (0072), a JSON array.
+    send_as_json  TEXT NOT NULL DEFAULT '[]'
 );
 
 -- Folders and labels.

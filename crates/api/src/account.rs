@@ -137,6 +137,31 @@ pub struct Account {
     /// sync until the user signs in again.
     #[serde(default)]
     pub contacts_need_reconnect: bool,
+    /// Other addresses this account sends as (0072).
+    #[serde(default)]
+    pub send_as: Vec<SendAs>,
+}
+
+/// An address an account can send as besides its own (0072). Typed in by
+/// the user; never fetched from the provider.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendAs {
+    pub email: String,
+    /// Empty: the account's display name.
+    #[serde(default)]
+    pub display_name: String,
+    /// IMAP accounts only: send through this server instead of the account's
+    /// SMTP. Its password is in the secret store, never here.
+    #[serde(default)]
+    pub smtp: Option<SmtpServer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SmtpServer {
+    pub host: String,
+    pub port: u16,
+    pub security: Security,
+    pub username: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

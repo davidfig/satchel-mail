@@ -108,6 +108,10 @@ impl ProviderFactory for Factory {
         oauth::start(app, done)
     }
 
+    async fn test_smtp(&self, relay: &satchel_core::provider::SmtpRelay, allow_invalid_certs: bool) -> Result<()> {
+        imap::test_relay(relay, allow_invalid_certs).await
+    }
+
     fn places(&self) -> Option<Arc<dyn PlaceSearch>> {
         Some(self.places.clone())
     }

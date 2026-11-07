@@ -9,7 +9,8 @@ import { store } from '../../state';
 import { RpcError } from '../../transport';
 import type { Account, AccountConfig, Credential, ProviderKind, Security } from '../../types';
 import { openExternal } from '../mail/message-body';
-import { field } from './form';
+import { field, secSelect } from './form';
+import { canSendAs, editSendAs } from './send-as';
 
 interface Preset {
   id: string;
@@ -49,9 +50,11 @@ export function accounts(el: HTMLElement) {
               ? h('div.small.error', `${signOutMessage(a)} `,
                 h('button.link', { title: 'Enter this account’s new password to resume syncing', on: { click: () => changePassword(a) } }, 'Update password'))
               : a.sync.error && h('div.small.error', a.sync.error),
+          (a.send_as?.length ?? 0) > 0 && h('div.small.muted', `Also sends as ${a.send_as!.map((s) => s.email).join(', ')}`),
           a.contacts_need_reconnect && a.sync.state !== 'sign_in' && h('div.small.muted', 'Contacts don’t sync yet: this sign-in predates contacts access. ',
             h('button.link', { title: 'Sign in again to allow Satchel to sync your contacts', on: { click: () => void reconnect(a) } }, 'Reconnect to sync contacts'))),
         h('button', { title: 'Check this account for new mail now', on: { click: () => void api.syncNow(a.id).then(() => toast('Syncing…', { quiet: true })) } }, 'Sync now'),
+        canSendAs(a) && h('button', { title: 'Choose other addresses this account can send from', on: { click: () => editSendAs(a) } }, 'Send as…'),
         !isOAuth(a) && a.sync.state !== 'sign_in' && h('button', { title: 'Change the password Satchel uses for this account', on: { click: () => changePassword(a) } }, 'Update password'),
         h('button.danger', {
           title: 'Remove this account from Satchel; nothing is deleted on the server',
@@ -222,10 +225,6 @@ export function changePassword(a: Account) {
   const m = modal(`Update password for ${a.email}`, h('div.form',
     field('Password', password, 'Some providers, such as iCloud and Fastmail, need an app password.'),
     status), { footer: h('div.row.end', h('button', { title: 'Keep the current password', on: { click: () => m.close() } }, 'Cancel'), btn) });
-}
-
-function secSelect(v: Security) {
-  return h('select', [['tls', 'SSL/TLS'], ['start_tls', 'STARTTLS'], ['none', 'None']].map(([val, l]) => h('option', { value: val, selected: v === val }, l)));
 }
 
 export function isOAuth(a: Account) {

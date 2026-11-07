@@ -100,6 +100,7 @@ impl SatchelMcp {
                 let draft = Draft {
                     id: None,
                     account_id: req("account_id")?,
+                    from: None,
                     to: addrs("to")?,
                     cc: addrs("cc")?,
                     bcc: vec![],

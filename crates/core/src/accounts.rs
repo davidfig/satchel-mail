@@ -83,6 +83,7 @@ impl Engine {
             sync: SyncStatus::default(),
             color: String::new(),
             contacts_need_reconnect: false,
+            send_as: vec![],
         };
         secrets.set(&account_key("test"), credential)?;
         let p = self.factory.create(&tmp, CredentialHandle::new("test".into(), secrets))?;
@@ -132,6 +133,13 @@ impl Engine {
             tracing::warn!(account = %acc.email, "deleting the account's stored mail: {e:#}");
         }
         let secret = self.secrets.delete(&account_key(account_id));
+        for a in &acc.send_as {
+            if a.smtp.is_some()
+                && let Err(e) = self.secrets.delete(&crate::secrets::send_as_key(account_id, &a.email))
+            {
+                tracing::warn!(account = %acc.email, "deleting the SMTP password for {}: {e:#}", a.email);
+            }
+        }
         self.store.audit(
             "user",
             "account_removed",

@@ -80,7 +80,7 @@ class Store {
 
   async refreshAccounts() {
     const accounts = await api.listAccounts();
-    this.set({ accounts, myEmails: new Set(accounts.map((a) => a.email.toLowerCase())) });
+    this.set({ accounts, myEmails: new Set(accounts.flatMap((a) => [a.email, ...(a.send_as ?? []).map((s) => s.email)]).map((e) => e.toLowerCase())) });
   }
 
   async refreshMailboxes() {
@@ -147,7 +147,8 @@ class Store {
           toast(`${e.description} failed: ${e.error}`, { kind: 'error', ms: 9000 });
           break;
         case 'notice':
-          toast(e.message, { kind: e.level === 'error' ? 'error' : 'info' });
+          // Warnings (Gmail changed a send-as From) need reading, so they stay up longer.
+          toast(e.message, e.level === 'error' || e.level === 'warning' ? { kind: 'error', ms: 12000 } : { kind: 'info' });
           break;
         case 'new_mail':
           void notifyNewMail(e.messages);

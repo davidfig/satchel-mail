@@ -58,6 +58,20 @@ impl MaybeSent {
     }
 }
 
+/// A send-as address's own SMTP server and its password (0072).
+#[derive(Clone)]
+pub struct SmtpRelay {
+    pub server: SmtpServer,
+    pub password: String,
+}
+
+/// Never prints the password.
+impl std::fmt::Debug for SmtpRelay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmtpRelay").field("server", &self.server).field("password", &"<redacted>").finish()
+    }
+}
+
 /// A mailbox membership as (remote mailbox id, IMAP UID if any).
 pub type RemoteMembership = (String, Option<u32>);
 
@@ -81,6 +95,9 @@ pub struct ApplyOutcome {
     /// For mailbox updates that change remote ids (IMAP names are paths): old → new,
     /// for the folder and each folder under it.
     pub mailbox_renamed: Vec<(String, String)>,
+    /// Something the user should know about an op that still succeeded (a
+    /// send whose From the provider changed), shown as a warning.
+    pub warning: Option<String>,
 }
 
 /// A mutation, with remote handles already resolved by the core.
@@ -104,6 +121,10 @@ pub enum ResolvedOp {
         replaces_draft: Option<MessageRef>,
         /// Provider thread of the message being replied to (Gmail needs it to thread).
         thread_remote_id: Option<String>,
+        /// `from` is one of the account's send-as addresses, not its own (0072).
+        send_as: bool,
+        /// Send through this server instead of the account's own SMTP (IMAP only).
+        smtp: Option<SmtpRelay>,
     },
     /// New folder `name` under `parent` (None = top level). `path` is the full
     /// "/"-separated path, for providers that name folders by path (Gmail).
@@ -245,6 +266,12 @@ pub trait ProviderFactory: Send + Sync {
     /// error), so it is tried again later.
     async fn dkim_pass(&self, _raw: &[u8]) -> Option<Vec<String>> {
         None
+    }
+    /// Connect and sign in to a send-as address's own SMTP server, to check
+    /// its settings before they're saved (0072). Hosts that can't send mail
+    /// accept them unchecked.
+    async fn test_smtp(&self, _relay: &SmtpRelay, _allow_invalid_certs: bool) -> Result<()> {
+        Ok(())
     }
     /// The service that looks up places for event locations, if the host has one.
     fn places(&self) -> Option<Arc<dyn PlaceSearch>> {

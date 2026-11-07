@@ -46,4 +46,22 @@ export interface Account {
   color: string;
   /** Signed in before contacts access was requested; contacts sync after signing in again. */
   contacts_need_reconnect?: boolean;
+  /** Other addresses this account sends as (0072). */
+  send_as?: SendAs[];
+}
+
+/** An address an account sends as besides its own (0072). */
+export interface SendAs {
+  email: string;
+  /** Empty: the account's display name. */
+  display_name: string;
+  /** IMAP accounts only: send through this server instead of the account's. */
+  smtp?: SmtpServer | null;
+}
+
+export interface SmtpServer {
+  host: string;
+  port: number;
+  security: Security;
+  username: string;
 }

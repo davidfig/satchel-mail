@@ -19,8 +19,9 @@ export type Mine = (a: Address | null | undefined) => boolean;
 
 /** "You" in a thread is the account it belongs to (other local accounts are just people). */
 export function mineFor(thread: Thread): Mine {
-  const own = store.state.accounts.find((a) => a.id === thread.account_id)?.email.toLowerCase();
-  return (a) => !!a && (own ? a.email.toLowerCase() === own : store.state.myEmails.has(a.email.toLowerCase()));
+  const acc = store.state.accounts.find((a) => a.id === thread.account_id);
+  const own = acc && new Set([acc.email, ...(acc.send_as ?? []).map((s) => s.email)].map((e) => e.toLowerCase()));
+  return (a) => !!a && (own ? own.has(a.email.toLowerCase()) : store.state.myEmails.has(a.email.toLowerCase()));
 }
 
 const normId = (id: string | null) => (id ?? '').trim().replace(/^<|>$/g, '').toLowerCase();

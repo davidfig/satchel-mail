@@ -131,7 +131,9 @@ export class ReplyBox {
   private showRecipients() {
     const all = [...(this.base?.to ?? []), ...(this.base?.cc ?? [])];
     const label = this.proposal ? 'To' : this.mode === 'reply_all' ? 'Reply all' : 'Reply';
-    this.to.textContent = `${label} · ${all.map(shortName).join(', ') || 'no recipients'}`;
+    // A reply from a send-as address says which one (0072).
+    const as = this.base?.from ? ` · as ${this.base.from.email}` : '';
+    this.to.textContent = `${label} · ${all.map(shortName).join(', ') || 'no recipients'}${as}`;
     this.to.dataset.tooltip = this.proposal ? all.map(displayName).join(', ') : 'Switch between reply and reply all';
   }
 
