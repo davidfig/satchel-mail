@@ -62,21 +62,21 @@ async function fileToAttachment(f: File): Promise<OutgoingAttachment> {
   return { filename: f.name, mime_type: f.type || 'application/octet-stream', data_base64: btoa(bin) };
 }
 
-/** Sends after a short undo window; `restore` reopens the message for editing on undo or failure. */
+/** Sends after a short undo window, counting down, with Send now to skip the wait;
+ *  `restore` reopens the message for editing on undo or failure. */
 export function sendWithUndo(d: Draft, restore: () => void) {
-  let cancelled = false;
-  toast(`Sending in ${UNDO_SECONDS} seconds…`, {
-    ms: UNDO_SECONDS * 1000,
-    action: {
-      label: 'Undo',
-      run: () => {
-        cancelled = true;
-        restore();
-      },
-    },
-  });
-  setTimeout(async () => {
-    if (cancelled) return;
+  let left = UNDO_SECONDS;
+  let settled = false;
+  const message = () => `Sending in ${left} second${left === 1 ? '' : 's'}…`;
+  const settle = () => {
+    if (settled) return false;
+    settled = true;
+    clearInterval(tick);
+    clearTimeout(timer);
+    return true;
+  };
+  const send = async () => {
+    if (!settle()) return;
     try {
       await api.send(d);
       toast('Sent', { kind: 'success' });
@@ -84,7 +84,18 @@ export function sendWithUndo(d: Draft, restore: () => void) {
       errorToast(e);
       restore();
     }
-  }, UNDO_SECONDS * 1000);
+  };
+  const shown = toast(message(), {
+    ms: UNDO_SECONDS * 1000,
+    action: [
+      { label: 'Send now', title: 'Send it without waiting', run: () => void send() },
+      { label: 'Undo', title: 'Don’t send; reopen the message', run: () => settle() && restore() },
+    ],
+  });
+  const tick = window.setInterval(() => {
+    if (--left > 0) shown.setMessage(message());
+  }, 1000);
+  const timer = window.setTimeout(() => void send(), UNDO_SECONDS * 1000);
 }
 
 /** Open a message from Drafts in the composer, to finish and send it. */
