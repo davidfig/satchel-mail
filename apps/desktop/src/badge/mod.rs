@@ -1,6 +1,12 @@
-//! The Dock badge: unread inbox mail, which macOS also shows in the Cmd-Tab
-//! switcher. It's set here, not from the UI, because macOS can suspend a
-//! hidden webview while the engine keeps syncing (0070).
+//! The unread inbox count on the app's icon: the Dock badge on macOS (also
+//! shown in Cmd-Tab), a taskbar overlay on Windows, and the launcher count on
+//! Linux docks that support it. It's set here, not from the UI, because a
+//! hidden webview can be suspended while the engine keeps syncing (0070, 0071).
+
+#[cfg(any(windows, test))]
+mod icon;
+#[cfg(target_os = "linux")]
+mod launcher;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,22 +19,31 @@ use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 /// Sync sends events in bursts; wait this long so one burst is one count.
 const SETTLE: Duration = Duration::from_millis(250);
 
+/// Windows ignores an overlay set before the taskbar button exists, and doesn't
+/// say so, so the first count is set again after this long.
+const TASKBAR_READY: Duration = Duration::from_secs(3);
+
 /// Keep the badge current until the engine shuts down.
 pub fn start(window: WebviewWindow, engine: Arc<Engine>) {
     // Subscribed before the first count, so no change falls between the two.
     let mut rx = engine.subscribe();
+    let mut display = Display::new(window);
     tauri::async_runtime::spawn(async move {
         let mut shown = None;
+        let mut first = true;
         loop {
             match count(&engine).await {
-                Ok(n) if shown != Some(n) => {
-                    if let Err(e) = window.set_badge_count((n > 0).then_some(n)) {
-                        tracing::warn!("couldn't set the Dock badge: {e}");
-                    }
-                    shown = Some(n);
-                }
+                Ok(n) if shown != Some(n) => match display.show(n).await {
+                    Ok(()) => shown = Some(n),
+                    Err(e) => tracing::warn!("couldn't set the unread badge: {e}"),
+                },
                 Ok(_) => {}
-                Err(e) => tracing::warn!("couldn't count unread mail for the Dock badge: {e}"),
+                Err(e) => tracing::warn!("couldn't count unread mail for the badge: {e}"),
+            }
+            if cfg!(windows) && std::mem::take(&mut first) {
+                tokio::time::sleep(TASKBAR_READY).await;
+                shown = None;
+                continue;
             }
             loop {
                 match rx.recv().await {
@@ -43,6 +58,28 @@ pub fn start(window: WebviewWindow, engine: Arc<Engine>) {
             while !matches!(rx.try_recv(), Err(TryRecvError::Empty | TryRecvError::Closed)) {}
         }
     });
+}
+
+#[cfg(target_os = "linux")]
+use launcher::Launcher as Display;
+
+/// Where the count goes on hosts where Tauri can show it.
+#[cfg(not(target_os = "linux"))]
+struct Display(WebviewWindow);
+
+#[cfg(not(target_os = "linux"))]
+impl Display {
+    fn new(window: WebviewWindow) -> Self {
+        Self(window)
+    }
+
+    async fn show(&mut self, count: i64) -> Result<(), String> {
+        #[cfg(windows)]
+        let shown = self.0.set_overlay_icon((count > 0).then(|| tauri::image::Image::new_owned(icon::render(count), icon::SIZE, icon::SIZE)));
+        #[cfg(not(windows))]
+        let shown = self.0.set_badge_count((count > 0).then_some(count));
+        shown.map_err(|e| e.to_string())
+    }
 }
 
 async fn count(engine: &Arc<Engine>) -> Result<i64, String> {
