@@ -74,3 +74,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0067 | [A verified sender's link mismatch asks on click, not with a banner](0067-link-mismatches-ask-on-click.md) | Accepted |
 | 0068 | [Gmail new-mail signal over IMAP IDLE, and a check on window focus](0068-gmail-idle-and-sync-on-focus.md) | Accepted |
 | 0069 | [A signed-out account is loud until it's fixed](0069-signed-out-accounts-are-loud.md) | Accepted |
+| 0070 | [The Dock badge is set by the host, not the UI](0070-dock-badge-from-the-host.md) | Accepted |
