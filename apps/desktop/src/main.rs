@@ -3,6 +3,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "macos")]
+mod badge;
 mod doc_viewer;
 #[cfg(target_os = "macos")]
 mod mac_alerts;
@@ -295,6 +297,8 @@ fn main() {
             if mac_alerts::available() {
                 mac_alerts::start(app.handle(), engine.clone());
             }
+            #[cfg(target_os = "macos")]
+            let badge_engine = engine.clone();
             app.manage(AppState { engine, _lock: lock });
             // Built here, not from the config, so we can catch popups. WebKit
             // runs no listeners in the script-less message iframe, so its links
@@ -323,6 +327,8 @@ fn main() {
                 .build()?;
             save_window_state_on_change(&window);
             update::start(app.handle());
+            #[cfg(target_os = "macos")]
+            badge::start(window.clone(), badge_engine);
             #[cfg(target_os = "macos")]
             window.on_window_event(|e| {
                 if let tauri::WindowEvent::Focused(f) = e {
