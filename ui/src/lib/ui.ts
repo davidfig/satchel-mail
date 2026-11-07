@@ -4,9 +4,17 @@ import { h, icon, listen } from './dom';
 
 // ---------------------------------------------------------------- toasts
 
+interface ToastAction {
+  label: string;
+  run: () => void;
+  /** Tooltip for the button; defaults to the label. */
+  title?: string;
+}
+
 interface ToastOpts {
   kind?: 'info' | 'error' | 'success';
-  action?: { label: string; run: () => void };
+  /** One button, or several in order (Send now, Undo). */
+  action?: ToastAction | ToastAction[];
   ms?: number;
   /** Stays until it's dismissed or its action runs, in a slot of its own that other toasts don't replace. */
   sticky?: boolean;
@@ -38,12 +46,17 @@ function clearSlot(key: SlotKey) {
   slots[key] = null;
 }
 
-export function toast(message: string, opts: ToastOpts = {}) {
+/** A shown toast; `setMessage` rewrites its text in place (a countdown). */
+export interface ToastHandle {
+  setMessage: (text: string) => void;
+}
+
+export function toast(message: string, opts: ToastOpts = {}): ToastHandle {
   const kind = opts.kind ?? 'info';
   const key: SlotKey = opts.sticky ? 'sticky' : opts.action ? 'action' : 'plain';
   const ms = opts.ms ?? (opts.quiet ? 1800 : 4500);
   const cur = slots[key];
-  if (key === 'plain' && opts.quiet && cur?.kind === 'error') return;
+  if (key === 'plain' && opts.quiet && cur?.kind === 'error') return { setMessage: () => {} };
 
   const arm = (s: Slot) => {
     s.timers.forEach(clearTimeout);
@@ -56,7 +69,7 @@ export function toast(message: string, opts: ToastOpts = {}) {
     cur.count++;
     cur.label.textContent = `${message} ×${cur.count}`;
     arm(cur);
-    return;
+    return { setMessage: (t) => (cur.label.textContent = t) };
   }
   clearSlot(key);
   if (!toastHost) {
@@ -64,18 +77,21 @@ export function toast(message: string, opts: ToastOpts = {}) {
     document.body.appendChild(toastHost);
   }
   const label = h('span', message);
+  const actions = opts.action ? [opts.action].flat() : [];
   const el = h(
     `div.toast.${kind}`,
     label,
-    opts.action &&
+    ...actions.map((a) =>
       h('button.link', {
+        title: a.title ?? a.label,
         on: {
           click: () => {
-            opts.action!.run();
+            a.run();
             clearSlot(key);
           },
         },
-      }, opts.action.label),
+      }, a.label),
+    ),
     h('button.icon-btn', { 'aria-label': 'Dismiss', on: { click: () => clearSlot(key) } }, icon('close', 14)),
   );
   const slot: Slot = { el, message, kind, count: 1, label, timers: [] };
@@ -85,6 +101,7 @@ export function toast(message: string, opts: ToastOpts = {}) {
   else if (key === 'action') toastHost.insertBefore(el, slots.sticky?.el ?? null);
   else toastHost.insertBefore(el, toastHost.firstChild);
   arm(slot);
+  return { setMessage: (t) => (label.textContent = t) };
 }
 
 export function errorToast(e: unknown) {
