@@ -77,7 +77,22 @@ mod feed {
     #[derive(Default)]
     struct Staged(Mutex<Option<(Update, Vec<u8>)>>);
 
+    /// Held for a whole check, so the user's check and the timer's never
+    /// download the same update twice: the second waits, then finds it staged.
+    #[derive(Default)]
+    struct Checking(tauri::async_runtime::Mutex<()>);
+
+    /// How far a download has got, for the UI to show while the user waits
+    /// on a check they asked for (`satchel://update-progress`).
+    #[derive(Clone, serde::Serialize)]
+    struct Progress<'a> {
+        version: &'a str,
+        /// None when the server doesn't say how big the download is.
+        percent: Option<u64>,
+    }
+
     pub fn start(app: &tauri::AppHandle) {
+        app.manage(Checking::default());
         app.manage(Staged::default());
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -91,13 +106,26 @@ mod feed {
     }
 
     pub async fn check(app: &tauri::AppHandle) -> anyhow::Result<()> {
+        let checking = app.state::<Checking>();
+        let _one_at_a_time = checking.0.lock().await;
         let Some(update) = app.updater()?.check().await? else { return Ok(()) };
         if ready(app).as_deref() == Some(update.version.as_str()) {
             return Ok(());
         }
-        // `download` checks the signature against the public key built into the app.
-        let bytes = update.download(|_, _| {}, || {}).await?;
         let version = update.version.clone();
+        // Sent when the whole percent changes, not for every chunk.
+        let (mut got, mut shown) = (0u64, None);
+        let mut progress = |chunk: usize, total: Option<u64>| {
+            got += chunk as u64;
+            let percent = total.filter(|t| *t > 0).map(|t| (got * 100 / t).min(100));
+            if shown != Some(percent) {
+                shown = Some(percent);
+                let _ = app.emit_to("main", "satchel://update-progress", Progress { version: &version, percent });
+            }
+        };
+        progress(0, None);
+        // `download` checks the signature against the public key built into the app.
+        let bytes = update.download(progress, || {}).await?;
         tracing::info!("update {version} downloaded");
         *app.state::<Staged>().0.lock().unwrap() = Some((update, bytes));
         app.emit_to("main", "satchel://update-ready", &version)?;

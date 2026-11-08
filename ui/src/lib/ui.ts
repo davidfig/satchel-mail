@@ -20,6 +20,8 @@ interface ToastOpts {
   sticky?: boolean;
   /** Only confirms what the screen already shows: flashes briefly and never replaces an error. */
   quiet?: boolean;
+  /** Stays up until `dismiss` or a newer toast in its slot: for something still under way (a check). */
+  persist?: boolean;
 }
 
 interface Slot {
@@ -46,9 +48,10 @@ function clearSlot(key: SlotKey) {
   slots[key] = null;
 }
 
-/** A shown toast; `setMessage` rewrites its text in place (a countdown). */
+/** A shown toast; `setMessage` rewrites its text in place (a countdown), `dismiss` takes it down. */
 export interface ToastHandle {
   setMessage: (text: string) => void;
+  dismiss: () => void;
 }
 
 export function toast(message: string, opts: ToastOpts = {}): ToastHandle {
@@ -56,12 +59,12 @@ export function toast(message: string, opts: ToastOpts = {}): ToastHandle {
   const key: SlotKey = opts.sticky ? 'sticky' : opts.action ? 'action' : 'plain';
   const ms = opts.ms ?? (opts.quiet ? 1800 : 4500);
   const cur = slots[key];
-  if (key === 'plain' && opts.quiet && cur?.kind === 'error') return { setMessage: () => {} };
+  if (key === 'plain' && opts.quiet && cur?.kind === 'error') return { setMessage: () => {}, dismiss: () => {} };
 
   const arm = (s: Slot) => {
     s.timers.forEach(clearTimeout);
     s.el.classList.remove('leaving');
-    if (opts.sticky) return void (s.timers = []);
+    if (opts.sticky || opts.persist) return void (s.timers = []);
     s.timers = [window.setTimeout(() => s.el.classList.add('leaving'), ms - 300), window.setTimeout(() => clearSlot(key), ms)];
   };
 
@@ -69,7 +72,7 @@ export function toast(message: string, opts: ToastOpts = {}): ToastHandle {
     cur.count++;
     cur.label.textContent = `${message} ×${cur.count}`;
     arm(cur);
-    return { setMessage: (t) => (cur.label.textContent = t) };
+    return handle(key, cur);
   }
   clearSlot(key);
   if (!toastHost) {
@@ -101,7 +104,15 @@ export function toast(message: string, opts: ToastOpts = {}): ToastHandle {
   else if (key === 'action') toastHost.insertBefore(el, slots.sticky?.el ?? null);
   else toastHost.insertBefore(el, toastHost.firstChild);
   arm(slot);
-  return { setMessage: (t) => (label.textContent = t) };
+  return handle(key, slot);
+}
+
+/** Acts on `slot` only while it's still the one showing in `key`. */
+function handle(key: SlotKey, slot: Slot): ToastHandle {
+  return {
+    setMessage: (t) => { if (slots[key] === slot) slot.label.textContent = t; },
+    dismiss: () => { if (slots[key] === slot) clearSlot(key); },
+  };
 }
 
 export function errorToast(e: unknown) {
