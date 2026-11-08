@@ -5,6 +5,7 @@ pub(crate) mod drafts;
 pub(crate) mod favorites;
 pub(crate) mod folders;
 pub(crate) mod read;
+pub(crate) mod send_as;
 pub mod search;
 pub(crate) mod smart_folders;
 pub(crate) mod spam;

@@ -8,6 +8,7 @@ use serde_json::json;
 
 use crate::engine::{Engine, Mode};
 use crate::error::{forbidden, invalid, not_found};
+use crate::mail::send_as;
 use crate::store::new_id;
 
 impl Engine {
@@ -15,8 +16,8 @@ impl Engine {
         let m = self.store.message_row(message_id)?.ok_or_else(|| not_found("message"))?;
         let acc = self.store.get_account(&m.summary.account_id)?.ok_or_else(|| not_found("account"))?;
         let detail = self.message_detail(message_id, false).await?;
-        let me = acc.email.to_lowercase();
-        let not_me = |a: &Address| a.email.to_lowercase() != me;
+        let mine = send_as::own_addresses(&acc);
+        let not_me = |a: &Address| !mine.contains(&a.email.to_lowercase());
         let from_me = m.summary.from.as_ref().is_some_and(|f| !not_me(f));
         let primary: Vec<Address> = if !m.reply_to.is_empty() {
             m.reply_to.clone()
@@ -26,6 +27,17 @@ impl Engine {
             m.summary.from.clone().into_iter().collect()
         };
         let mut d = Draft { account_id: acc.id.clone(), ..Default::default() };
+        if !acc.send_as.is_empty() {
+            // Bcc'd or list mail names the address only in the delivery headers.
+            let delivered: Vec<String> = match m.blob_hash.as_ref().and_then(|h| self.blobs.get(h).ok().flatten()) {
+                Some(raw) => ["Delivered-To", "X-Original-To"]
+                    .iter()
+                    .flat_map(|n| header_values(&raw, n))
+                    .collect(),
+                None => vec![],
+            };
+            d.from = send_as::reply_from(&acc, m.summary.from.as_ref(), &m.summary.to, &m.cc, &delivered);
+        }
         match mode {
             ReplyMode::Reply => {
                 d.to = primary;
@@ -100,9 +112,15 @@ impl Engine {
             Some(h) => self.store.message_id_by_header(&account, h)?,
             None => None,
         };
+        // Keep the send-as address the draft was written from.
+        let from = match (self.store.get_account(&account)?, &p.from) {
+            (Some(acc), Some(f)) if !f.email.eq_ignore_ascii_case(&acc.email) && send_as::sender(&acc, Some(f)).is_ok() => Some(Address { name: None, email: f.email.clone() }),
+            _ => None,
+        };
         let draft = Draft {
             id: None,
             account_id: account.clone(),
+            from,
             to: p.to,
             cc: p.cc,
             bcc: p.bcc,
@@ -139,6 +157,7 @@ impl Engine {
             return Err(invalid("add at least one recipient"));
         }
         check_addresses(&draft, true)?;
+        let from = send_as::sender(&acc, draft.from.as_ref())?;
         let raw = self.build_raw(&draft, false)?;
         let draft_id = match &draft.id {
             Some(id) if self.store.get_draft(id)?.is_some() => Some(id.clone()),
@@ -150,7 +169,7 @@ impl Engine {
             json!({
                 "raw": base64::engine::general_purpose::STANDARD.encode(&raw),
                 "rcpts": rcpts,
-                "from": acc.email,
+                "from": from.email,
                 "subject": draft.subject,
                 "draft_id": draft_id,
                 "reply_to_message": draft.in_reply_to,
@@ -160,6 +179,18 @@ impl Engine {
         self.store.audit(actor, "send_queued", &json!({ "account": acc.email, "to": rcpts, "subject": draft.subject }))?;
         Ok(op)
     }
+}
+
+/// Every value of a header in a raw message (`Delivered-To` repeats), unfolded.
+pub(crate) fn header_values(raw: &[u8], name: &str) -> Vec<String> {
+    let text = String::from_utf8_lossy(raw);
+    let head = text.split("\r\n\r\n").next().unwrap_or_default();
+    let unfolded = head.replace("\r\n ", " ").replace("\r\n\t", " ");
+    unfolded
+        .lines()
+        .filter_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().trim_matches(['<', '>']).to_string()))
+        .filter(|v| !v.is_empty())
+        .collect()
 }
 
 /// One header's value from a raw message, unfolded.

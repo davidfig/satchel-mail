@@ -316,6 +316,10 @@ pub struct Draft {
     /// Local draft id; None for a new draft.
     pub id: Option<Id>,
     pub account_id: Id,
+    /// The address to send from: the account's own or one of its send-as
+    /// addresses (0072). None: the account's own.
+    #[serde(default)]
+    pub from: Option<Address>,
     pub to: Vec<Address>,
     #[serde(default)]
     pub cc: Vec<Address>,

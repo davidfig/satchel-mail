@@ -75,7 +75,9 @@ impl Engine {
         let summary = match &action {
             ProposalAction::Draft { draft } => {
                 self.check_account(&caller, &draft.account_id, "account")?;
-                self.store.get_account(&draft.account_id)?.ok_or_else(|| not_found("account"))?;
+                let acc = self.store.get_account(&draft.account_id)?.ok_or_else(|| not_found("account"))?;
+                // Only the account's own addresses, as when the user sends (0072).
+                crate::mail::send_as::sender(&acc, draft.from.as_ref())?;
                 let all: Vec<&Address> = draft.to.iter().chain(draft.cc.iter()).chain(draft.bcc.iter()).collect();
                 if all.is_empty() {
                     return Err(invalid("a draft needs at least one recipient"));

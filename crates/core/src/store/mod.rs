@@ -245,7 +245,7 @@ fn open_conn(path: &Path) -> Result<Connection> {
 /// The schema version `schema.sql` creates. To change the schema, edit
 /// `schema.sql` to the new shape, bump this, and append to [`MIGRATIONS`] the
 /// SQL that takes a database from the previous version to this one.
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` database to version `i + 2`.
 const MIGRATIONS: &[&str] = &[
@@ -282,6 +282,8 @@ const MIGRATIONS: &[&str] = &[
         position    INTEGER NOT NULL,
         created_at  INTEGER NOT NULL
     );",
+    // 10: send-as addresses (0072).
+    "ALTER TABLE accounts ADD COLUMN send_as_json TEXT NOT NULL DEFAULT '[]';",
 ];
 
 /// Create or upgrade the schema, tracked in `PRAGMA user_version`.

@@ -169,6 +169,8 @@ export interface OutgoingAttachment {
 export interface Draft {
   id?: Id | null;
   account_id: Id;
+  /** The account's own address or one of its send-as addresses; null: its own. */
+  from?: Address | null;
   to: Address[];
   cc: Address[];
   bcc: Address[];

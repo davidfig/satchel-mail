@@ -86,12 +86,19 @@ impl Engine {
                     .and_then(Value::as_str)
                     .and_then(|m| self.store.message_ref(m).ok().flatten())
                     .and_then(|r| r.remote_thread_id);
+                let (send_as, smtp) = self.send_route(&ctx.account, &from)?;
                 self.store.op_sending(&op.id)?;
-                mail.apply(ctx, &ResolvedOp::Send { raw, from, rcpts, sent_remote_mailbox: sent_mb, replaces_draft: server_draft.clone(), thread_remote_id }).await?;
+                let out = mail
+                    .apply(ctx, &ResolvedOp::Send { raw, from, rcpts, sent_remote_mailbox: sent_mb, replaces_draft: server_draft.clone(), thread_remote_id, send_as, smtp })
+                    .await?;
                 // Sent: record it before anything else can fail or be cut
                 // off, so the op is never replayed. The rest is tidying up.
                 self.store.op_done(&op.id)?;
                 info!(account = %ctx.account.email, "message sent");
+                if let Some(w) = out.warning {
+                    warn!(account = %ctx.account.email, "{w}");
+                    self.emit(CoreEvent::Notice { level: "warning".into(), message: w });
+                }
                 if let Err(e) = self.store.audit(&op.actor, "sent", &json!({ "account": ctx.account.email, "subject": p.get("subject"), "recipients": p.get("rcpts") })) {
                     warn!("message sent, but recording it in the audit log failed: {e:#}");
                 }
@@ -188,14 +195,15 @@ impl Engine {
                         }
                     }
                 }
-        let domain = acc.email.split('@').nth(1).unwrap_or("satchel.local").to_string();
+        let from = crate::mail::send_as::sender(&acc, d.from.as_ref())?;
+        let domain = from.email.split('@').nth(1).unwrap_or("satchel.local").to_string();
         let mut extra = vec![("X-Mailer".to_string(), "satchel.email".to_string())];
         if for_draft_folder
             && let Some(id) = &d.id {
                 extra.push(("X-Satchel-Draft-Id".into(), id.clone()));
             }
         let o = satchel_mime::Outgoing {
-            from: Address { name: Some(acc.display_name.clone()).filter(|s| !s.is_empty()), email: acc.email.clone() },
+            from,
             to: d.to.clone(),
             cc: d.cc.clone(),
             bcc: d.bcc.clone(),

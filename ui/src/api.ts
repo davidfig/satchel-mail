@@ -30,6 +30,7 @@ import type {
   ProposalStatus,
   ProviderKind,
   ReplyMode,
+  SendAs,
   SenderRule,
   SenderVerdict,
   Settings,
@@ -50,6 +51,9 @@ export const api = {
   addAccount: (config: AccountConfig, credential: Credential) => call<Account>('add_account', { config, credential }),
   removeAccount: (account_id: Id) => call('remove_account', { account_id }),
   updateAccount: (account_id: Id, config: AccountConfig, credential: Credential | null) => call<Account>('update_account', { account_id, config, credential }),
+  /** `smtp_credentials`: new SMTP passwords by address; others keep theirs. */
+  setSendAs: (account_id: Id, send_as: SendAs[], smtp_credentials: Record<string, Credential>) =>
+    call<Account>('set_send_as', { account_id, send_as, smtp_credentials }),
   startOAuth: (provider: ProviderKind) => call<{ auth_url: string }>('start_o_auth', { provider }),
   syncNow: (account_id: Id | null = null) => call('sync_now', { account_id }),
 

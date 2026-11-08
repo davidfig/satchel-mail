@@ -326,7 +326,11 @@ impl MailProvider for GraphMailProvider {
                 }
                 self.api.send(|h, t| with_prefs(h.delete(format!("{ME}/mailFolders/{}", crate::net::enc(remote_id)))).bearer_auth(t), "delete folder").await?;
             }
-            ResolvedOp::Send { raw, replaces_draft, .. } => {
+            ResolvedOp::Send { raw, replaces_draft, send_as, .. } => {
+                if *send_as {
+                    // The core refuses these first (0072); never send one as the account.
+                    return Err(ApiError::new(ErrorCode::InvalidInput, "Microsoft 365 accounts can't send as other addresses in Satchel").into());
+                }
                 self.mime_upload(&format!("{ME}/sendMail"), raw, "send").await.map_err(crate::net::send_error)?;
                 if let Some(d) = replaces_draft {
                     let _ = self.delete(&d.remote_id).await;

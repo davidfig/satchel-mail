@@ -118,6 +118,7 @@ export function openComposer(initial: Partial<Draft> & { account_id?: string }, 
   const draft: Draft = {
     id: initial.id ?? null,
     account_id: initial.account_id ?? accounts[0].id,
+    from: initial.from ?? null,
     to: initial.to ?? [],
     cc: initial.cc ?? [],
     bcc: initial.bcc ?? [],
@@ -160,10 +161,26 @@ export function openComposer(initial: Partial<Draft> & { account_id?: string }, 
     status.textContent = '';
   };
 
+  // Every account's address, each followed by its send-as addresses (0072).
+  const fromEmail = draft.from?.email.toLowerCase();
   const accountSelect = h(
     'select',
-    { 'aria-label': 'From', on: { change: () => { draft.account_id = accountSelect.value; touch(); } } },
-    accounts.map((a) => h('option', { value: a.id, selected: a.id === draft.account_id }, `${a.display_name || a.email} <${a.email}>`)),
+    {
+      'aria-label': 'From',
+      on: {
+        change: () => {
+          const [account, email] = accountSelect.value.split('\n');
+          draft.account_id = account;
+          draft.from = email ? { name: null, email } : null;
+          touch();
+        },
+      },
+    },
+    accounts.flatMap((a) => [
+      h('option', { value: a.id, selected: a.id === draft.account_id && (!fromEmail || fromEmail === a.email.toLowerCase()) }, `${a.display_name || a.email} <${a.email}>`),
+      ...(a.send_as ?? []).map((s) =>
+        h('option', { value: `${a.id}\n${s.email}`, selected: a.id === draft.account_id && fromEmail === s.email.toLowerCase() }, `${s.display_name || a.display_name || s.email} <${s.email}>`)),
+    ]),
   );
   const subject = h('input.subject', {
     type: 'text',

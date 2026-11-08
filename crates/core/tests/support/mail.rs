@@ -38,6 +38,11 @@ pub struct Fake {
     pub dkim_checks: std::sync::atomic::AtomicUsize,
     /// Raw messages handed to the server to send.
     pub sent: Mutex<Vec<Vec<u8>>>,
+    /// Each send's envelope sender, whether it was a send-as address, and the
+    /// SMTP server it was routed through (0072).
+    pub routes: Mutex<Vec<(String, bool, Option<SmtpRelay>)>>,
+    /// SMTP servers the host was asked to check; password "wrong" fails.
+    pub smtp_tests: Mutex<Vec<String>>,
     /// Make sends fail as if the connection dropped before the server confirmed.
     pub sends_unconfirmed: std::sync::atomic::AtomicBool,
     /// Full raw messages by remote id, for `fetch_raw` (delivered ones).
@@ -127,8 +132,9 @@ impl MailProvider for Fake {
             ResolvedOp::DeleteMailbox { .. } => "mailbox_delete",
         };
         self.applied.lock().unwrap().push(name.into());
-        if let ResolvedOp::Send { raw, .. } = op {
+        if let ResolvedOp::Send { raw, from, send_as, smtp, .. } = op {
             self.sent.lock().unwrap().push(raw.clone());
+            self.routes.lock().unwrap().push((from.clone(), *send_as, smtp.clone()));
             if self.sends_unconfirmed.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(MaybeSent(anyhow::anyhow!("connection reset")).into());
             }
@@ -265,6 +271,11 @@ impl ProviderFactory for FakeFactory {
     fn places(&self) -> Option<Arc<dyn PlaceSearch>> {
         Some(Arc::new(FakePlaces(self.0.clone())))
     }
+    async fn test_smtp(&self, relay: &SmtpRelay, _allow_invalid_certs: bool) -> Result<()> {
+        self.0.smtp_tests.lock().unwrap().push(relay.server.host.clone());
+        anyhow::ensure!(relay.password != "wrong", "535 authentication failed");
+        Ok(())
+    }
     /// Signing domains named in an `X-Test-Dkim-Pass:` header "verify";
     /// `X-Test-Dkim-Pass: offline` can't be checked.
     async fn dkim_pass(&self, raw: &[u8]) -> Option<Vec<String>> {
@@ -294,12 +305,35 @@ pub async fn setup() -> (Arc<Engine>, Arc<Fake>, String, tempfile::TempDir) {
     setup_with(|fake| Arc::new(FakeFactory(fake))).await
 }
 
+/// `setup` with an IMAP/SMTP account (the same fake server behind it).
+pub async fn setup_imap() -> (Arc<Engine>, Arc<Fake>, String, tempfile::TempDir) {
+    let config = AccountConfig::Imap {
+        email: "me@x.test".into(),
+        display_name: "Me".into(),
+        username: "me@x.test".into(),
+        imap_host: "imap.x.test".into(),
+        imap_port: 993,
+        imap_security: Security::Tls,
+        smtp_host: "smtp.x.test".into(),
+        smtp_port: 465,
+        smtp_security: Security::Tls,
+        caldav_url: None,
+        carddav_url: None,
+        allow_invalid_certs: false,
+    };
+    setup_account(|fake| Arc::new(FakeFactory(fake)), config).await
+}
+
 /// `setup` with a Gmail-style account, where mailboxes are labels.
 pub async fn setup_labels() -> (Arc<Engine>, Arc<Fake>, String, tempfile::TempDir) {
     setup_with(|fake| Arc::new(LabelsFactory(fake))).await
 }
 
 async fn setup_with(factory: impl FnOnce(Arc<Fake>) -> Arc<dyn ProviderFactory>) -> (Arc<Engine>, Arc<Fake>, String, tempfile::TempDir) {
+    setup_account(factory, AccountConfig::Gmail { email: "me@x.test".into(), display_name: "Me".into() }).await
+}
+
+async fn setup_account(factory: impl FnOnce(Arc<Fake>) -> Arc<dyn ProviderFactory>, config: AccountConfig) -> (Arc<Engine>, Arc<Fake>, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let fake = Arc::new(Fake::default());
     let engine = Engine::with_parts(
@@ -320,7 +354,7 @@ async fn setup_with(factory: impl FnOnce(Arc<Fake>) -> Arc<dyn ProviderFactory>)
     engine.handle(&Caller::User, Command::UpdateSettings { settings: s }).await.unwrap();
     let acc: Account = serde_json::from_value(
         engine
-            .handle(&Caller::User, Command::AddAccount { config: AccountConfig::Gmail { email: "me@x.test".into(), display_name: "Me".into() }, credential: Credential::Password { password: "x".into() } })
+            .handle(&Caller::User, Command::AddAccount { config, credential: Credential::Password { password: "x".into() } })
             .await
             .unwrap(),
     )

@@ -2,6 +2,7 @@
 //! calendars, times) into the store's ids and values.
 
 use super::*;
+use crate::mail::send_as;
 
 /// A reply to the last message of `thread` (or to `message:`), addressed to
 /// its sender unless `to:` says otherwise.
@@ -14,15 +15,24 @@ pub(crate) fn reply(store: &Store, fm: &FrontMatter, threads: &[String], body: S
         }
     };
     let m = message(store, &message_id)?;
-    let own = store.get_account(&m.summary.account_id)?.map(|a| a.email.to_lowercase()).unwrap_or_default();
+    let acc = store.get_account(&m.summary.account_id)?;
+    // The account's own address and its send-as addresses all count as "me" (0072).
+    let own = acc.as_ref().map(send_as::own_addresses).unwrap_or_default();
     let mut to = addresses(fm, "to")?;
     if to.is_empty() {
         let sender: Vec<Address> = if m.reply_to.is_empty() { m.summary.from.iter().cloned().collect() } else { m.reply_to.clone() };
         // Replying to our own message continues to its recipients.
-        to = if sender.iter().all(|a| a.email.to_lowercase() == own) { m.summary.to.clone() } else { sender };
+        to = if sender.iter().all(|a| own.contains(&a.email.to_lowercase())) { m.summary.to.clone() } else { sender };
     }
+    // As in the app: from the send-as address the mail was sent to, unless
+    // `from:` says otherwise. Creating the proposal checks it's the account's.
+    let from = match fm.str("from") {
+        Some(f) => Some(address(f).context("from")?),
+        None => acc.as_ref().and_then(|a| send_as::reply_from(a, m.summary.from.as_ref(), &m.summary.to, &m.cc, &[])),
+    };
     Ok(Draft {
         account_id: m.summary.account_id.clone(),
+        from,
         to,
         cc: addresses(fm, "cc")?,
         bcc: addresses(fm, "bcc")?,

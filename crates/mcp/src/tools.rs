@@ -67,6 +67,7 @@ pub(crate) fn tools() -> Vec<Tool> {
         ),
         Tool::new("propose_draft", "Propose a new message (not a reply).", schema(json!({
             "account_id": { "type": "string" }, "to": addr_prop("Recipients."), "cc": addr_prop("Cc."),
+            "from": { "type": "string", "description": "Send from this address: the account's own or one of its send_as addresses (list_accounts). Default: the account's own." },
             "subject": { "type": "string" }, "body_text": { "type": "string" },
             "source_thread_ids": src, "rationale": rationale_prop()
         }), &["account_id", "to", "subject", "body_text", "rationale"])),

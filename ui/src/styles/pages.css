@@ -44,6 +44,13 @@
 .card-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
 .account-card { display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--panel); }
 .preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+/* Send-as addresses (0072). */
+.send-as-list { display: flex; flex-direction: column; gap: 10px; }
+.send-as-row { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.send-as-row > .row { align-items: flex-end; }
+.send-as-row .form-field { flex: 1; }
+.send-as-server { display: flex; flex-direction: column; gap: 8px; }
+.send-as-server[hidden] { display: none; }
 .preset { height: auto; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; text-align: left; white-space: normal; }
 .form { display: flex; flex-direction: column; gap: 12px; }
 .form-field { display: flex; flex-direction: column; gap: 4px; }

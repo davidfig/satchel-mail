@@ -233,10 +233,11 @@ impl ImapProvider {
                 let _ = s.unsubscribe(remote_id).await;
                 s.delete(remote_id).await?;
             }
-            ResolvedOp::Send { raw, from, rcpts, sent_remote_mailbox, replaces_draft, .. } => {
-                self.smtp_send(raw, from, rcpts).await?;
+            ResolvedOp::Send { raw, from, rcpts, sent_remote_mailbox, replaces_draft, smtp, .. } => {
+                self.smtp_send(raw, from, rcpts, smtp.as_ref()).await?;
                 // After this point the mail is out: never fail the op (it would resend).
-                if !self.server_saves_sent()
+                // The copy goes to the account's Sent, whichever server sent it.
+                if !self.server_saves_sent(smtp.as_ref())
                     && let Some(sent) = sent_remote_mailbox
                         && let Err(e) = s.append(sent, Some("(\\Seen)"), None, raw).await {
                             warn!("could not save to Sent: {e}");

@@ -19,6 +19,11 @@ pub fn account_key(account_id: &str) -> String {
     format!("account:{account_id}")
 }
 
+/// The password for a send-as address's own SMTP server (0072).
+pub fn send_as_key(account_id: &str, email: &str) -> String {
+    format!("send_as:{account_id}:{}", email.trim().to_lowercase())
+}
+
 /// OS keychain store. Every credential lives in one keychain item, so macOS
 /// asks the user once per app instead of once per account (0052).
 #[cfg(feature = "keychain")]
