@@ -41,6 +41,16 @@ function readListOpen() {
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const startOfWeek = (d: Date) => addDays(startOfDay(d), -((d.getDay() + 6) % 7));
+/**
+ * When an occurrence starts and ends on this machine's clock. All-day events
+ * are stored as UTC midnights, so read their dates as local midnights;
+ * otherwise west of UTC they spill into the day before.
+ */
+function span(o: Occurrence): [Date, Date] {
+  if (!o.event.all_day) return [new Date(o.start), new Date(o.end)];
+  const local = (iso: string) => { const d = new Date(iso); return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); };
+  return [local(o.start), local(o.end)];
+}
 const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
 /** Whether `m` is drawn as the sideways-scrolling strip of days; the others page. */
 const isStrip = (m: Mode) => m === 'week';
@@ -237,7 +247,7 @@ export class CalendarView {
   }
 
   private allDayOn(d: Date) {
-    return this.eventsOn(d).filter((o) => o.event.all_day || new Date(o.end).getTime() - new Date(o.start).getTime() >= 86_400_000);
+    return this.eventsOn(d).filter((o) => { const [s, e] = span(o); return o.event.all_day || e.getTime() - s.getTime() >= 86_400_000; });
   }
 
   /** Draw (and load) around the days in view once they drift from what's drawn. */
@@ -396,7 +406,7 @@ export class CalendarView {
 
   private eventsOn(day: Date) {
     const next = addDays(day, 1);
-    return this.occurrences.filter((o) => new Date(o.start) < next && new Date(o.end) > day);
+    return this.occurrences.filter((o) => { const [s, e] = span(o); return s < next && e > day; });
   }
 
   private chip(o: Occurrence, compact = false): HTMLElement {
@@ -550,7 +560,7 @@ export class CalendarView {
       if (await this.respond(e, r)) m.close();
     };
     const m = modal(e.title, h('div.event-details',
-      h('div', icon('clock', 16), ` ${new Date(o.start).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} · ${timeRange(o.start, o.end, e.all_day)}`),
+      h('div', icon('clock', 16), ` ${span(o)[0].toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })} · ${timeRange(o.start, o.end, e.all_day)}`),
       e.rrule && h('div.muted.small', eventRepeatText(e)),
       e.location && h('div', icon('location', 16), ` ${e.location}`),
       !!e.alerts?.length && h('div.small', icon('bell', 16), ` ${e.alerts.map((a) => alertLabel(a.minutes_before, e.all_day)).join(', ')}`),
