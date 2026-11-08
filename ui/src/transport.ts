@@ -28,6 +28,8 @@ export interface Transport {
   onOpenEvent(fn: (e: { id: string; start: string }) => void): void;
   /** A newer version the desktop app has downloaded and can restart into (0063), once per version. The web has none. */
   onUpdateReady(fn: (version: string) => void): void;
+  /** How far the desktop app has got downloading a newer version (`percent` null: size unknown). */
+  onUpdateProgress(fn: (p: { version: string; percent: number | null }) => void): void;
   /** Where the host serves the vendored document viewer (`ui/public/golemdocs/`, 0062):
    *  the desktop's own `golemdocs:` scheme, or this server. */
   docViewerBase(): string;
@@ -90,6 +92,11 @@ class TauriTransport implements Transport {
     void import('@tauri-apps/api/event').then(({ listen }) => listen<string>('satchel://update-ready', (msg) => fn(msg.payload)));
     // One downloaded before this was listening.
     void this.host<string | null>('update_ready').then((v) => { if (v) fn(v); });
+  }
+
+  onUpdateProgress(fn: (p: { version: string; percent: number | null }) => void) {
+    void import('@tauri-apps/api/event').then(({ listen }) =>
+      listen<{ version: string; percent: number | null }>('satchel://update-progress', (msg) => fn(msg.payload)));
   }
 
   onMenu(fn: (id: string) => void) {
@@ -182,6 +189,8 @@ class HttpTransport implements Transport {
   onUpdateReady() {
     // `satchel serve` is updated with the CLI.
   }
+
+  onUpdateProgress() {}
 
   onFullscreen() {
     // The browser's full screen has no title bar to leave room for.
