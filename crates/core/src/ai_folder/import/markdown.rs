@@ -28,6 +28,7 @@ pub(crate) fn from_markdown(store: &Store, text: &str) -> Result<DroppedProposal
             ProposalAction::Draft {
                 draft: Draft {
                     account_id,
+                    from: fm.str("from").map(address).transpose().context("from")?,
                     to: addresses(&fm, "to")?,
                     cc: addresses(&fm, "cc")?,
                     bcc: addresses(&fm, "bcc")?,

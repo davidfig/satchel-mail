@@ -30,7 +30,11 @@ export function editSendAs(a: Account) {
   const addRow = (s?: SendAs) => {
     const email = h('input', { type: 'email', value: s?.email ?? '', placeholder: 'hello@example.com', 'aria-label': 'Address' });
     const name = h('input', { type: 'text', value: s?.display_name ?? '', placeholder: a.display_name || 'Name (optional)', 'aria-label': 'Name' });
-    const own = h('input', { type: 'checkbox', checked: !!s?.smtp });
+    const own = h('input', {
+      type: 'checkbox',
+      checked: !!s?.smtp,
+      on: { change: (e: Event) => (server.hidden = !(e.currentTarget as HTMLInputElement).checked) },
+    });
     const host = h('input', { type: 'text', value: s?.smtp?.host ?? '', placeholder: 'smtp.example.com' });
     const port = h('input', { type: 'number', value: String(s?.smtp?.port ?? 465) });
     const sec = secSelect(s?.smtp?.security ?? 'tls');
@@ -40,7 +44,6 @@ export function editSendAs(a: Account) {
       h('div.row', field('SMTP server', host), field('Port', port), field('Security', sec)),
       h('div.row', field('Username', user), field('Password', pass)));
     server.hidden = !own.checked;
-    own.addEventListener('change', () => (server.hidden = !own.checked));
     const el = h('div.send-as-row',
       h('div.row', field('Address', email), field('Name', name),
         h('button.icon-btn', {

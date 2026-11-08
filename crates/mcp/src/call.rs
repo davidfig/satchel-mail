@@ -100,7 +100,8 @@ impl SatchelMcp {
                 let draft = Draft {
                     id: None,
                     account_id: req("account_id")?,
-                    from: None,
+                    // Must be the account's own or a send-as address; the proposal checks (0072).
+                    from: a.get("from").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map(|s| Address { name: None, email: s.trim().to_string() }),
                     to: addrs("to")?,
                     cc: addrs("cc")?,
                     bcc: vec![],

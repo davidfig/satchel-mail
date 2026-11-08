@@ -40,6 +40,12 @@ address found in the original's To, then Cc, then its `Delivered-To` /
 message keeps the From you used. Send-as addresses also count as "me" when
 working out reply-all recipients.
 
+**Agents get the same defaults.** A `reply` in the AI folder and MCP's
+`propose_reply` default From the same way (the folder looks at To and Cc
+only, since it reads the store and not the raw message). Folder `reply` and
+`draft` files and MCP's `propose_draft` take an optional `from`, which
+creating the proposal checks like any other draft's.
+
 **Per provider:**
 
 - **IMAP/SMTP:** a send-as address may have its own SMTP server (host, port,

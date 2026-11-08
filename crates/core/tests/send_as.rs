@@ -123,3 +123,37 @@ async fn a_send_as_address_with_its_own_server_sends_through_it() {
     set(&engine, &account, vec![alias("hello@satchel.test", None)], &[]).await.unwrap();
     assert!(set(&engine, &account, vec![alias("hello@satchel.test", Some(cloudflare()))], &[]).await.is_err());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn folder_replies_go_out_from_the_address_the_mail_was_sent_to() {
+    let (engine, fake, account, dir) = setup().await;
+    set(&engine, &account, vec![alias("hello@satchel.test", None)], &[]).await.unwrap();
+    let to_alias = b"From: Zed <zed@x.test>\r\nTo: hello@satchel.test\r\nSubject: Plan\r\nMessage-ID: <g1@x.test>\r\nDate: Tue, 20 Oct 2026 10:00:00 +0000\r\n\r\nHi\r\n".to_vec();
+    deliver(&fake, "g1", to_alias, "INBOX");
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| engine.store().message_id_by_remote(&account, "g1").unwrap().is_some()).await;
+    let mid = engine.store().message_id_by_remote(&account, "g1").unwrap().unwrap();
+    let draft_of = |done: &str| {
+        let id = field(done, "proposal").unwrap_or_else(|| panic!("{done}")).to_string();
+        let engine = engine.clone();
+        async move {
+            let p: Proposal = serde_json::from_value(engine.handle(&Caller::User, Command::GetProposal { proposal_id: id }).await.unwrap()).unwrap();
+            let ProposalAction::Draft { draft } = p.action else { panic!("expected a draft") };
+            draft
+        }
+    };
+
+    let done = drop_proposal(&engine, &dir, "r1.md", &format!("---\naction: reply\nmessage: {mid}\nwhy: Ack\n---\nThanks.\n")).await;
+    let d = draft_of(&done).await;
+    assert_eq!(d.from.map(|a| a.email), Some("hello@satchel.test".into()));
+    assert_eq!(d.to.iter().map(|a| a.email.as_str()).collect::<Vec<_>>(), vec!["zed@x.test"]);
+
+    // `from:` can pick the account's own address instead…
+    let done = drop_proposal(&engine, &dir, "r2.md", &format!("---\naction: reply\nmessage: {mid}\nfrom: me@x.test\nwhy: Ack\n---\nThanks.\n")).await;
+    assert_eq!(draft_of(&done).await.from.map(|a| a.email), Some("me@x.test".into()));
+    // …but not an address that isn't the account's.
+    let done = drop_proposal(&engine, &dir, "r3.md", &format!("---\naction: reply\nmessage: {mid}\nfrom: ceo@bank.test\nwhy: Ack\n---\nThanks.\n")).await;
+    assert_eq!(field(&done, "proposal"), None, "{done}");
+    let done = drop_proposal(&engine, &dir, "d1.md", "---\naction: draft\nto: zed@x.test\nsubject: Hi\nfrom: hello@satchel.test\nwhy: Hi\n---\nHello.\n").await;
+    assert_eq!(draft_of(&done).await.from.map(|a| a.email), Some("hello@satchel.test".into()));
+}

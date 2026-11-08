@@ -70,13 +70,16 @@ Satchel picks it up within seconds and the user reviews it.
     Monday at 10 works for me — see you then.
 
 `reply` answers the last message in the thread (or `message:`), addressed to
-its sender unless you give `to:`. Every action takes `why:` (shown to the
+its sender unless you give `to:`. It goes out from the address the mail was
+sent to when that's one of the account's send-as addresses; `from:` picks
+another, which must be the account's own address or one of its send-as
+addresses. Every action takes `why:` (shown to the
 user) and optionally `agent:` (your name).
 
 | action | fields |
 |---|---|
-| reply | thread or message; optional to, cc, bcc, subject |
-| draft | to, subject; optional account, cc, bcc (body = text) |
+| reply | thread or message; optional to, cc, bcc, subject, from |
+| draft | to, subject; optional account, cc, bcc, from (body = text) |
 | archive, mark_read, mark_unread, flag, unflag | threads or messages |
 | move | threads or messages; mailbox (name or path) |
 | labels | threads or messages; add, remove (label names) |
