@@ -89,8 +89,16 @@ async fn warns_about_impersonation_and_deceptive_links() {
     deliver(&fake, "s4", brand("s4", "brand.test", pass), "INBOX");
     deliver(&fake, "s5", brand("s5", "brand.test", "spf=none; dkim=none; dmarc=none"), "INBOX");
     deliver(&fake, "s6", brand("s6", "bank.com", pass), "INBOX");
+    // Bob's signature links through a signature service, and his mail isn't verified.
+    let signature = |id: &str, auth: &str| {
+        format!("{auth}From: Bob <bob@x.test>\r\nTo: me@x.test\r\nSubject: Re: Kickoff\r\nMessage-ID: <{id}@x.test>\r\n\
+            Date: Tue, 20 Oct 2026 10:00:00 +0000\r\nContent-Type: text/html\r\n\r\n\
+            <p><a href=\"https://img.signatures.test/r/1\">bobsgenerators.com</a></p>\r\n").into_bytes()
+    };
+    deliver(&fake, "s7", signature("s7", ""), "INBOX");
+    deliver(&fake, "s8", signature("s8", "Authentication-Results: mx.google.com; spf=fail; dkim=none; dmarc=fail\r\n"), "INBOX");
     engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
-    wait_for(|| engine.store().message_id_by_remote(&account, "s6").ok().flatten().is_some()).await;
+    wait_for(|| engine.store().message_id_by_remote(&account, "s8").ok().flatten().is_some()).await;
 
     let get = |rid: &str| {
         let id = engine.store().message_id_by_remote(&account, rid).unwrap().unwrap();
@@ -116,6 +124,13 @@ async fn warns_about_impersonation_and_deceptive_links() {
     // Verified, but naming another domain: no banner, and a question on click.
     assert_eq!(link_warnings(&other), 0, "another brand's domain");
     assert_eq!(other.deceptive_links, vec![DeceptiveLink { url: "https://click.brandinvestments.test/x".into(), shown: "bank.com".into(), actual: "click.brandinvestments.test".into() }]);
+
+    // Someone you've written to: no banner, but still a question on click,
+    // unless the message failed authentication.
+    let known = get("s7").await;
+    assert_eq!(link_warnings(&known), 0, "{:?}", known.warnings);
+    assert_eq!(known.deceptive_links.len(), 1);
+    assert_eq!(link_warnings(&get("s8").await), 1, "a known sender's mail that failed authentication");
 
     // Bob himself gets no warnings.
     assert!(get("r1").await.warnings.is_empty());

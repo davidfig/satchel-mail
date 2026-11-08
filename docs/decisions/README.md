@@ -77,3 +77,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0070 | [The Dock badge is set by the host, not the UI](0070-dock-badge-from-the-host.md) | Accepted |
 | 0071 | [The unread badge on Windows and Linux](0071-taskbar-and-launcher-badges.md) | Accepted |
 | 0072 | [Send-as addresses, typed in per account](0072-send-as-addresses.md) | Accepted |
+| 0073 | [A known sender's link mismatch asks on click, not with a banner](0073-known-senders-link-mismatches-ask-on-click.md) | Accepted |

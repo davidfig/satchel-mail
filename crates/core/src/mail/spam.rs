@@ -301,13 +301,16 @@ impl Engine {
                 warn(&mut out, WarningKind::Impersonation, format!("\"{}\" usually writes from {real}, but this came from {from_email}.", name.trim()));
             }
         }
-        if let Some(why) = p.auth_results.as_deref().and_then(satchel_mime::auth_failure) {
+        let auth_failure = p.auth_results.as_deref().and_then(satchel_mime::auth_failure);
+        if let Some(why) = &auth_failure {
             let domain = if from_domain.is_empty() { "the sender".to_string() } else { from_domain.clone() };
             warn(&mut out, WarningKind::AuthFailed, format!("This message {why}, so it may not really be from {domain}."));
         }
-        // Real companies do this all the time, so from a verified sender the
-        // link is asked about only when clicked (0067).
-        if !verified {
+        // Real companies and people's signatures do this all the time, so
+        // from a verified sender, or someone you've written to whose mail
+        // didn't fail authentication, the link is asked about only when
+        // clicked (0067, 0073).
+        if !verified && !(known && auth_failure.is_none()) {
             let mut seen = HashSet::new();
             for l in links.iter().filter(|l| seen.insert((&l.shown, &l.actual))).take(2) {
                 warn(&mut out, WarningKind::DeceptiveLink, format!("A link shows {} but goes to {}.", l.shown, l.actual));
