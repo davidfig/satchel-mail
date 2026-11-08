@@ -22,6 +22,17 @@ import * as person from './person';
 import { personQuery } from './person';
 import * as reader from './reader';
 
+/** A stable name for a folder, to remember its cursor by; null for searches
+ *  and people, which are one-off lists. */
+function sourceKey(s: MailSource): string | null {
+  switch (s.kind) {
+    case 'role': return `role:${s.role}`;
+    case 'mailbox': return `mailbox:${s.mailbox_id}`;
+    case 'smart': return `smart:${s.id}`;
+    default: return null;
+  }
+}
+
 /** The open smart folder's search, if one is open. */
 function openSmartQuery(): string | null {
   const s = store.state.source;
@@ -55,6 +66,10 @@ export class MailView {
   /** Settles when the reader has shown `readerThread`. */
   readerLoad: Promise<void> = Promise.resolve();
   generation = 0;
+  /** The folder the list shows, and the conversation the cursor was on when
+   *  the user last left each folder (this session only). */
+  private loadedKey: string | null = null;
+  private lastCursor = new Map<string, string>();
   /** Where clearing the search box goes back to. */
   /** The search of the open smart folder when its list was loaded. */
   loadedSmartQuery = openSmartQuery();
@@ -210,7 +225,11 @@ export class MailView {
   eventsOpen = false;
 
   async reload() {
-    ++this.generation;
+    const gen = ++this.generation;
+    // Remember where the cursor was in the folder we're leaving.
+    const leaving = this.list.at(this.cursor)?.thread_id;
+    if (this.loadedKey && leaving) this.lastCursor.set(this.loadedKey, leaving);
+    this.loadedKey = sourceKey(store.state.source);
     this.cursor = -1;
     this.selected.clear();
     this.range = null;
@@ -221,9 +240,17 @@ export class MailView {
     // A new folder or search: the old conversation mustn't stay on screen,
     // or its buttons would act on whatever the cursor lands on.
     if (!sel && this.readerThread) this.renderEmptyReader();
+    if (gen !== this.generation) return;
     if (sel) {
       this.cursor = this.list.indexOf(sel);
       this.renderRows();
+    } else if (this.list.total) {
+      // Put the cursor on a conversation without opening it, so the keyboard
+      // works at once but nothing is marked read or rendered unasked: the one
+      // the user was on when they left this folder, else the first.
+      const last = this.loadedKey && this.lastCursor.get(this.loadedKey);
+      const at = last ? this.list.indexOf(last) : -1;
+      this.moveCursor(at >= 0 ? at : 0);
     }
   }
 
