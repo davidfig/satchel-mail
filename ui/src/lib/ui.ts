@@ -407,17 +407,29 @@ export function installShortcuts() {
   });
 }
 
+// Whether text was selected before the latest right-click. WebKit on macOS
+// selects the word under the pointer on a right-click's mousedown, so the
+// selection by `contextmenu` time doesn't say whether the user made one.
+let selectedBeforeRightClick = false;
+document.addEventListener('mousedown', (e) => {
+  if (e.button === 2) selectedBeforeRightClick = !(getSelection()?.isCollapsed ?? true);
+}, true);
+
 /** Our own right-click menu on `el`, built when it opens. Text selections,
  *  links and form fields inside keep the system menu, so Copy still works. */
 export function contextMenu(el: HTMLElement, build: (e: MouseEvent) => (MenuItem | '-')[] | null) {
   listen(el, 'contextmenu', (ev) => {
     const e = ev as MouseEvent;
     const t = e.target as HTMLElement;
-    if (t.closest('a, input, textarea, [contenteditable="true"]') || !(getSelection()?.isCollapsed ?? true)) return;
+    // The keyboard's menu key has no mousedown, so the live selection decides.
+    const selected = e.button === 2 ? selectedBeforeRightClick : !(getSelection()?.isCollapsed ?? true);
+    if (t.closest('a, input, textarea, [contenteditable="true"]') || selected) return;
     const items = build(e);
     if (!items?.length) return;
     e.preventDefault();
     e.stopPropagation();
+    // Drop the word WebKit selected for its own menu.
+    getSelection()?.removeAllRanges();
     // The keyboard's menu key (or Shift+F10) reports no pointer position.
     const at = e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : el;
     popupMenu(at, items);
