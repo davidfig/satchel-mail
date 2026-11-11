@@ -4601,6 +4601,7 @@ version = "0.1.14"
 dependencies = [
  "anyhow",
  "async-trait",
+ "aws-lc-rs",
  "base64 0.22.1",
  "blake3",
  "chrono",

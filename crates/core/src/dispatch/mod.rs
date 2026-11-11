@@ -370,6 +370,48 @@ impl Engine {
                 ok(json!({ "ok": true }))
             }
 
+            Command::NewAgentToken { agent_id } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                ok(self.new_agent_token(&agent_id)?)
+            }
+
+            // ---------------------------------------------------------- sync (0080)
+            Command::GetSync => {
+                self.require_user(caller)?;
+                ok(self.sync_status()?)
+            }
+            Command::EnableSync { folder } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                ok(json!({ "code": self.enable_sync(&folder).await? }))
+            }
+            Command::JoinSync { folder, code } => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                // Joined even if the first pass reports a problem; the status says what.
+                if let Err(e) = self.join_sync(&folder, &code).await {
+                    if self.sync_config_exists()? {
+                        tracing::warn!("sync: {e:#}");
+                    } else {
+                        return Err(e);
+                    }
+                }
+                ok(self.sync_status()?)
+            }
+            Command::DisableSync => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                self.disable_sync().await?;
+                ok(self.sync_status()?)
+            }
+            Command::SyncSettingsNow => {
+                self.require_user(caller)?;
+                self.require_full()?;
+                let _ = self.sync_pass().await;
+                ok(self.sync_status()?)
+            }
+
             // ---------------------------------------------------------- misc
             Command::GetSettings => ok(self.settings()),
             Command::UpdateSettings { settings } => {

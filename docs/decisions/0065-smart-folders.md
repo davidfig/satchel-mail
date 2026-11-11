@@ -78,6 +78,7 @@ query with counts and paging. It had no negation or relative dates, and
 - `smart-folders.md` is rewritten when mail or the folders change, or every 10
   minutes to keep relative dates current, not on every AI folder pass.
 - Smart folders don't follow the user to another computer until the hosted
-  version (0018) syncs settings.
+  version (0018) syncs settings. *Update: they do now, through a shared sync
+  folder (0080).*
 - Not done yet: OR across different operators and grouping (Superhuman's `{}` and
   `()`), dragging to reorder, and agents proposing a new smart folder.

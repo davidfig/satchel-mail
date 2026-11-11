@@ -308,6 +308,44 @@ impl Engine {
         Ok(p)
     }
 
+    /// The versions of what an action changes, for the staleness check on
+    /// approval. Used for proposals that came from another computer (0080).
+    pub(crate) fn target_versions(&self, action: &ProposalAction) -> Result<HashMap<String, i64>> {
+        let mut out = HashMap::new();
+        let mut msg = |id: &String| -> Result<()> {
+            if let Some(v) = self.store.message_version(id)? {
+                out.insert(format!("msg:{id}"), v);
+            }
+            Ok(())
+        };
+        let mut events = vec![];
+        match action {
+            ProposalAction::Draft { draft } => {
+                for m in draft.in_reply_to.iter().chain(draft.forward_of.iter()) {
+                    msg(m)?;
+                }
+            }
+            ProposalAction::Labels { message_ids, .. }
+            | ProposalAction::Archive { message_ids }
+            | ProposalAction::Move { message_ids, .. }
+            | ProposalAction::MarkRead { message_ids, .. }
+            | ProposalAction::Flag { message_ids, .. } => {
+                for m in message_ids {
+                    msg(m)?;
+                }
+            }
+            ProposalAction::UpdateEvent { event } => events.extend(event.id.clone()),
+            ProposalAction::CancelEvent { event_id } | ProposalAction::RespondToInvite { event_id, .. } => events.push(event_id.clone()),
+            ProposalAction::CreateEvent { .. } | ProposalAction::SaveContact { .. } | ProposalAction::MergeContacts { .. } => {}
+        }
+        for id in events {
+            if let Some(e) = self.store.get_event(&id)? {
+                out.insert(format!("event:{id}"), e.version);
+            }
+        }
+        Ok(out)
+    }
+
     /// Keep the proposal's file in the AI folder, if it came from one, current.
     pub(crate) fn proposal_decided(&self, id: &str, edited: bool) {
         let mirror = self.settings().mirror;

@@ -6,4 +6,5 @@ export * from './mail';
 export * from './calendar';
 export * from './contacts';
 export * from './agents';
+export * from './sync';
 export * from './events';

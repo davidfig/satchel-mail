@@ -9,6 +9,7 @@ import type {
   Agent,
   AgentPolicy,
   AuditEntry,
+  FolderSync,
   CalEvent,
   Calendar,
   CalendarAlert,
@@ -130,6 +131,13 @@ export const api = {
   createAgent: (name: string, policy: AgentPolicy) => call<{ agent: Agent; token: string }>('create_agent', { name, policy }),
   updateAgent: (agent_id: Id, name: string | null, policy: AgentPolicy | null) => call<Agent>('update_agent', { agent_id, name, policy }),
   revokeAgent: (agent_id: Id) => call('revoke_agent', { agent_id }),
+  newAgentToken: (agent_id: Id) => call<{ agent: Agent; token: string }>('new_agent_token', { agent_id }),
+
+  getSync: () => call<FolderSync>('get_sync'),
+  enableSync: (folder: string) => call<{ code: string }>('enable_sync', { folder }),
+  joinSync: (folder: string, code: string) => call<FolderSync>('join_sync', { folder, code }),
+  disableSync: () => call<FolderSync>('disable_sync'),
+  syncSettingsNow: () => call<FolderSync>('sync_settings_now'),
 
   getSettings: () => call<Settings>('get_settings'),
   updateSettings: (settings: Settings) => call<Settings>('update_settings', { settings }),

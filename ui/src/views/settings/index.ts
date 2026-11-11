@@ -11,6 +11,7 @@ import { agents } from './agents';
 import { favorites } from './favorites';
 import { activity, general, mirror } from './general';
 import { privacy } from './privacy';
+import { sync } from './sync';
 
 export class SettingsView {
   private nav = h('nav.settings-nav');
@@ -54,6 +55,7 @@ export class SettingsView {
       ['privacy', 'Privacy', 'shield'],
       ['favorites', 'Favorites', 'heart'],
       ['general', 'General', 'settings'],
+      ['sync', 'Sync', 'refresh'],
       ['activity', 'Activity', 'clock'],
     ];
     // Patched, not replaced: the Accounts page redraws on every sync tick,
@@ -63,7 +65,7 @@ export class SettingsView {
     const content = this.content;
     if (this.drawn !== this.section) clear(content);
     this.drawn = this.section;
-    const r = { accounts: () => accounts(content), agents: () => agents(this, content), mirror: () => mirror(this, content), privacy: () => privacy(this, content), favorites: () => favorites(this, content), general: () => general(this, content), activity: () => activity(this, content) };
+    const r = { accounts: () => accounts(content), agents: () => agents(this, content), mirror: () => mirror(this, content), privacy: () => privacy(this, content), favorites: () => favorites(this, content), general: () => general(this, content), sync: () => sync(this, content), activity: () => activity(this, content) };
     void r[this.section]();
   }
 

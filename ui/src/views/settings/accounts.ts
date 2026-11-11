@@ -7,7 +7,7 @@ import { signOutMessage } from '../../lib/signouts';
 import { confirmDialog, errorToast, modal, toast } from '../../lib/ui';
 import { store } from '../../state';
 import { RpcError } from '../../transport';
-import type { Account, AccountConfig, Credential, ProviderKind, Security } from '../../types';
+import type { Account, AccountConfig, Credential, OfferedAccount, ProviderKind, Security } from '../../types';
 import { openExternal } from '../mail/message-body';
 import { field, secSelect } from './form';
 import { canSendAs, editSendAs } from './send-as';
@@ -76,7 +76,16 @@ export function accounts(el: HTMLElement) {
   );
 }
 
-export function addAccount(p: Preset) {
+/** Signs in to an account set up on another computer (0080): the same
+ *  server setup, filled in; only the password or sign-in is new. */
+export function signInOffered(o: OfferedAccount) {
+  const c = o.config;
+  const id = c.kind === 'gmail' ? 'gmail' : c.kind === 'graph' ? 'microsoft' : c.kind;
+  const preset = PRESETS.find((p) => p.id === id);
+  if (preset) addAccount(preset, c);
+}
+
+export function addAccount(p: Preset, prefill?: AccountConfig) {
   if (p.kind === 'oauth') return oauth(p);
   const email = h('input', { type: 'email', placeholder: 'you@example.com', autocomplete: 'email' });
   const name = h('input', { type: 'text', placeholder: 'Your name' });
@@ -147,6 +156,25 @@ export function addAccount(p: Preset) {
       field('CardDAV URL', carddav, 'For contacts. Leave empty to look them up on the CalDAV server.'),
       h('label.row.inline', insecure, 'Allow self-signed certificates (local test servers only)')),
     status), { footer: h('div.row.end', h('button', { on: { click: () => m.close() } }, 'Cancel'), btn) });
+  if (prefill && prefill.kind !== 'gmail' && prefill.kind !== 'graph') {
+    email.value = prefill.email;
+    name.value = prefill.display_name;
+    username.value = prefill.username;
+    username.dataset.touched = host.dataset.touched = shost.dataset.touched = '1';
+    caldav.value = prefill.caldav_url ?? '';
+    carddav.value = prefill.carddav_url ?? '';
+    insecure.checked = prefill.allow_invalid_certs ?? false;
+    if (prefill.kind === 'jmap') session.value = prefill.session_url;
+    else {
+      host.value = prefill.imap_host;
+      port.value = String(prefill.imap_port);
+      sec.value = prefill.imap_security;
+      shost.value = prefill.smtp_host;
+      sport.value = String(prefill.smtp_port);
+      ssec.value = prefill.smtp_security;
+    }
+    password.focus();
+  }
 }
 
 export async function oauth(p: Preset) {

@@ -27,6 +27,7 @@ Current third-party dependencies and why:
 | flate2 (miniz_oxide back end) | gzip for stored messages (0074). Already in the tree through mail-auth and png, at the same version, so it adds no new code |
 | directories | platform data-directory conventions |
 | keyring | OS keychain |
+| aws-lc-rs | ChaCha20-Poly1305 and OS randomness for the settings-sync files (0080). Already in the tree through rustls, at the same version, so it adds no new code |
 | mail-parser, mail-builder | RFC 5322 / MIME |
 | ammonia | HTML sanitizing (security-critical) |
 | html5ever | HTML tokenizing for our HTML → text conversion (0043). Already in the tree through ammonia, at the same version, so it adds no new code |

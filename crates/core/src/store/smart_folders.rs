@@ -64,6 +64,21 @@ impl Store {
         })
     }
 
+    /// Insert or update a folder with a given id and place (sync from
+    /// another computer, 0080). With no place, a new one goes last.
+    pub fn put_smart_folder(&self, f: &SmartFolder, position: Option<i64>) -> Result<()> {
+        self.w(|c| {
+            c.execute(
+                "INSERT INTO smart_folders (id, name, query, badge, position, created_at)
+                 VALUES (?,?,?,?,COALESCE(?, (SELECT COALESCE(MAX(position),-1)+1 FROM smart_folders)),?)
+                 ON CONFLICT(id) DO UPDATE SET name=excluded.name, query=excluded.query, badge=excluded.badge,
+                   position=COALESCE(?, position)",
+                params![f.id, f.name, f.query, badge_str(f.badge), position, now_ms(), position],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn delete_smart_folder(&self, id: &str) -> Result<bool> {
         self.w(|c| Ok(c.execute("DELETE FROM smart_folders WHERE id=?", [id])? > 0))
     }

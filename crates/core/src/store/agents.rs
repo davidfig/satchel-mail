@@ -66,6 +66,25 @@ impl Store {
         })
     }
 
+    /// An agent that came from another computer (0080): same id, and a token
+    /// hash no token matches until `set_agent_token_hash`.
+    pub fn insert_synced_agent(&self, id: &str, name: &str, policy: &AgentPolicy) -> Result<()> {
+        self.w(|c| {
+            c.execute(
+                "INSERT INTO agents (id, name, token_hash, created_at, policy_json) VALUES (?,?,?,?,?)",
+                params![id, name, format!("synced:{}", new_id()), now_ms(), to_json(policy)],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn set_agent_token_hash(&self, id: &str, token_hash: &str) -> Result<()> {
+        self.w(|c| {
+            c.execute("UPDATE agents SET token_hash=? WHERE id=? AND token_hash NOT LIKE 'builtin:%'", params![token_hash, id])?;
+            Ok(())
+        })
+    }
+
     pub fn touch_agent(&self, id: &str) -> Result<()> {
         self.w(|c| {
             c.execute("UPDATE agents SET last_used=? WHERE id=?", params![now_ms(), id])?;
@@ -95,7 +114,7 @@ impl Store {
         })
     }
 
-    fn proposal_row(r: &Row) -> rusqlite::Result<(Proposal, HashMap<String, i64>)> {
+    pub(super) fn proposal_row(r: &Row) -> rusqlite::Result<(Proposal, HashMap<String, i64>)> {
         let action: ProposalAction = serde_json::from_str(&r.get::<_, String>("action_json")?).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
         })?;
