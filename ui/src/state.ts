@@ -6,7 +6,7 @@ import type { Account, CoreEvent, Mailbox, MailboxRole, Settings, SmartFolder } 
 import { notifyNewMail } from './lib/notify';
 import { toast } from './lib/ui';
 
-export type SettingsSection = 'accounts' | 'agents' | 'mirror' | 'privacy' | 'favorites' | 'general' | 'activity';
+export type SettingsSection = 'accounts' | 'agents' | 'mirror' | 'privacy' | 'favorites' | 'general' | 'sync' | 'activity';
 export type View = 'mail' | 'calendar' | 'contacts' | 'review' | 'settings';
 
 /** What the mail list is showing. */

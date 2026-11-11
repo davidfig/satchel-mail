@@ -18,6 +18,7 @@ mod command;
 mod contacts;
 mod event;
 mod mail;
+mod sync;
 mod wire;
 
 pub use account::*;
@@ -27,4 +28,5 @@ pub use command::*;
 pub use contacts::*;
 pub use event::*;
 pub use mail::*;
+pub use sync::*;
 pub use wire::*;

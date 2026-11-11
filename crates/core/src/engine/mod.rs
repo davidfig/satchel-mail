@@ -247,6 +247,7 @@ impl Engine {
         w.push(tokio::spawn(Self::snippet_repair_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::compress_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::ai_attachment_worker(Arc::downgrade(self))));
+        w.push(tokio::spawn(Self::sync_worker(Arc::downgrade(self))));
     }
 
     pub fn shutdown(&self) {

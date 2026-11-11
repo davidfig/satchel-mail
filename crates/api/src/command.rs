@@ -167,6 +167,23 @@ pub enum Command {
     CreateAgent { name: String, policy: AgentPolicy },
     UpdateAgent { agent_id: Id, name: Option<String>, policy: Option<AgentPolicy> },
     RevokeAgent { agent_id: Id },
+    /// Returns {agent, token}: a new token for an agent, e.g. one that came
+    /// from another computer with none (0080). Earlier tokens stop working.
+    NewAgentToken { agent_id: Id },
+
+    // settings sync between computers (0080)
+    /// Returns [`FolderSync`].
+    GetSync,
+    /// Start syncing through `folder` with a new key. Returns {code}, the sync
+    /// code other computers join with (shown once). Refused if the folder
+    /// already holds a sync: join it instead.
+    EnableSync { folder: String },
+    /// Join the sync in `folder` with the code from another computer.
+    JoinSync { folder: String, code: String },
+    /// Stop syncing on this computer. Its file is removed from the folder.
+    DisableSync,
+    /// Run a sync pass now. Returns [`FolderSync`].
+    SyncSettingsNow,
 
     // misc
     GetSettings,

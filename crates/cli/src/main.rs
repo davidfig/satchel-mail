@@ -4,6 +4,7 @@
 //!   satchel mcp              MCP server over stdio for AI agents
 //!   satchel accounts ...     list/add accounts
 //!   satchel agents ...       create/list agent tokens
+//!   satchel settings-sync    settings sync between computers (0080)
 //!   satchel call '<json>'    run one API command (debugging)
 
 mod server;
@@ -58,6 +59,9 @@ enum Cmd {
     Accounts(AccountsCmd),
     #[command(subcommand)]
     Agents(AgentsCmd),
+    /// Keep settings in step between computers through a shared folder.
+    #[command(subcommand)]
+    SettingsSync(SyncCmd),
     /// Run one API command as the user, e.g. '{"cmd":"list_accounts"}'.
     Call { json: String },
 }
@@ -133,6 +137,22 @@ enum AgentsCmd {
         allow_attachments: bool,
     },
     Revoke { agent_id: String },
+    /// Make a new token for an agent (e.g. one synced from another computer).
+    Token { agent_id: String },
+}
+
+#[derive(Subcommand)]
+enum SyncCmd {
+    /// What's syncing, with which computers, and any problem.
+    Status,
+    /// Start syncing through FOLDER and print the sync code (shown once).
+    On { folder: PathBuf },
+    /// Join the sync in FOLDER with the code from another computer.
+    Join { folder: PathBuf, code: String },
+    /// Stop syncing on this computer.
+    Off,
+    /// Sync now.
+    Now,
 }
 
 fn security(s: &str) -> Result<Security> {
@@ -311,7 +331,27 @@ async fn main() -> Result<()> {
                 AgentsCmd::Revoke { agent_id } => {
                     user(&engine, Command::RevokeAgent { agent_id: agent_id.clone() }).await?;
                 }
+                AgentsCmd::Token { agent_id } => {
+                    let v = user(&engine, Command::NewAgentToken { agent_id: agent_id.clone() }).await?;
+                    println!("{}", v["token"].as_str().unwrap_or_default());
+                }
             }
+        }
+        Cmd::SettingsSync(s) => {
+            let (engine, _lock) = open_for_call(&cli)?;
+            let full = |p: &PathBuf| -> Result<String> { Ok(std::path::absolute(p)?.to_string_lossy().into()) };
+            let st = match s {
+                SyncCmd::Status => user(&engine, Command::GetSync).await?,
+                SyncCmd::On { folder } => {
+                    let v = user(&engine, Command::EnableSync { folder: full(folder)? }).await?;
+                    println!("Sync code (enter it on your other computers; it isn't shown again):\n\n  {}\n", v["code"].as_str().unwrap_or_default());
+                    user(&engine, Command::GetSync).await?
+                }
+                SyncCmd::Join { folder, code } => user(&engine, Command::JoinSync { folder: full(folder)?, code: code.clone() }).await?,
+                SyncCmd::Off => user(&engine, Command::DisableSync).await?,
+                SyncCmd::Now => user(&engine, Command::SyncSettingsNow).await?,
+            };
+            print_sync(&serde_json::from_value(st)?);
         }
         Cmd::Call { json } => {
             let (engine, _lock) = open_for_call(&cli)?;
@@ -332,4 +372,21 @@ fn default_ui_dir() -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn print_sync(s: &FolderSync) {
+    if !s.enabled {
+        println!("Sync is off.");
+        return;
+    }
+    println!("Syncing through {} as {}", s.folder.as_deref().unwrap_or("?"), s.device_name.as_deref().unwrap_or("?"));
+    for d in &s.devices {
+        println!("  with {} (last change {})", d.name, d.last_seen.format("%Y-%m-%d %H:%M"));
+    }
+    for a in &s.offered_accounts {
+        println!("  account on another computer, not here yet: {}", a.config.email());
+    }
+    if let Some(e) = &s.error {
+        println!("Problem: {e}");
+    }
 }

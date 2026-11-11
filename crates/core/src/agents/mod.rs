@@ -18,6 +18,19 @@ impl Engine {
         Ok((agent, token))
     }
 
+    /// A new token for an agent; earlier ones stop working. For an agent that
+    /// came from another computer without one (0080).
+    pub(crate) fn new_agent_token(&self, agent_id: &str) -> Result<serde_json::Value> {
+        let agent = self.store.get_agent(agent_id)?.ok_or_else(|| anyhow::anyhow!("no such agent"))?;
+        if agent.builtin || agent.revoked {
+            anyhow::bail!("that agent can't have a token");
+        }
+        let token = format!("stk_{}", crate::random_token(24));
+        self.store.set_agent_token_hash(agent_id, &Self::hash_token(&token))?;
+        self.store.audit("user", "agent_token_replaced", &json!({ "agent": agent.name }))?;
+        Ok(json!({ "agent": self.store.get_agent(agent_id)?, "token": token }))
+    }
+
     /// The built-in agent behind token-less proposal files. What it can see
     /// follows the AI folder settings; its rate limit is the default policy's.
     pub(crate) fn folder_agent(&self, mirror: &MirrorSettings) -> Result<Agent> {

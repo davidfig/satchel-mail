@@ -38,6 +38,13 @@ impl Store {
         })
     }
 
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        self.w(|c| {
+            c.execute("DELETE FROM settings WHERE key=?", [key])?;
+            Ok(())
+        })
+    }
+
     pub fn set_setting<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {
         self.w(|c| {
             c.execute(

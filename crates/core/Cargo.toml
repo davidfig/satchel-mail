@@ -11,6 +11,7 @@ satchel-mime.workspace = true
 satchel-ical.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
+aws-lc-rs = "1.18.2"
 base64.workspace = true
 blake3.workspace = true
 chrono.workspace = true

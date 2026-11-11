@@ -21,6 +21,7 @@ mod people;
 mod sender_rules;
 mod smart_folders;
 mod stamps;
+mod sync_refs;
 #[cfg(test)]
 mod tests;
 mod thread_search;

@@ -16,6 +16,7 @@ mod ops;
 pub mod provider;
 pub mod secrets;
 pub mod store;
+mod sync;
 
 pub use engine::{Caller, Engine, EngineOptions, Mode, default_data_dir};
 

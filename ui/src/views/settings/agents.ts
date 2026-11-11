@@ -34,6 +34,7 @@ export async function agents(view: SettingsView, el: HTMLElement) {
           h('div.small.muted', `Created ${relative(a.created_at)} · last used ${relative(a.last_used)}`),
           h('div.small.muted', policyLabel(a.policy))),
         h('button', { title: 'Change what this agent can read and propose', on: { click: () => editAgent(view, a) } }, 'Edit access'),
+        h('button', { title: 'Make a token for this agent on this computer, e.g. one set up on another computer. Its earlier token stops working.', on: { click: () => void newToken(a, info?.data_dir) } }, 'New token'),
         h('button.danger', { title: 'Cut off this agent’s access', on: { click: async () => { if (await confirmDialog('Revoke agent?', `${a.name} will lose access immediately.`, 'Revoke', true)) { await api.revokeAgent(a.id); view.render(); } } } }, 'Revoke')))),
     h('button.primary', { on: { click: () => editAgent(view, null, info?.data_dir) } }, icon('plus', 16), 'Connect an agent'),
   );
@@ -83,6 +84,16 @@ export function editAgent(view: SettingsView, existing: Agent | null, dataDir?: 
     field('Max proposals per hour', rate)), {
     footer: h('div.row.end', h('button', { on: { click: () => m.close() } }, 'Cancel'), h('button.primary', { on: { click: () => void save() } }, existing ? 'Save' : 'Create token')),
   });
+}
+
+async function newToken(a: Agent, dataDir?: string) {
+  if (!(await confirmDialog('Make a new token?', `${a.name} gets a new token for this computer. Anything using its earlier token here stops working.`, 'New token'))) return;
+  try {
+    const r = await api.newAgentToken(a.id);
+    void showToken(r.token, dataDir);
+  } catch (e) {
+    errorToast(e);
+  }
 }
 
 export async function showToken(token: string, dataDir?: string) {
