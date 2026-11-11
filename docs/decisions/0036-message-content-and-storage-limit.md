@@ -1,6 +1,6 @@
 # 0036. Download all mail without attachments, within a storage limit
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by 0074 (sizes count compressed bytes) and 0078 (AI folder attachments no longer keep copies whole)
 - **Date:** 2026-10-26
 
 ## Context
@@ -39,7 +39,8 @@ have the disk space for that.
   - a message with larger inline images is opened.
   If the forwarded message's attachments couldn't be fetched, sending the
   forward fails rather than going out without them. With the AI folder set
-  to include attachments or .eml files, copies are kept whole.
+  to include .eml files, copies are kept whole. (Its attachments used to
+  keep them whole too; since 0078 they're downloaded for the folder alone.)
 - **An optional storage limit per account** (`storage_limit_mb`). Before each
   batch, the account's oldest stored content is freed until it fits. A
   message downloads only if freeing older mail can make room for it, so the
@@ -80,8 +81,8 @@ Schema 2 adds `messages.partial` and `messages.blob_size` (0031).
   request (and Gmail quota) for nothing. Copies rebuilt this way are always
   `partial`, because their bytes aren't the server's, so the raw message
   still comes from the server. If a rebuild fails, the message downloads
-  whole. With the AI folder copying attachments or .eml files, messages
-  download whole as before.
+  whole. With the AI folder copying .eml files, messages download whole as
+  before.
 - Space is counted per account, from what's stored on disk, not the space
   free on the drive. Copies shared between accounts count for each one.
 - Content freed by the limit loses its body from search if the search index

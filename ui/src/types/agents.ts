@@ -62,9 +62,13 @@ export interface MirrorSettings {
   since_days: number | null;
   include_eml: boolean;
   include_attachments: boolean;
+  /** How many days back attachments are written; null for as far as the text goes (0078). */
+  attachment_days: number | null;
   accept_proposals: boolean;
   include_calendar: boolean;
   include_contacts: boolean;
+  /** Write `history/`: every message's metadata, for all mail (0076). */
+  history_all: boolean;
 }
 
 export interface Settings {

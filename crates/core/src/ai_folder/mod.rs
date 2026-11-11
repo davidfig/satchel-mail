@@ -13,7 +13,7 @@ mod relocate;
 mod safe_fs;
 
 pub use export::Mirror;
-pub(crate) use export::contact_file;
+pub(crate) use export::{MAX_ATTACHMENT, contact_file, listed_attachment};
 pub use readme::README;
 pub(crate) use relocate::relocate;
 pub(crate) use safe_fs::*;

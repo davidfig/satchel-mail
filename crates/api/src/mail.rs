@@ -294,6 +294,7 @@ pub struct ThreadQuery {
     #[serde(default)]
     pub smart_folder_id: Option<Id>,
     /// Search query (supports from:, to:, with:, subject:, has:attachment,
+    /// has:pdf (a kind such as presentation, or any extension), filename:,
     /// is:unread/read, is:flagged/unflagged, is:favorite, before:, after:,
     /// newer_than:7d, older_than:1y, in:, in:anywhere, account:). from:, to:,
     /// with:, in: and account: take a comma-separated list; a full address

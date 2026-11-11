@@ -1,4 +1,4 @@
-//! Thread files and the per-account and per-mailbox indexes.
+//! Thread files, and keeping them in step with the store and the date limit.
 
 use super::*;
 
@@ -58,13 +58,19 @@ impl Mirror<'_> {
         md.push_str("---\n\n");
         md.push_str(&format!("# {}\n\n", if t.subject.trim().is_empty() { "(no subject)".to_string() } else { one_line(&t.subject) }));
         let mut meta_msgs = vec![];
+        let attachment_window = self.attachment_window();
+        // Messages whose attachments were downloaded for the folder: their
+        // files are kept, not written again. Afterwards, `on` and `off` say
+        // which messages now have all their files, and which lost them.
+        let downloaded = self.store.ai_attachments_written(thread_id)?;
+        let (mut on, mut off) = (vec![], vec![]);
         // The files written this pass; others in the folder (from messages
         // now outside the date limit) are removed after.
         let mut written: HashSet<PathBuf> = HashSet::new();
         for (n, m) in msgs.iter().enumerate() {
             let raw = m.blob_hash.as_ref().and_then(|h| self.blobs.get(h).ok().flatten());
             let parsed = raw.as_deref().and_then(satchel_mime::parse);
-            let body = parsed.as_ref().map(|p| satchel_mime::strip_quotes(&p.text)).unwrap_or_else(|| m.summary.snippet.clone());
+            let body = parsed.as_ref().map(satchel_mime::agent_body).unwrap_or_else(|| m.summary.snippet.clone());
             let from = m.summary.from.as_ref().map(|a| one_line(&a.display())).unwrap_or_else(|| "(unknown)".into());
             md.push_str(&format!("## {} — {}\n\n", m.summary.date.format("%Y-%m-%d %H:%M UTC"), from));
             md.push_str(&format!("- message_id: `{}`\n", m.summary.id));
@@ -91,7 +97,7 @@ impl Mirror<'_> {
             if !fl.is_empty() {
                 md.push_str(&format!("- flags: {}\n", fl.join(", ")));
             }
-            let atts: Vec<&Attachment> = m.attachments.iter().filter(|a| !a.inline).collect();
+            let atts: Vec<&Attachment> = m.attachments.iter().filter(|a| listed_attachment(a)).collect();
             if !atts.is_empty() {
                 md.push_str(&format!(
                     "- attachments: {}\n",
@@ -116,27 +122,29 @@ impl Mirror<'_> {
                     write_if_changed(&self.root(), &p, r)?;
                     written.insert(p);
                 }
-            if self.settings.include_attachments
-                && RAW_FILES_EXPORTED
-                && let Some(r) = &raw {
-                    let mut names = Names::reserving(&[]);
-                    for a in &atts {
-                        if a.size > 25 * 1024 * 1024 {
-                            continue;
-                        }
-                        if let Some((name, _, data)) = satchel_mime::attachment_bytes(r, &a.id) {
-                            let safe = safe_name(&name);
-                            let (stem, ext) = match safe.rsplit_once('.') {
-                                Some((s, e)) if !s.is_empty() && e.len() <= 10 => (s.to_string(), format!(".{e}")),
-                                _ => (safe.clone(), String::new()),
-                            };
-                            let file = names.take(&format!("{}-{stem}", n + 1), &ext, &format!("{}\0{name}", a.id));
-                            let p = dir.join("attachments").join(file);
-                            write_if_changed(&self.root(), &p, &data)?;
-                            written.insert(p);
-                        }
+            let in_window = attachment_window.is_some_and(|since| since.is_none_or(|s| m.summary.date >= s));
+            let mut complete = in_window;
+            if in_window {
+                // The stored copy has the contents unless it's slimmed.
+                let full = raw.as_deref().filter(|_| !m.partial);
+                for (id, file) in attachment_files(n + 1, &atts) {
+                    let p = dir.join("attachments").join(file);
+                    if let Some((_, _, data)) = full.and_then(|r| satchel_mime::attachment_bytes(r, &id)) {
+                        write_if_changed(&self.root(), &p, &data)?;
+                    } else if !(downloaded.contains(&m.summary.id) && p.is_file()) {
+                        complete = false;
+                        continue;
                     }
+                    written.insert(p);
                 }
+            }
+            match (complete, downloaded.contains(&m.summary.id)) {
+                (true, false) => on.push(m.summary.id.clone()),
+                // Out of the window, or a file went missing: the background
+                // download fetches it again if it's still wanted.
+                (false, true) => off.push(m.summary.id.clone()),
+                _ => {}
+            }
             meta_msgs.push(serde_json::json!({
                 "message_id": m.summary.id,
                 "date": m.summary.date,
@@ -188,6 +196,8 @@ impl Mirror<'_> {
             }
         }
         self.store.set_mirror_path(thread_id, Some(&rel.to_string_lossy()))?;
+        self.store.set_ai_attachments(&on, true)?;
+        self.store.set_ai_attachments(&off, false)?;
         Ok(true)
     }
 
@@ -199,170 +209,51 @@ impl Mirror<'_> {
         Ok(())
     }
 
+    /// Queue every thread whose folder was written but has gone (deleted by
+    /// hand, by another program, or by a rewrite cut short) to be written
+    /// again. The indexes only notice this for the threads they list.
+    /// Returns how many were missing.
+    pub fn check_threads(&self) -> Result<usize> {
+        let root = self.root();
+        let missing: Vec<String> =
+            self.store.mirror_paths()?.into_iter().filter(|(_, p)| !root.join(p).join("thread.md").is_file()).map(|(t, _)| t).collect();
+        if !missing.is_empty() {
+            tracing::info!("AI folder: {} thread folders missing, writing them again", missing.len());
+            self.store.mark_threads_unmirrored(&missing)?;
+        }
+        Ok(missing.len())
+    }
+
+    /// Queue every written thread the date limit has moved past, in part or
+    /// whole, to be written again: that drops its older messages, or removes
+    /// its folder when none are left. Threads are otherwise only rewritten
+    /// when their mail changes, so without this a conversation would stay in
+    /// the folder long after it aged out. Returns how many were queued.
+    pub fn sweep_aged(&self) -> Result<usize> {
+        // Attachments past their own window (or all of them, when the folder
+        // no longer takes any) go the same way (0078).
+        let since = match self.attachment_window() {
+            None => None,
+            Some(None) => Some(i64::MIN),
+            Some(Some(d)) => Some(d.timestamp_millis()),
+        };
+        let mut aged = self.store.clear_ai_attachments_before(since)?;
+        if let Some(cutoff) = self.cutoff() {
+            aged.extend(self.store.mirrored_threads_before(cutoff.timestamp_millis())?);
+        }
+        aged.sort();
+        aged.dedup();
+        if !aged.is_empty() {
+            tracing::debug!("AI folder: {} threads reach past the date limit, writing them again", aged.len());
+            self.store.mark_threads_unmirrored(&aged)?;
+        }
+        Ok(aged.len())
+    }
+
     pub fn cleanup_orphans(&self) -> Result<()> {
         for (t, p) in self.store.orphan_mirror_paths()? {
             let _ = remove_dir_all(&self.root(), &self.root().join(&p));
             self.store.set_mirror_path(&t, None)?;
-        }
-        Ok(())
-    }
-
-    /// Per-account INDEX.md and per-mailbox listings. An account that fails
-    /// is logged and skipped, so the others are still written.
-    pub fn write_indexes(&self) -> Result<()> {
-        let accounts = self.store.list_accounts()?;
-        for acc in &accounts {
-            if let Err(e) = self.write_account_indexes(acc) {
-                tracing::warn!("AI folder: indexes for {}: {e:#}", acc.email);
-            }
-        }
-        // Folders of accounts that were removed (or written by another data
-        // directory) would read as live mail.
-        let mail = self.root().join("mail");
-        let ours: HashSet<String> = accounts.iter().map(|a| fold(&safe_name(&a.email))).collect();
-        if let Ok(entries) = std::fs::read_dir(&mail) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if entry.file_type().is_ok_and(|t| t.is_dir()) && !ours.contains(&fold(&name)) {
-                    let _ = remove_dir_all(&self.root(), &entry.path());
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn write_account_indexes(&self, acc: &Account) -> Result<()> {
-        let base = self.root().join("mail").join(safe_name(&acc.email));
-        if !self.account_allowed(&acc.id) {
-            let _ = remove_dir_all(&self.root(), &base);
-            return Ok(());
-        }
-        let mailboxes = self.store.list_mailboxes(Some(&acc.id))?;
-        let prefix = format!("mail/{}/", safe_name(&acc.email));
-        // Where each thread's folder is, relative to the account folder, if
-        // its thread.md is really there. One that was written but has gone
-        // (deleted by hand, or a rewrite cut short) is queued to be written
-        // again, and listed without a link until it is.
-        let missing = std::cell::RefCell::new(vec![]);
-        let folder = |thread_id: &str| -> Result<Option<String>> {
-            let Some(path) = self.store.mirror_path(thread_id)? else { return Ok(None) };
-            if !self.root().join(&path).join("thread.md").is_file() {
-                missing.borrow_mut().push(thread_id.to_string());
-                return Ok(None);
-            }
-            Ok(Some(path.strip_prefix(&prefix).unwrap_or(&path).to_string()))
-        };
-        let from_of = |t: &ThreadSummary| t.participants.first().map(|a| a.name.clone().unwrap_or_else(|| a.email.clone())).unwrap_or_default();
-        let render = |title: &str, threads: &[ThreadSummary]| -> Result<String> {
-            let cell = |s: &str| one_line(s).replace('|', "/");
-            let mut s = format!("# {}\n\n| date | from | subject | msgs | unread | thread |\n|---|---|---|---|---|---|\n", one_line(title));
-            for t in threads {
-                let id = &t.thread_id[t.thread_id.len().saturating_sub(8)..];
-                let link = match folder(&t.thread_id)? {
-                    Some(rel) => format!("[{id}]({rel}/thread.md)"),
-                    None => format!("{id} (not written yet)"),
-                };
-                s.push_str(&format!(
-                    "| {} | {} | {} | {} | {} | {} |\n",
-                    t.last_date.format("%Y-%m-%d"),
-                    cell(&from_of(t)),
-                    cell(&t.subject),
-                    t.message_count,
-                    t.unread_count,
-                    link
-                ));
-            }
-            Ok(s)
-        };
-        // Under a date limit each row counts, names and previews only the
-        // messages inside it, and a thread with none there isn't listed.
-        let cutoff = self.cutoff();
-        let visible = std::cell::RefCell::new(HashMap::<String, Option<ThreadSummary>>::new());
-        let filter = |v: Vec<ThreadSummary>, mailbox: Option<&str>| -> Result<Vec<ThreadSummary>> {
-            if cutoff.is_none() {
-                return Ok(v);
-            }
-            let mut out = vec![];
-            for t in v {
-                let cached = visible.borrow().get(&t.thread_id).cloned();
-                let s = match cached {
-                    Some(s) => s,
-                    None => {
-                        let id = t.thread_id.clone();
-                        let s = self.visible_summary(t)?;
-                        visible.borrow_mut().insert(id, s.clone());
-                        s
-                    }
-                };
-                if let Some(s) = s.filter(|s| mailbox.is_none_or(|mb| s.mailbox_ids.iter().any(|x| x == mb))) {
-                    out.push(s);
-                }
-            }
-            Ok(out)
-        };
-        let all = filter(
-            self.store.list_threads(&crate::store::ThreadFilter {
-                account_ids: Some(vec![acc.id.clone()]),
-                exclude_trash_junk: true,
-                after: cutoff,
-                limit: 200,
-                ..Default::default()
-            })?,
-            None,
-        )?;
-        write_if_changed(&self.root(), &base.join("INDEX.md"), render(&format!("{} — recent threads", acc.email), &all)?.as_bytes())?;
-        // The same rows for tools: one JSON object per line.
-        let mut jsonl = String::new();
-        for t in &all {
-            let row = serde_json::json!({
-                "thread_id": t.thread_id,
-                "last_date": t.last_date,
-                "from": from_of(t),
-                "subject": t.subject,
-                "messages": t.message_count,
-                "unread": t.unread_count,
-                "flagged": t.flagged,
-                "favorite": t.favorite,
-                "mailboxes": t.mailbox_ids.iter().filter_map(|id| mailboxes.iter().find(|m| &m.id == id).map(|m| m.path.clone())).collect::<Vec<_>>(),
-                "path": folder(&t.thread_id)?.map(|rel| format!("{rel}/thread.md")),
-            });
-            jsonl.push_str(&serde_json::to_string(&row)?);
-            jsonl.push('\n');
-        }
-        write_if_changed(&self.root(), &base.join("index.jsonl"), jsonl.as_bytes())?;
-        // A mailbox called "index" (or two differing only in case) mustn't
-        // overwrite INDEX.md or each other.
-        let mut names = Names::reserving(&["INDEX.md", "index.jsonl", "threads"]);
-        for mb in &mailboxes {
-            let file = base.join(names.take(&safe_name(&mb.path), ".md", &mb.id));
-            let threads = filter(
-                self.store.list_threads(&crate::store::ThreadFilter {
-                    mailbox_id: Some(mb.id.clone()),
-                    after: cutoff,
-                    limit: 200,
-                    ..Default::default()
-                })?,
-                Some(&mb.id),
-            )?;
-            // An empty mailbox gets no file: it would only clutter listings.
-            let r = if threads.is_empty() {
-                match remove_file(&self.root(), &file) {
-                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-                    _ => Ok(()),
-                }
-            } else {
-                write_if_changed(&self.root(), &file, render(&mb.path, &threads)?.as_bytes())
-            };
-            if let Err(e) = r {
-                tracing::warn!("AI folder: index of {}: {e:#}", mb.path);
-            }
-        }
-        let mut missing = missing.into_inner();
-        missing.sort();
-        missing.dedup();
-        if !missing.is_empty() {
-            tracing::debug!("AI folder: {} thread folders missing in {}, writing them again", missing.len(), acc.email);
-            self.store.mark_threads_unmirrored(&missing)?;
         }
         Ok(())
     }

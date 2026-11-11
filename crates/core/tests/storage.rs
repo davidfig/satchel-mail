@@ -158,3 +158,60 @@ async fn deleted_mail_and_removed_accounts_leave_no_stored_copies() {
     engine.handle(&Caller::User, Command::RemoveAccount { account_id: acc.id.clone() }).await.unwrap();
     assert_eq!(count(), 0);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uncompressed_copies_are_compressed_and_resized() {
+    use satchel_core::blobs::{BlobStore, FsBlobStore};
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Arc::new(Fake::default());
+    let root = dir.path().join("blobs");
+    let blobs = Arc::new(FsBlobStore::new(root.clone()).unwrap());
+    let engine = Engine::with_parts(
+        Arc::new(satchel_core::store::Store::open_in_memory().unwrap()),
+        blobs.clone(),
+        satchel_core::EngineOptions {
+            data_dir: dir.path().to_path_buf(),
+            mode: satchel_core::Mode::Full,
+            secrets: Arc::new(satchel_core::secrets::MemSecretStore::default()),
+            factory: Arc::new(FakeFactory(fake.clone())),
+            start_workers: false,
+        },
+    )
+    .unwrap();
+    let acc: Account = serde_json::from_value(
+        engine
+            .handle(&Caller::User, Command::AddAccount { config: AccountConfig::Gmail { email: "me@x.test".into(), display_name: "Me".into() }, credential: Credential::Password { password: "x".into() } })
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    wait_for(|| engine.store().message_id_by_remote(&acc.id, "r3").ok().flatten().is_some()).await;
+    let id = engine.store().message_id_by_remote(&acc.id, "r1").unwrap().unwrap();
+    let row = engine.store().message_row(&id).unwrap().unwrap();
+    let hash = row.blob_hash.clone().unwrap();
+    let gz = root.join(&hash[..2]).join(format!("{}.gz", &hash[2..]));
+    // What every stored copy takes on disk, whichever form it's in.
+    let on_disk = || -> u64 {
+        blobs.list(Duration::ZERO).unwrap().iter().map(|h| {
+            let p = root.join(&h[..2]).join(&h[2..]);
+            std::fs::metadata(p.with_extension("gz")).or_else(|_| std::fs::metadata(p.with_extension("eml"))).unwrap().len()
+        }).sum()
+    };
+    assert_eq!(engine.store().stored_bytes(&acc.id).unwrap(), on_disk(), "new copies are stored compressed and sized on disk");
+
+    // As an older version left it: uncompressed, sized by its bytes.
+    let raw = blobs.get(&hash).unwrap().unwrap();
+    std::fs::remove_file(&gz).unwrap();
+    std::fs::write(gz.with_extension("eml"), &raw).unwrap();
+    engine.store().set_blob_sizes(&[(hash.clone(), raw.len() as u64)]).unwrap();
+    assert_eq!(blobs.get(&hash).unwrap().unwrap(), raw, "still readable");
+    assert_eq!(engine.store().stored_bytes(&acc.id).unwrap(), on_disk());
+
+    assert_eq!(engine.compress_batch(10).unwrap(), Some(1));
+    assert!(gz.is_file() && !gz.with_extension("eml").exists());
+    assert_eq!(engine.store().stored_bytes(&acc.id).unwrap(), on_disk(), "resized to the compressed copy");
+    assert_eq!(blobs.get(&hash).unwrap().unwrap(), raw);
+    assert_eq!(engine.compress_batch(10).unwrap(), None, "done, and remembered");
+    std::fs::write(gz.with_extension("eml"), &raw).unwrap();
+    assert_eq!(engine.compress_batch(10).unwrap(), None, "not scanned again once done");
+}

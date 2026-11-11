@@ -130,8 +130,10 @@ async fn smart_folders_are_listed_for_agents() {
     let file = dir.path().join("mirror").join(&link);
     assert!(file.is_file(), "{link}");
 
-    // A thread that has gone from disk is listed without a dead link.
+    // A thread that has gone from disk is listed without a dead link, once
+    // the folder is next written whole (every ten minutes).
     std::fs::remove_file(&file).unwrap();
+    engine.refresh_mirror();
     engine.mirror_pass(true).unwrap();
     let md = std::fs::read_to_string(dir.path().join("mirror/smart-folders.md")).unwrap();
     assert!(!md.contains(&link) && md.contains("(not written yet)"), "{md}");
@@ -200,9 +202,11 @@ async fn indexes_link_only_threads_on_disk_and_say_how_fresh_they_are() {
         }
     }
 
-    // A thread folder deleted behind Satchel's back is unlinked, then written again.
+    // A thread folder deleted behind Satchel's back is unlinked when the
+    // folder is next written whole, then written again.
     let gone = index[0]["path"].as_str().unwrap().trim_end_matches("/thread.md").to_string();
     std::fs::remove_dir_all(base.join(&gone)).unwrap();
+    engine.refresh_mirror();
     engine.mirror_pass(true).unwrap();
     assert!(!read("INDEX.md").contains(&format!("({gone}/thread.md)")));
     assert!(read("INDEX.md").contains("(not written yet)"));
@@ -219,7 +223,82 @@ async fn indexes_link_only_threads_on_disk_and_say_how_fresh_they_are() {
     let stale = dir.path().join("mirror/mail/old@x.test");
     std::fs::create_dir_all(&stale).unwrap();
     std::fs::write(stale.join("INDEX.md"), "# old").unwrap();
+    engine.refresh_mirror();
     engine.mirror_pass(true).unwrap();
     assert!(!stale.exists());
     assert!(base.join("INDEX.md").is_file());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn thread_folders_that_go_missing_are_found_and_written_again() {
+    let (engine, _fake, account, dir) = setup().await;
+    engine.mirror_pass(true).unwrap();
+    let root = dir.path().join("mirror");
+    let id = engine.store().message_id_by_remote(&account, "r1").unwrap().unwrap();
+    let thread = engine.store().thread_of(&id).unwrap().unwrap();
+    let folder = root.join(engine.store().mirror_path(&thread).unwrap().unwrap());
+    assert!(folder.join("thread.md").is_file());
+    let status = || std::fs::read_to_string(root.join("sync.json")).unwrap();
+    assert!(status().contains("\"complete\": true"), "{}", status());
+
+    // Gone behind Satchel's back. Without the indexes running, nothing
+    // notices until the next check.
+    std::fs::remove_dir_all(&folder).unwrap();
+    engine.mirror_pass(false).unwrap();
+    assert!(!folder.exists());
+
+    // The check covers every thread, not just the ones the indexes list.
+    engine.recheck_mirror();
+    assert_eq!(engine.mirror_pass(false).unwrap(), 1);
+    assert!(folder.join("thread.md").is_file());
+    assert!(status().contains("\"complete\": true"), "{}", status());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn history_lists_every_message_by_month() {
+    let (engine, fake, account, dir) = setup().await;
+    // Older than the folder's year of threads, with an attachment.
+    let old = (chrono::Utc::now() - chrono::Duration::days(800)).to_rfc2822();
+    let raw = format!(
+        "From: Dana <dana@x.test>\r\nTo: me@x.test\r\nSubject: Old deck\r\nMessage-ID: <old@x.test>\r\nDate: {old}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nSlides: https://x.test/d?utm_source=mail\r\n--b\r\nContent-Type: application/vnd.ms-powerpoint; name=\"Q3.ppt\"\r\nContent-Disposition: attachment; filename=\"Q3.ppt\"\r\nContent-Transfer-Encoding: base64\r\n\r\nQUFB\r\n--b--\r\n"
+    );
+    deliver(&fake, "old", raw.into_bytes(), "INBOX");
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| engine.store().message_id_by_remote(&account, "old").ok().flatten().is_some()).await;
+    engine.mirror_pass(true).unwrap();
+
+    let history = dir.path().join("mirror/mail/me@x.test/history");
+    let rows = || -> Vec<serde_json::Value> {
+        let mut files: Vec<_> = std::fs::read_dir(&history).unwrap().flatten().map(|e| e.path()).collect();
+        files.sort();
+        files.iter().flat_map(|f| std::fs::read_to_string(f).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect::<Vec<_>>()).collect()
+    };
+    let all = rows();
+    assert_eq!(all.len(), 4, "every message, old ones too");
+    let old_row = all.iter().find(|r| r["subject"] == "Old deck").unwrap();
+    assert_eq!(old_row["from"]["email"], "dana@x.test");
+    assert_eq!(old_row["from_me"], false);
+    assert_eq!(old_row["attachments"][0]["name"], "Q3.ppt");
+    assert_eq!(old_row["mailboxes"][0], "INBOX");
+    assert!(!old_row["snippet"].as_str().unwrap().contains("utm_"), "{old_row}");
+    let month = chrono::DateTime::parse_from_rfc3339(old_row["date"].as_str().unwrap()).unwrap().format("%Y-%m").to_string();
+    assert!(history.join(format!("{month}.jsonl")).is_file());
+    // No thread.md for it: it's outside the year the folder writes.
+    let thread = old_row["thread_id"].as_str().unwrap();
+    assert!(engine.store().mirror_path(thread).unwrap().is_none());
+
+    // A change shows on the next pass.
+    let kickoff = engine.store().message_id_by_remote(&account, "r1").unwrap().unwrap();
+    engine.handle(&Caller::User, Command::SetFlags { message_ids: vec![kickoff.clone()], seen: Some(true), flagged: Some(true) }).await.unwrap();
+    engine.mirror_pass(true).unwrap();
+    let row = rows().into_iter().find(|r| r["message_id"] == kickoff.as_str()).unwrap();
+    assert_eq!((row["unread"].clone(), row["flagged"].clone()), (false.into(), true.into()));
+
+    // Limited to the folder's dates, the old month goes.
+    let mut s: Settings = serde_json::from_value(engine.handle(&Caller::User, Command::GetSettings).await.unwrap()).unwrap();
+    s.mirror.history_all = false;
+    engine.handle(&Caller::User, Command::UpdateSettings { settings: s }).await.unwrap();
+    engine.mirror_pass(true).unwrap();
+    assert!(!history.join(format!("{month}.jsonl")).exists());
+    assert_eq!(rows().len(), 3);
 }

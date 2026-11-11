@@ -86,6 +86,30 @@ pub fn is_full_address(v: &str) -> bool {
     matches!(v.split_once('@'), Some((l, d)) if !l.is_empty() && !d.is_empty())
 }
 
+/// File extensions for each kind of attachment `has:` knows (0077).
+const ATTACHMENT_KINDS: &[(&str, &[&str])] = &[
+    ("pdf", &["pdf"]),
+    ("document", &["doc", "docx", "odt", "rtf", "pages", "pdf", "txt", "md"]),
+    ("spreadsheet", &["xls", "xlsx", "xlsm", "ods", "csv", "numbers"]),
+    ("presentation", &["ppt", "pptx", "pps", "ppsx", "odp", "key"]),
+    ("image", &["jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tif", "tiff", "bmp", "svg"]),
+    ("video", &["mp4", "mov", "m4v", "avi", "mkv", "webm"]),
+    ("audio", &["mp3", "m4a", "wav", "aac", "flac", "ogg"]),
+    ("archive", &["zip", "rar", "7z", "tar", "gz", "tgz"]),
+    ("calendar", &["ics"]),
+];
+
+/// The extensions `has:<v>` looks for: a kind's (`has:spreadsheet`, or its
+/// plural), or `v` itself when it looks like an extension (`has:pptx`).
+fn attachment_kind(v: &str) -> Option<Vec<String>> {
+    let v = v.trim_start_matches('.').to_ascii_lowercase();
+    let singular = v.strip_suffix('s').unwrap_or(&v);
+    if let Some((_, exts)) = ATTACHMENT_KINDS.iter().find(|(k, _)| *k == v || *k == singular) {
+        return Some(exts.iter().map(|e| e.to_string()).collect());
+    }
+    (!v.is_empty() && v.len() <= 8 && v.chars().all(|c| c.is_ascii_alphanumeric())).then(|| vec![v])
+}
+
 /// The term an `op:value` token stands for, if it is an operator we know.
 fn operator(k: &str, v: &str, now: DateTime<Utc>) -> Option<MsgTerm> {
     let is = |x: &str| v.eq_ignore_ascii_case(x);
@@ -94,7 +118,9 @@ fn operator(k: &str, v: &str, now: DateTime<Utc>) -> Option<MsgTerm> {
         "to" => MsgTerm::To(list(v)),
         "with" => MsgTerm::With(list(v)),
         "subject" => MsgTerm::Subject(v.to_string()),
-        "has" if is("attachment") => MsgTerm::HasAttachment,
+        "has" if is("attachment") || is("attachments") => MsgTerm::HasAttachment,
+        "has" => MsgTerm::AttachmentType(list(v).iter().map(|x| attachment_kind(x)).collect::<Option<Vec<_>>>()?.concat()),
+        "filename" => MsgTerm::AttachmentName(list(v)),
         "is" if is("unread") => MsgTerm::Unread,
         "is" if is("flagged") || is("starred") => MsgTerm::Flagged,
         "is" if is("favorite") || is("favourite") => MsgTerm::Favorite,
@@ -215,6 +241,21 @@ mod tests {
         assert!(has(&p, false, MsgTerm::InMailbox(vec!["inbox".into()])));
         assert!(has(&p, false, MsgTerm::Text("\"budget\"* \"q3 numbers\"".into())));
         assert!(p.names_mailbox());
+    }
+
+    #[test]
+    fn attachment_kinds_and_names() {
+        let t = |q: &str| parse_query(q).conds.remove(0).term;
+        assert_eq!(t("has:PDF"), MsgTerm::AttachmentType(vec!["pdf".into()]));
+        assert_eq!(t("has:.pptx"), MsgTerm::AttachmentType(vec!["pptx".into()]));
+        assert!(matches!(t("has:presentations"), MsgTerm::AttachmentType(v) if v.contains(&"key".to_string()) && v.contains(&"ppt".to_string())));
+        assert!(matches!(t("has:pdf,spreadsheet"), MsgTerm::AttachmentType(v) if v[0] == "pdf" && v.contains(&"xlsx".to_string())));
+        assert_eq!(t("has:attachments"), MsgTerm::HasAttachment);
+        assert_eq!(t("filename:invoice,receipt"), MsgTerm::AttachmentName(vec!["invoice".into(), "receipt".into()]));
+        assert_eq!(t("filename:\"Q3 plan\""), MsgTerm::AttachmentName(vec!["Q3 plan".into()]));
+        assert!(has(&parse_query("-has:image"), true, t("has:image")));
+        // What can't be an extension stays text.
+        assert!(matches!(t("has:a-long-word"), MsgTerm::Text(_)));
     }
 
     #[test]

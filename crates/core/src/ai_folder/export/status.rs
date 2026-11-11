@@ -20,12 +20,17 @@ impl Mirror<'_> {
                 "error": acc.sync.error,
             }));
         }
-        let status = serde_json::json!({
+        let mut status = serde_json::json!({
             "complete": complete,
             "pending_threads": pending_threads,
             "since_days": self.settings.since_days,
             "accounts": accounts,
         });
+        // Attachments arrive in the background, after their threads (0078).
+        if let Some(since) = self.attachment_window() {
+            status["attachment_days"] = serde_json::json!(self.settings.attachment_days);
+            status["pending_attachments"] = serde_json::json!(self.store.ai_attachments_pending(since.map(|d| d.timestamp_millis()))?);
+        }
         write_if_changed(&self.root(), &self.root().join("sync.json"), serde_json::to_vec_pretty(&status)?.as_slice())
     }
 }

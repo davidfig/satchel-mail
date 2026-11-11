@@ -1,13 +1,18 @@
-//! Writing the AI folder: one Markdown file per thread, indexes, smart
-//! folders, contacts, the agenda and `sync.json`.
+//! Writing the AI folder: one Markdown file per thread, indexes, the
+//! history index, smart folders, contacts, the agenda and `sync.json`.
 
+mod attachments;
 mod calendar;
 mod contacts;
+mod history;
+mod indexes;
 mod smart_folders;
 mod status;
 mod threads;
 mod visible;
 
+pub(crate) use attachments::{MAX_ATTACHMENT, listed_attachment};
+use attachments::attachment_files;
 pub(crate) use contacts::contact_file;
 
 use super::*;
@@ -121,6 +126,9 @@ pub struct Mirror<'a> {
     /// What was last written to each `contacts/people/` file, by file name,
     /// so an agent's edit can be told apart from an out-of-date copy.
     pub contact_files: &'a std::sync::Mutex<HashMap<String, String>>,
+    /// Each history month's fingerprint when it was last written, by
+    /// "account id/yyyy-mm", so unchanged months aren't rebuilt.
+    pub history_seen: &'a std::sync::Mutex<HashMap<String, u64>>,
 }
 
 impl Mirror<'_> {
@@ -151,7 +159,7 @@ impl Mirror<'_> {
         }
     }
 
-    fn account_allowed(&self, account_id: &str) -> bool {
+    pub(crate) fn account_allowed(&self, account_id: &str) -> bool {
         self.settings.account_ids.as_ref().is_none_or(|a| a.iter().any(|x| x == account_id))
     }
 }

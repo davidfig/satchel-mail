@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::{DateTime, TimeZone, Utc};
 use mail_parser::{MessageParser, MimeHeaders};
 use satchel_api::{Address, Attachment, Unsubscribe};
+mod agent_text;
 mod auth;
 mod build;
 mod html;
@@ -23,6 +24,7 @@ mod tests;
 mod text;
 mod trackers;
 
+pub use agent_text::{agent_body, agent_source, agent_text, clean_link};
 pub use build::*;
 pub use html::*;
 pub use html_text::html_to_text;

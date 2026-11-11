@@ -4568,7 +4568,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-api"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "chrono",
  "serde",
@@ -4577,7 +4577,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-cli"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "axum",
@@ -4597,7 +4597,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-core"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4606,6 +4606,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "directories",
+ "flate2",
  "keyring",
  "libc",
  "rusqlite",
@@ -4623,7 +4624,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-desktop"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4656,7 +4657,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-ical"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -4667,13 +4668,14 @@ dependencies = [
 
 [[package]]
 name = "satchel-mcp"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "chrono",
  "rmcp",
  "satchel-api",
  "satchel-core",
+ "satchel-mime",
  "serde",
  "serde_json",
  "tokio",
@@ -4682,7 +4684,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-mime"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "ammonia",
  "base64 0.22.1",
@@ -4695,7 +4697,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-providers"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anyhow",
  "async-imap",

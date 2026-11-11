@@ -321,6 +321,25 @@ impl Store {
         })
     }
 
+    /// Every thread the AI folder says it has written, with its folder.
+    pub fn mirror_paths(&self) -> Result<Vec<(String, String)>> {
+        self.r(|c| {
+            let mut s = c.prepare("SELECT thread_id, path FROM mirror_paths")?;
+            let rows = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Written threads with a message dated before `before_ms`: the AI
+    /// folder's date limit has moved past part or all of them.
+    pub fn mirrored_threads_before(&self, before_ms: i64) -> Result<Vec<String>> {
+        self.r(|c| {
+            let mut s = c.prepare("SELECT p.thread_id FROM mirror_paths p WHERE (SELECT min(m.date) FROM messages m WHERE m.thread_id=p.thread_id) < ?")?;
+            let rows = s.query_map([before_ms], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
     /// Mirror entries whose thread no longer exists.
     pub fn orphan_mirror_paths(&self) -> Result<Vec<(String, String)>> {
         self.r(|c| {

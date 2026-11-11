@@ -94,7 +94,7 @@ satchel-mail/
 ```
 ~/Library/Application Support/Satchel Mail/  (platform equivalent elsewhere)
   satchel.db             # SQLite: accounts, folders, messages, threads, events, ops, proposals
-  blobs/ab/cdef…eml      # raw RFC 822 messages, content-addressed (BLAKE3)
+  blobs/ab/cdef…gz       # raw RFC 822 messages, gzipped, content-addressed (BLAKE3 of the original)
   attachments/…          # extracted on demand, content-addressed
 ~/Satchel/                                   (user-visible AI mirror, §6.1)
 ```
@@ -163,7 +163,7 @@ A one-way export the AI can read with ordinary file tools — no special client 
   proposals/inbox/                  # AI may drop proposal JSON files here (alternative to MCP)
 ```
 
-- Configurable scope (which accounts, how far back, include attachments or not).
+- Configurable scope (which accounts, how far back, and attachments for recent mail, 0078).
 - Written incrementally by the core after each sync; never read back as truth (except `proposals/inbox/`, which is validated and ingested as Proposals).
 
 ### 6.2 MCP server
@@ -218,7 +218,7 @@ Initial sync strategy: headers + snippets for the last N months first (fast inbo
 - Keyboard-first (Gmail/Superhuman-style shortcuts), command palette.
 
 Views:
-1. **Mail** — accounts/mailboxes sidebar, unified inbox, thread list, reading pane, composer (rich text + plain), search with operators (`from: to: has:attachment before:`), smart folders (saved searches under Mail, 0065).
+1. **Mail** — accounts/mailboxes sidebar, unified inbox, thread list, reading pane, composer (rich text + plain), search with operators (`from: to: has:attachment has:pdf filename: before:`), smart folders (saved searches under Mail, 0065).
 2. **Calendar** — day/week/month/agenda, event editor, invite responses, free-time finder.
 3. **Review** — the proposal queue: grouped by agent and thread, inline diffs, edit-before-approve, bulk approve for low-risk ops (labels/archive), reject with note (fed back to the agent via `get_proposal_status`).
 4. **Settings** — accounts, AI agents & policies, mirror scope, privacy.

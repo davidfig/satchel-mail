@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS messages (
     partial          INTEGER NOT NULL DEFAULT 0,
     -- Bytes the stored copy takes on disk (0: unknown, use size).
     blob_size        INTEGER NOT NULL DEFAULT 0,
+    -- Its attachments are written to the AI folder, the only copy (0078).
+    ai_attachments   INTEGER NOT NULL DEFAULT 0,
     -- authserv-id of the topmost Authentication-Results header, for learning
     -- which server to trust: NULL not read yet, '' none or unusable.
     auth_serv        TEXT,
@@ -76,6 +78,7 @@ CREATE TABLE IF NOT EXISTS messages (
     UNIQUE (account_id, remote_id)
 );
 CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, date);
+CREATE INDEX IF NOT EXISTS messages_blob ON messages(blob_hash);
 CREATE INDEX IF NOT EXISTS messages_msgid ON messages(account_id, message_id_hdr);
 CREATE INDEX IF NOT EXISTS messages_date ON messages(account_id, date);
 CREATE INDEX IF NOT EXISTS messages_unindexed ON messages(indexed) WHERE indexed = 0;

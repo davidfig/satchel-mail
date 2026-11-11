@@ -29,10 +29,12 @@ export async function mirror(view: SettingsView, el: HTMLElement) {
     Object.assign(draft, change);
     saveMirrorSoon(view, { ...draft, root: store.state.settings?.mirror.root ?? draft.root });
   };
-  const box = (key: 'enabled' | 'include_eml' | 'include_attachments' | 'accept_proposals' | 'include_calendar' | 'include_contacts', label: string) =>
+  const box = (key: 'enabled' | 'include_eml' | 'include_attachments' | 'accept_proposals' | 'include_calendar' | 'include_contacts' | 'history_all', label: string) =>
     h('label.row.inline', h('input', { type: 'checkbox', checked: draft[key], on: { change: (e: Event) => set({ [key]: (e.currentTarget as HTMLInputElement).checked }) } }), label);
   const since = h('select', { on: { change: (e: Event) => { const v = (e.currentTarget as HTMLSelectElement).value; set({ since_days: v ? Number(v) : null }); } } },
     [['30', 'Last 30 days'], ['90', 'Last 90 days'], ['365', 'Last year'], ['', 'Everything']].map(([v, l]) => h('option', { value: v, selected: String(draft.since_days ?? '') === v }, l)));
+  const attachmentDays = h('select', { on: { change: (e: Event) => { const v = (e.currentTarget as HTMLSelectElement).value; set({ attachment_days: v ? Number(v) : null }); } } },
+    [['30', 'Last 30 days'], ['90', 'Last 90 days'], ['365', 'Last year'], ['', 'As far back as the mail']].map(([v, l]) => h('option', { value: v, selected: String(draft.attachment_days ?? '') === v }, l)));
   const accounts = (e: Event) => {
     const boxes = [...(e.currentTarget as HTMLElement).closest('fieldset')!.querySelectorAll('input')];
     const ids = boxes.filter((b) => b.checked).map((b) => b.value);
@@ -68,9 +70,11 @@ export async function mirror(view: SettingsView, el: HTMLElement) {
         h('button', { type: 'button', title: 'Move the AI folder here (Enter)', on: { click: (e: Event) => void move(e) } }, 'Move')),
         'Leave empty for ~/Satchel. Moving takes the folder, with any proposals waiting in it, to the new place.'),
       field('Include mail from', since),
+      box('history_all', 'List every message ever, with its sender, subject and attachment names (history/), beyond the dates above'),
       h('fieldset', h('legend', 'Accounts'), store.state.accounts.map((a) => h('label.row.inline', h('input', { type: 'checkbox', value: a.id, checked: !draft.account_ids || draft.account_ids.includes(a.id), on: { change: accounts } }), a.email))),
       box('include_eml', 'Include raw .eml files'),
       box('include_attachments', 'Include attachments (up to 25 MB each)'),
+      field('Attachments from', attachmentDays, 'Downloaded in the background for the AI folder only, and removed from it once they\'re older than this.'),
       box('include_calendar', 'Include the calendar'),
       box('include_contacts', 'Include contacts (AI tools can propose edits to them)'),
       box('accept_proposals', 'Let AI tools propose changes by writing files to proposals/inbox')));

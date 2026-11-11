@@ -49,6 +49,26 @@ impl Store {
                 "lower(m.subject) LIKE ?".into()
             }
             MsgTerm::HasAttachment => "m.has_attachments=1".into(),
+            MsgTerm::AttachmentName(v) | MsgTerm::AttachmentType(v) if v.is_empty() => "1".into(),
+            MsgTerm::AttachmentName(v) | MsgTerm::AttachmentType(v) => {
+                let ext = matches!(term, MsgTerm::AttachmentType(_));
+                let esc = |s: &str| s.to_lowercase().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+                let mut ors = vec![];
+                for x in v {
+                    ors.push(r"lower(json_extract(j.value,'$.filename')) LIKE ? ESCAPE '\'");
+                    p.push(V::Text(if ext { format!("%.{}", esc(x)) } else { format!("%{}%", esc(x)) }));
+                }
+                // Not images a message's HTML shows in place (logos in
+                // signatures), nor Gmail's AMP bodies: the same rule as
+                // `listed_attachment` in the AI folder's history.
+                format!(
+                    "EXISTS (SELECT 1 FROM json_each(m.attachments_json) j WHERE ({}) \
+                     AND lower(json_extract(j.value,'$.mime_type'))<>'text/x-amp-html' \
+                     AND NOT (json_extract(j.value,'$.inline') AND json_extract(j.value,'$.content_id') IS NOT NULL \
+                              AND lower(json_extract(j.value,'$.mime_type')) LIKE 'image/%'))",
+                    ors.join(" OR ")
+                )
+            }
             MsgTerm::Unread => "m.seen=0".into(),
             MsgTerm::Flagged => "m.flagged=1".into(),
             MsgTerm::Favorite => "EXISTS (SELECT 1 FROM favorite_senders fs WHERE fs.email=lower(m.from_email))".into(),

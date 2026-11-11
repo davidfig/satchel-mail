@@ -132,6 +132,11 @@ pub struct MirrorSettings {
     pub since_days: Option<u32>,
     pub include_eml: bool,
     pub include_attachments: bool,
+    /// With `include_attachments`, how many days back attachments are
+    /// written (inside `since_days`); None for as far as the text goes.
+    /// They're downloaded for the folder alone and kept nowhere else (0078).
+    #[serde(default = "attachment_days")]
+    pub attachment_days: Option<u32>,
     /// Turn files in `proposals/inbox/` into proposals without an agent token.
     #[serde(default = "yes")]
     pub accept_proposals: bool,
@@ -142,6 +147,14 @@ pub struct MirrorSettings {
     /// Write `contacts/` (person files) and read edits to them back.
     #[serde(default = "yes")]
     pub include_contacts: bool,
+    /// Write `mail/<account>/history/`: every message's metadata, for all
+    /// mail (true) or only the date limit's (0076).
+    #[serde(default = "yes")]
+    pub history_all: bool,
+}
+
+fn attachment_days() -> Option<u32> {
+    Some(90)
 }
 
 impl Default for MirrorSettings {
@@ -153,9 +166,11 @@ impl Default for MirrorSettings {
             since_days: Some(365),
             include_eml: false,
             include_attachments: false,
+            attachment_days: attachment_days(),
             accept_proposals: true,
             include_calendar: true,
             include_contacts: true,
+            history_all: true,
         }
     }
 }

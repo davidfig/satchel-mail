@@ -24,6 +24,7 @@ Current third-party dependencies and why:
 | serde, serde_json, chrono, chrono-tz, uuid, base64, anyhow, tracing | basic data, time zones, ids/randomness, encoding, errors, logs |
 | rusqlite (bundled SQLite) | the store and full-text search (FTS5) |
 | blake3 | fast content addressing of message blobs |
+| flate2 (miniz_oxide back end) | gzip for stored messages (0074). Already in the tree through mail-auth and png, at the same version, so it adds no new code |
 | directories | platform data-directory conventions |
 | keyring | OS keychain |
 | mail-parser, mail-builder | RFC 5322 / MIME |

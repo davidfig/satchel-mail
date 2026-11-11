@@ -64,20 +64,21 @@ impl SyncCtx {
         Ok(self.store.mailbox_by_remote(&self.account.id, remote_id)?.map(|m| m.id))
     }
 
-    /// Whether stored copies keep attachments: the AI folder copies
-    /// attachments or .eml files.
+    /// Whether stored copies keep attachments: the AI folder copies .eml
+    /// files. Its attachments are downloaded for the folder alone, only for
+    /// recent mail, and don't keep stored copies whole (0078).
     pub fn keeps_attachments(&self) -> bool {
         let m = &self.settings.mirror;
-        m.enabled && (m.include_attachments || m.include_eml)
+        m.enabled && m.include_eml
     }
 
     /// Store a message's raw bytes, leaving out attachment contents unless
-    /// `full` or [`Self::keeps_attachments`]. Returns (hash, bytes stored,
+    /// `full` or [`Self::keeps_attachments`]. Returns (hash, bytes on disk,
     /// whether attachments were left out).
     pub fn put_blob(&self, raw: &[u8], full: bool) -> Result<(String, u64, bool)> {
         let slim = if full || self.keeps_attachments() { None } else { satchel_mime::strip_attachments(raw) };
-        let bytes = slim.as_deref().unwrap_or(raw);
-        Ok((self.blobs.put(bytes)?, bytes.len() as u64, slim.is_some()))
+        let stored = self.blobs.put(slim.as_deref().unwrap_or(raw))?;
+        Ok((stored.hash, stored.size, slim.is_some()))
     }
 
     /// Store a downloaded message's copy. Returns (hash, bytes stored,
@@ -92,7 +93,8 @@ impl SyncCtx {
             Download::Slim(s) => {
                 let mut parsed = satchel_mime::parse(&s.raw).unwrap_or_default();
                 parsed.attachments = s.attachments.clone();
-                (self.blobs.put(&s.raw)?, s.raw.len() as u64, true, parsed)
+                let stored = self.blobs.put(&s.raw)?;
+                (stored.hash, stored.size, true, parsed)
             }
         })
     }

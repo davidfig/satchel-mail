@@ -17,12 +17,16 @@ editing their files (see Contacts).
     mail/<account>/INDEX.md                    newest 200 threads first, with links
     mail/<account>/index.jsonl                 the same threads, one JSON object per line
     mail/<account>/<mailbox>.md                threads in that mailbox (empty ones are left out)
+    mail/<account>/history/<yyyy-mm>.jsonl     every message that month, one JSON object
+                                               per line: sender, recipients, subject,
+                                               mailboxes, flags, attachments, snippet
     mail/<account>/threads/<yyyy-mm>/<slug>-<id>/
         thread.md                              the conversation as clean text; each
                                                message's text is in a fenced block
         meta.json                              ids, participants, mailboxes, flags
         <n>.eml                                raw messages (if enabled)
-        attachments/                           attachments (if enabled)
+        attachments/<n>-<name>                 message n's attachments, for recent mail
+                                               (if enabled; see below)
     smart-folders.md                           the user's saved searches, each with
                                                its query and newest threads
     calendar/AGENDA.md                         the next 60 days, all calendars
@@ -45,16 +49,42 @@ a minute.
 (the first time, or after the folder's settings change), and each account's
 `last_sync` time. Check it before concluding something isn't there.
 
+When attachments are shared, they're there only for messages from the last
+`attachment_days` (in `sync.json`), up to 25 MB each, and they arrive in the
+background after their thread: `pending_attachments` says how many messages
+are still waiting. Older attachments are removed as they age out; their
+names are still in `thread.md` and `history/`. Ask the user for one you need.
+
 In `thread.md`, each message shows only what it added: quoted earlier
 messages are removed. A message marked `body: not downloaded yet` shows
-only a short preview.
+only a short preview. Text is cleaned to save you reading: tracking is
+removed from links, and a link that is still long or goes through a
+click tracker is cut to its host (`https://links.shop.example/…`). Ask
+the user if you need the exact link.
+
+## History
+
+`history/` lists every message, back to the oldest, even where there's no
+`thread.md` (those cover only the dates in `sync.json`'s `since_days`). Use it
+to count, filter and find across all mail in one pass:
+
+    cat mail/*/history/*.jsonl | jq -r 'select(.from_me | not) | .from.email' | sort | uniq -c | sort -rn | head
+    cat mail/*/history/*.jsonl | jq -c 'select(any(.attachments[]; .name | test("\\.pptx?$"; "i"))) | {date, subject, from: .from.email}'
+
+Each line has `date`, `message_id`, `thread_id`, `from` (`name`, `email`),
+`from_me`, `to`, `cc`, `subject`, `mailboxes`, `unread`, `flagged`, `answered`,
+`draft`, `attachments` (`name`, `type`, `size`) and a one-line `snippet`. A
+message's thread folder, if it has one, ends in the last 8 characters of its
+`thread_id`: `ls -d mail/*/threads/*/*-<last 8>`. Proposals can only act on
+mail inside the dates `thread.md` covers.
 
 ## Searching
 
-To find things, search the files (`grep -ril "invoice" mail/`) or read
-`index.jsonl`. Tools that speak MCP can run `satchel mcp` instead and use its
+To find things, search the files (`grep -ril "invoice" mail/`), read
+`index.jsonl`, or filter `history/`. Tools that speak MCP can run `satchel mcp` instead and use its
 `search_threads` and `search_contacts` tools, which take operators such as
-`from:`, `subject:`, `is:unread` and `after:2026-01-01`.
+`from:`, `subject:`, `is:unread`, `has:pdf`, `filename:budget` and
+`after:2026-01-01`.
 
 ## Proposing changes
 
