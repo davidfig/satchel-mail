@@ -3,6 +3,7 @@
 
 mod account_loop;
 mod bodies;
+mod compress;
 mod workers;
 
 use std::collections::HashMap;
@@ -85,6 +86,10 @@ pub struct Engine {
     pub(crate) contacts_dirty: std::sync::atomic::AtomicBool,
     /// When the AI folder's `smart-folders.md` is next due (ms); 0 is now.
     pub(crate) smart_folders_due: std::sync::atomic::AtomicI64,
+    /// When the AI folder's thread folders are next checked for ones that
+    /// went missing (ms); 0 is now, and nothing is reported complete until
+    /// a check has run.
+    pub(crate) mirror_check_due: std::sync::atomic::AtomicI64,
     /// Recent place lookups by query, so retyping doesn't ask again.
     pub(crate) place_cache: Mutex<HashMap<String, (std::time::Instant, Vec<PlaceSuggestion>)>>,
     pub mode: Mode,
@@ -168,6 +173,7 @@ impl Engine {
             contact_files: Mutex::new(HashMap::new()),
             contacts_dirty: std::sync::atomic::AtomicBool::new(true),
             smart_folders_due: std::sync::atomic::AtomicI64::new(0),
+            mirror_check_due: std::sync::atomic::AtomicI64::new(0),
             place_cache: Mutex::new(HashMap::new()),
             mode: opts.mode,
             data_dir: opts.data_dir,
@@ -224,6 +230,7 @@ impl Engine {
         w.push(tokio::spawn(Self::blob_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::alerts_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::snippet_repair_worker(Arc::downgrade(self))));
+        w.push(tokio::spawn(Self::compress_worker(Arc::downgrade(self))));
     }
 
     pub fn shutdown(&self) {

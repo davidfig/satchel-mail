@@ -1,6 +1,6 @@
 # 0036. Download all mail without attachments, within a storage limit
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by 0074 (sizes count compressed bytes)
 - **Date:** 2026-10-26
 
 ## Context

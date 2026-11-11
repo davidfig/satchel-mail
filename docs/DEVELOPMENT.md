@@ -66,7 +66,7 @@ The desktop app and CLI store credentials in the OS keychain
 ```
 satchel.db      SQLite (WAL): accounts, mailboxes, messages, threads, events, ops, proposals, audit,
                 and the FTS5 full-text index
-blobs/          raw RFC 822 messages, content-addressed (BLAKE3)
+blobs/          raw RFC 822 messages, gzipped, content-addressed (BLAKE3)
 engine.lock     held by the process that owns sync
 ```
 

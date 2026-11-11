@@ -321,6 +321,15 @@ impl Store {
         })
     }
 
+    /// Every thread the AI folder says it has written, with its folder.
+    pub fn mirror_paths(&self) -> Result<Vec<(String, String)>> {
+        self.r(|c| {
+            let mut s = c.prepare("SELECT thread_id, path FROM mirror_paths")?;
+            let rows = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
     /// Mirror entries whose thread no longer exists.
     pub fn orphan_mirror_paths(&self) -> Result<Vec<(String, String)>> {
         self.r(|c| {

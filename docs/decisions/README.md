@@ -78,3 +78,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0071 | [The unread badge on Windows and Linux](0071-taskbar-and-launcher-badges.md) | Accepted |
 | 0072 | [Send-as addresses, typed in per account](0072-send-as-addresses.md) | Accepted |
 | 0073 | [A known sender's link mismatch asks on click, not with a banner](0073-known-senders-link-mismatches-ask-on-click.md) | Accepted |
+| 0074 | [One stored copy of each message, compressed; everything else is derived](0074-one-compressed-copy-of-each-message.md) | Accepted |

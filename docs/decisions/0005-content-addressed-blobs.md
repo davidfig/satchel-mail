@@ -1,6 +1,6 @@
 # 0005. Content-addressed raw message storage
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by 0036 and 0074 (copies are gzip-compressed, `.gz`)
 - **Date:** 2026-10-23
 
 ## Context

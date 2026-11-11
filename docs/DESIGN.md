@@ -94,7 +94,7 @@ satchel-mail/
 ```
 ~/Library/Application Support/Satchel Mail/  (platform equivalent elsewhere)
   satchel.db             # SQLite: accounts, folders, messages, threads, events, ops, proposals
-  blobs/ab/cdef…eml      # raw RFC 822 messages, content-addressed (BLAKE3)
+  blobs/ab/cdef…gz       # raw RFC 822 messages, gzipped, content-addressed (BLAKE3 of the original)
   attachments/…          # extracted on demand, content-addressed
 ~/Satchel/                                   (user-visible AI mirror, §6.1)
 ```

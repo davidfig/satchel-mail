@@ -199,6 +199,21 @@ impl Mirror<'_> {
         Ok(())
     }
 
+    /// Queue every thread whose folder was written but has gone (deleted by
+    /// hand, by another program, or by a rewrite cut short) to be written
+    /// again. The indexes only notice this for the threads they list.
+    /// Returns how many were missing.
+    pub fn check_threads(&self) -> Result<usize> {
+        let root = self.root();
+        let missing: Vec<String> =
+            self.store.mirror_paths()?.into_iter().filter(|(_, p)| !root.join(p).join("thread.md").is_file()).map(|(t, _)| t).collect();
+        if !missing.is_empty() {
+            tracing::info!("AI folder: {} thread folders missing, writing them again", missing.len());
+            self.store.mark_threads_unmirrored(&missing)?;
+        }
+        Ok(missing.len())
+    }
+
     pub fn cleanup_orphans(&self) -> Result<()> {
         for (t, p) in self.store.orphan_mirror_paths()? {
             let _ = remove_dir_all(&self.root(), &self.root().join(&p));

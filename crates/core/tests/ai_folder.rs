@@ -223,3 +223,28 @@ async fn indexes_link_only_threads_on_disk_and_say_how_fresh_they_are() {
     assert!(!stale.exists());
     assert!(base.join("INDEX.md").is_file());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn thread_folders_that_go_missing_are_found_and_written_again() {
+    let (engine, _fake, account, dir) = setup().await;
+    engine.mirror_pass(true).unwrap();
+    let root = dir.path().join("mirror");
+    let id = engine.store().message_id_by_remote(&account, "r1").unwrap().unwrap();
+    let thread = engine.store().thread_of(&id).unwrap().unwrap();
+    let folder = root.join(engine.store().mirror_path(&thread).unwrap().unwrap());
+    assert!(folder.join("thread.md").is_file());
+    let status = || std::fs::read_to_string(root.join("sync.json")).unwrap();
+    assert!(status().contains("\"complete\": true"), "{}", status());
+
+    // Gone behind Satchel's back. Without the indexes running, nothing
+    // notices until the next check.
+    std::fs::remove_dir_all(&folder).unwrap();
+    engine.mirror_pass(false).unwrap();
+    assert!(!folder.exists());
+
+    // The check covers every thread, not just the ones the indexes list.
+    engine.recheck_mirror();
+    assert_eq!(engine.mirror_pass(false).unwrap(), 1);
+    assert!(folder.join("thread.md").is_file());
+    assert!(status().contains("\"complete\": true"), "{}", status());
+}

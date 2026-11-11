@@ -94,6 +94,22 @@ impl Store {
         })
     }
 
+    /// Record new on-disk sizes for stored copies, as (hash, bytes), for
+    /// every message that uses each one.
+    pub fn set_blob_sizes(&self, sizes: &[(String, u64)]) -> Result<()> {
+        self.w(|c| {
+            let tx = c.transaction()?;
+            {
+                let mut s = tx.prepare("UPDATE messages SET blob_size=? WHERE blob_hash=?")?;
+                for (hash, size) in sizes {
+                    s.execute(params![*size as i64, hash])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     /// The account's oldest message with a stored copy, dated before
     /// `before` if given, as (id, blob hash, bytes).
     pub fn oldest_with_body(&self, account_id: &str, before: Option<DateTime<Utc>>) -> Result<Option<(String, String, u64)>> {
