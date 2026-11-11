@@ -22,7 +22,7 @@ fn a_database_from_before_versioning_counts_as_version_1() {
     let c = Connection::open(&path).unwrap();
     c.execute_batch(include_str!("schema.sql")).unwrap();
     // Back to the version 1 shape, so the migrations since run on it.
-    c.execute_batch("ALTER TABLE messages DROP COLUMN partial; ALTER TABLE messages DROP COLUMN blob_size; ALTER TABLE proposals DROP COLUMN processed_file; ALTER TABLE messages DROP COLUMN auth_serv; ALTER TABLE messages DROP COLUMN dkim_pass; ALTER TABLE events DROP COLUMN location; DROP TABLE smart_folders; ALTER TABLE accounts DROP COLUMN send_as_json;").unwrap();
+    c.execute_batch("ALTER TABLE messages DROP COLUMN partial; ALTER TABLE messages DROP COLUMN blob_size; ALTER TABLE proposals DROP COLUMN processed_file; ALTER TABLE messages DROP COLUMN auth_serv; ALTER TABLE messages DROP COLUMN dkim_pass; ALTER TABLE events DROP COLUMN location; DROP TABLE smart_folders; ALTER TABLE accounts DROP COLUMN send_as_json; ALTER TABLE messages DROP COLUMN ai_attachments; DROP INDEX messages_blob;").unwrap();
     // An event from then gets its location read out of its iCalendar.
     c.pragma_update(None, "foreign_keys", false).unwrap();
     let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u1\r\nDTSTART:20261105T160000Z\r\nSUMMARY:Lunch\r\nLOCATION:Rose Cafe\\, Main St\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
@@ -40,6 +40,9 @@ fn a_database_from_before_versioning_counts_as_version_1() {
     assert_eq!(location, "Rose Cafe, Main St");
     c.query_row("SELECT id, name, query, badge, position FROM smart_folders", [], |_| Ok(())).optional().unwrap();
     c.query_row("SELECT send_as_json FROM accounts", [], |_| Ok(())).optional().unwrap();
+    c.query_row("SELECT ai_attachments FROM messages", [], |_| Ok(())).optional().unwrap();
+    let blob_index: i64 = c.query_row("SELECT count(*) FROM sqlite_master WHERE name='messages_blob'", [], |r| r.get(0)).unwrap();
+    assert_eq!(blob_index, 1);
 }
 
 #[test]

@@ -79,3 +79,8 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0072 | [Send-as addresses, typed in per account](0072-send-as-addresses.md) | Accepted |
 | 0073 | [A known sender's link mismatch asks on click, not with a banner](0073-known-senders-link-mismatches-ask-on-click.md) | Accepted |
 | 0074 | [One stored copy of each message, compressed; everything else is derived](0074-one-compressed-copy-of-each-message.md) | Accepted |
+| 0075 | [Message text for agents is cleaned of tracking and padding](0075-message-text-for-agents.md) | Accepted |
+| 0076 | [The AI folder lists every message's metadata, for all history](0076-ai-folder-history-index.md) | Accepted |
+| 0077 | [Search finds attachments by kind and name, and MCP says how many match](0077-search-by-attachment-kind-and-name.md) | Accepted |
+| 0078 | [The AI folder keeps to its date limits over time, and holds the only copy of recent attachments](0078-ai-folder-windows-attachments-and-aging.md) | Accepted |
+| 0079 | [An idle AI folder pass writes only what changed](0079-ai-folder-writes-only-what-changed.md) | Accepted |

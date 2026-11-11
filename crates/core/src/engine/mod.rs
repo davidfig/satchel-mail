@@ -2,6 +2,7 @@
 //! and executes [`Command`]s for a [`Caller`].
 
 mod account_loop;
+mod ai_attachments;
 mod bodies;
 mod compress;
 mod workers;
@@ -82,6 +83,12 @@ pub struct Engine {
     pub(crate) correspondents: Mutex<Option<(std::time::Instant, Arc<crate::mail::spam::Correspondents>)>>,
     /// The AI folder's person files as last written (see `Mirror`).
     pub(crate) contact_files: Mutex<HashMap<String, String>>,
+    /// AI folder history months as last written (see `Mirror::history_seen`).
+    pub(crate) history_seen: Mutex<HashMap<String, u64>>,
+    /// What each part of the AI folder was last written from (see
+    /// `Store::stamps`), so an idle pass skips the parts that would come out
+    /// the same.
+    pub(crate) mirror_stamps: Mutex<HashMap<&'static str, u64>>,
     /// Contacts changed since the AI folder last wrote them.
     pub(crate) contacts_dirty: std::sync::atomic::AtomicBool,
     /// When the AI folder's `smart-folders.md` is next due (ms); 0 is now.
@@ -144,6 +151,12 @@ impl Engine {
             store.reset_indexed()?;
             store.set_setting("search_index", &"fts5-v1")?;
         }
+        // AI folder text is cleaned for agents (0075): rewrite every thread
+        // once, in the background, so older files match.
+        if opts.mode == Mode::Full && store.get_setting::<String>("ai_folder_text")?.as_deref() != Some("agent-v1") {
+            store.reset_mirrored()?;
+            store.set_setting("ai_folder_text", &"agent-v1")?;
+        }
         Self::with_parts(store, blobs, opts)
     }
 
@@ -171,6 +184,8 @@ impl Engine {
             contacts_due: Mutex::new(Default::default()),
             correspondents: Mutex::new(None),
             contact_files: Mutex::new(HashMap::new()),
+            history_seen: Mutex::new(HashMap::new()),
+            mirror_stamps: Mutex::new(HashMap::new()),
             contacts_dirty: std::sync::atomic::AtomicBool::new(true),
             smart_folders_due: std::sync::atomic::AtomicI64::new(0),
             mirror_check_due: std::sync::atomic::AtomicI64::new(0),
@@ -231,6 +246,7 @@ impl Engine {
         w.push(tokio::spawn(Self::alerts_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::snippet_repair_worker(Arc::downgrade(self))));
         w.push(tokio::spawn(Self::compress_worker(Arc::downgrade(self))));
+        w.push(tokio::spawn(Self::ai_attachment_worker(Arc::downgrade(self))));
     }
 
     pub fn shutdown(&self) {

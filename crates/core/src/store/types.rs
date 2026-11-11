@@ -179,6 +179,10 @@ pub enum MsgTerm {
     With(Vec<String>),
     Subject(String),
     HasAttachment,
+    /// An attachment whose name contains any of these (0077).
+    AttachmentName(Vec<String>),
+    /// An attachment whose name ends in any of these extensions (`pdf`).
+    AttachmentType(Vec<String>),
     Unread,
     Flagged,
     /// From a favorite sender (0053).

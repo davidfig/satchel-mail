@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 satchel-api.workspace = true
 satchel-core.workspace = true
+satchel-mime.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 rmcp = { version = "3.7.0", features = ["server", "transport-io", "macros"] }

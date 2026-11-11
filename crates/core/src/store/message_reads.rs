@@ -70,7 +70,7 @@ impl Store {
         Ok(Some(m))
     }
 
-    fn summary_row(r: &Row) -> rusqlite::Result<MessageSummary> {
+    pub(super) fn summary_row(r: &Row) -> rusqlite::Result<MessageSummary> {
         let from_email: Option<String> = r.get("from_email")?;
         Ok(MessageSummary {
             id: r.get("id")?,

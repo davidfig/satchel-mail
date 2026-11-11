@@ -64,11 +64,12 @@ impl SyncCtx {
         Ok(self.store.mailbox_by_remote(&self.account.id, remote_id)?.map(|m| m.id))
     }
 
-    /// Whether stored copies keep attachments: the AI folder copies
-    /// attachments or .eml files.
+    /// Whether stored copies keep attachments: the AI folder copies .eml
+    /// files. Its attachments are downloaded for the folder alone, only for
+    /// recent mail, and don't keep stored copies whole (0078).
     pub fn keeps_attachments(&self) -> bool {
         let m = &self.settings.mirror;
-        m.enabled && (m.include_attachments || m.include_eml)
+        m.enabled && m.include_eml
     }
 
     /// Store a message's raw bytes, leaving out attachment contents unless

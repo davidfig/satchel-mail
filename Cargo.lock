@@ -4675,6 +4675,7 @@ dependencies = [
  "rmcp",
  "satchel-api",
  "satchel-core",
+ "satchel-mime",
  "serde",
  "serde_json",
  "tokio",

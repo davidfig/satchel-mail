@@ -1,6 +1,6 @@
 # 0074. One stored copy of each message, compressed; everything else is derived
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by 0078 (the AI folder holds recent attachments)
 - **Date:** 2026-11-10
 - **Amends:** 0005 (blobs are compressed), 0036 (sizes count compressed bytes)
 
@@ -51,8 +51,11 @@ can't be the source of truth.
 
 ## Consequences
 
-- About 3.7 GB becomes about 0.9 GB on the data directory above. Converting
-  it took about 50 seconds of CPU in the estimate, once.
+- About 3.7 GB becomes about 0.9 GB on the data directory above. Measured on
+  a copy of it before release: 87,940 copies, 3.9 GB → 1.1 GB, in 79 s, with
+  every copy read back and parsed. That needs the `messages(blob_hash)` index
+  (schema 11) and a conversion that resumes where its last batch stopped;
+  without them it took 33 minutes.
 - Reading a stored message adds about 0.04 ms of decompression (around 1 GB/s
   for an average 43 KB message). Storing one adds about 0.6 ms. Both are
   small next to parsing, rendering and the network.

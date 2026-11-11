@@ -37,12 +37,17 @@ const LEGACY: &str = "eml";
 
 pub struct FsBlobStore {
     root: PathBuf,
+    /// The first subdirectory that may still hold uncompressed copies, so
+    /// each batch of [`BlobStore::compress_legacy`] picks up where the last
+    /// stopped instead of listing every file again. Nothing writes new
+    /// uncompressed copies, so it only moves forward.
+    legacy_from: std::sync::Mutex<Option<String>>,
 }
 
 impl FsBlobStore {
     pub fn new(root: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&root)?;
-        Ok(Self { root })
+        Ok(Self { root, legacy_from: Default::default() })
     }
 
     fn path(&self, hash: &str, ext: &str) -> PathBuf {
@@ -152,24 +157,41 @@ impl BlobStore for FsBlobStore {
     }
 
     fn compress_legacy(&self, limit: usize) -> Result<Vec<Stored>> {
+        let mut from = self.legacy_from.lock().unwrap();
+        let mut dirs: Vec<String> = vec![];
+        for d in std::fs::read_dir(&self.root)? {
+            let d = d?;
+            if d.file_type()?.is_dir() {
+                dirs.push(d.file_name().to_string_lossy().into_owned());
+            }
+        }
+        dirs.sort();
+        dirs.retain(|d| from.as_ref().is_none_or(|f| d >= f));
+        let suffix = format!(".{LEGACY}");
         let mut out = vec![];
-        for (hash, _) in self.files(LEGACY)? {
-            if out.len() >= limit {
-                break;
+        for dir in dirs {
+            *from = Some(dir.clone());
+            for f in std::fs::read_dir(self.root.join(&dir))? {
+                let name = f?.file_name().to_string_lossy().into_owned();
+                let Some(rest) = name.strip_suffix(&suffix) else { continue };
+                if out.len() >= limit {
+                    return Ok(out);
+                }
+                let hash = format!("{dir}{rest}");
+                let data = match std::fs::read(self.path(&hash, LEGACY)) {
+                    Ok(d) => d,
+                    Err(e) if not_found(&e) => continue,
+                    Err(e) => return Err(e.into()),
+                };
+                // A copy whose bytes don't match its name is left as it is
+                // rather than stored under a hash it doesn't have.
+                if blake3::hash(&data).to_hex().as_str() != hash {
+                    tracing::warn!("blobs: {hash} doesn't match its contents; left uncompressed");
+                    continue;
+                }
+                let size = self.write_gz(&hash, &data)?;
+                out.push(Stored { hash, size });
             }
-            let data = match std::fs::read(self.path(&hash, LEGACY)) {
-                Ok(d) => d,
-                Err(e) if not_found(&e) => continue,
-                Err(e) => return Err(e.into()),
-            };
-            // A copy whose bytes don't match its name is left as it is
-            // rather than stored under a hash it doesn't have.
-            if blake3::hash(&data).to_hex().as_str() != hash {
-                tracing::warn!("blobs: {hash} doesn't match its contents; left uncompressed");
-                continue;
-            }
-            let size = self.write_gz(&hash, &data)?;
-            out.push(Stored { hash, size });
         }
         Ok(out)
     }

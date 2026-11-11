@@ -4,6 +4,7 @@
 
 mod accounts;
 mod agents;
+mod ai_attachments;
 mod alerts;
 mod audit;
 mod bodies;
@@ -11,6 +12,7 @@ mod calendars;
 mod contacts;
 mod drafts;
 mod favorites;
+mod history;
 mod mailboxes;
 mod message_reads;
 mod messages;
@@ -18,6 +20,7 @@ mod ops;
 mod people;
 mod sender_rules;
 mod smart_folders;
+mod stamps;
 #[cfg(test)]
 mod tests;
 mod thread_search;
@@ -26,6 +29,8 @@ mod types;
 
 pub use alerts::{AlertRow, AlertState};
 pub use bodies::StoredBlob;
+pub use history::HistoryRow;
+pub use stamps::Stamps;
 pub use types::*;
 
 use std::cell::Cell;
@@ -245,7 +250,7 @@ fn open_conn(path: &Path) -> Result<Connection> {
 /// The schema version `schema.sql` creates. To change the schema, edit
 /// `schema.sql` to the new shape, bump this, and append to [`MIGRATIONS`] the
 /// SQL that takes a database from the previous version to this one.
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 
 /// `MIGRATIONS[i]` upgrades a version `i + 1` database to version `i + 2`.
 const MIGRATIONS: &[&str] = &[
@@ -284,6 +289,11 @@ const MIGRATIONS: &[&str] = &[
     );",
     // 10: send-as addresses (0072).
     "ALTER TABLE accounts ADD COLUMN send_as_json TEXT NOT NULL DEFAULT '[]';",
+    // 11: messages whose attachments are in the AI folder (0078), and finding
+    // messages by stored copy, which compressing every copy does once per
+    // message (0074).
+    "ALTER TABLE messages ADD COLUMN ai_attachments INTEGER NOT NULL DEFAULT 0;
+     CREATE INDEX IF NOT EXISTS messages_blob ON messages(blob_hash);",
 ];
 
 /// Create or upgrade the schema, tracked in `PRAGMA user_version`.

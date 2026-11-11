@@ -34,6 +34,7 @@ README.md                                  how to read and propose (for the agen
 sync.json                                  last sync per account; complete: false mid-rewrite
 mail/<account>/INDEX.md, <mailbox>.md      newest threads first (empty mailboxes left out)
 mail/<account>/index.jsonl                 the same rows as INDEX.md, for tools
+mail/<account>/history/<yyyy-mm>.jsonl     every message's metadata, all history (0076)
 mail/<account>/threads/<yyyy-mm>/<slug>-<id>/thread.md, meta.json
 smart-folders.md                           the user's smart folders: each query and its newest threads
 calendar/AGENDA.md, calendar/<account>/<calendar>/<uid>.ics
@@ -104,11 +105,11 @@ The desktop app shows the absolute path of its bundled `satchel` binary.
 read-only and writes proposals the app picks up immediately.
 
 Read: `whoami`, `list_accounts`, `list_mailboxes`, `list_smart_folders`,
-`search_threads` (free text + `from: to: with: subject: has:attachment
-is:unread is:read is:flagged is:unflagged is:favorite before: after: newer_than:
+`search_threads` (free text, which also matches attachment names, + `from: to:
+with: subject: has:attachment has:<kind or extension> filename: is:unread is:read is:flagged is:unflagged is:favorite before: after: newer_than:
 older_than: in: in:anywhere account:`, `-` before a term to exclude it, and
 `smart_folder_id` to browse a smart folder; agents limited to some accounts
-get no smart folders),
+get no smart folders; returns the `total` matching and a page of threads),
 `get_thread`, `get_message`, `get_attachment`, `list_calendars`, `list_events`,
 `get_event`, `find_free_time`, `search_contacts`, `get_contact`.
 

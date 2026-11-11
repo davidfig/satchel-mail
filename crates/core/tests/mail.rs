@@ -316,3 +316,53 @@ async fn archiving_takes_every_copy_out_of_the_inbox_and_flags_reach_them_all() 
     assert!(!in_role(&engine, &account, "c1", MailboxRole::Inbox), "the Inbox copy is archived");
     assert!(in_role(&engine, &account, "c1", MailboxRole::Archive));
 }
+
+/// A message with one part: `disposition` (with its filename) and `cid`.
+fn with_part(id: &str, subject: &str, mime: &str, disposition: &str, cid: Option<&str>) -> Vec<u8> {
+    let cid = cid.map(|c| format!("Content-ID: <{c}>\r\n")).unwrap_or_default();
+    format!(
+        "From: Bob <bob@x.test>\r\nTo: me@x.test\r\nSubject: {subject}\r\nMessage-ID: <{id}@x.test>\r\nDate: {}\r\n\
+         MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n\
+         --b\r\nContent-Type: {mime}\r\nContent-Disposition: {disposition}\r\n{cid}Content-Transfer-Encoding: base64\r\n\r\nJVBERi0xLjQK\r\n--b--\r\n",
+        chrono::Utc::now().to_rfc2822()
+    )
+    .into_bytes()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn attachments_are_found_by_kind_and_name() {
+    let (engine, fake, account, _dir) = setup().await;
+    let pptx = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    let mail = [
+        ("a1", with_part("a1", "Deck", pptx, "attachment; filename=\"Q3 Plan_final.PPTX\"", None)),
+        // Apple Mail sends documents inline; they're still attachments.
+        ("a2", with_part("a2", "Bill 42", "application/pdf", "inline; filename=\"invoice-42.pdf\"", Some("pdf1"))),
+        // A logo the signature shows in place isn't.
+        ("a3", with_part("a3", "Logo", "image/png", "inline; filename=\"logo.png\"", Some("logo1"))),
+    ];
+    for (id, raw) in &mail {
+        deliver(&fake, id, raw.clone(), "INBOX");
+    }
+    engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
+    wait_for(|| ["a1", "a2", "a3"].iter().all(|id| engine.store().message_id_by_remote(&account, id).ok().flatten().is_some())).await;
+    let user = Caller::User;
+    let found = |q: &'static str| {
+        let engine = engine.clone();
+        let user = user.clone();
+        async move {
+            let mut s = subjects(&engine, &user, q).await;
+            s.sort();
+            s
+        }
+    };
+    assert_eq!(found("has:presentation").await, ["Deck"]);
+    assert_eq!(found("has:pptx").await, ["Deck"]);
+    assert_eq!(found("has:pdf").await, ["Bill 42"]);
+    assert_eq!(found("has:pdf,pptx").await, ["Bill 42", "Deck"]);
+    assert!(found("has:image").await.is_empty(), "signature logos don't count");
+    assert_eq!(found("filename:plan_final").await, ["Deck"], "`_` is a character, not a wildcard");
+    assert!(found("filename:plan%final").await.is_empty());
+    assert_eq!(found("filename:invoice,plan").await, ["Bill 42", "Deck"]);
+    assert!(found("-has:pdf").await.contains(&"Deck".to_string()));
+    assert!(!found("-has:pdf").await.contains(&"Bill 42".to_string()));
+}

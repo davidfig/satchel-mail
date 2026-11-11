@@ -186,7 +186,7 @@ fn one_line(s: &str, max: usize) -> String {
 }
 
 /// Decodes %XX escapes; `plus_is_space` for form-style query values.
-fn percent_decode(s: &str, plus_is_space: bool) -> String {
+pub(crate) fn percent_decode(s: &str, plus_is_space: bool) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;

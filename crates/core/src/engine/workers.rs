@@ -16,6 +16,9 @@ const MAX_INDEXED_BODY: usize = 1024 * 1024;
 const SMART_FOLDERS_REFRESH_MS: i64 = 10 * 60 * 1000;
 /// How often every thread folder is checked for ones that went missing.
 const MIRROR_CHECK_MS: i64 = 24 * 60 * 60 * 1000;
+/// How often every part of the AI folder is written whatever its stamp says,
+/// in case its files were changed or deleted behind Satchel's back.
+const MIRROR_REFRESH_MS: i64 = 10 * 60 * 1000;
 
 impl Engine {
     pub(crate) async fn indexer(this: std::sync::Weak<Self>) {
@@ -252,6 +255,14 @@ impl Engine {
     /// Check every AI folder thread folder on the next pass, not just daily.
     pub fn recheck_mirror(&self) {
         self.mirror_check_due.store(1, std::sync::atomic::Ordering::Relaxed);
+        self.refresh_mirror();
+    }
+
+    /// Write every part of the AI folder on the next pass, not just the parts
+    /// whose mail, events or contacts changed (as every ten minutes): for
+    /// files changed or deleted behind Satchel's back.
+    pub fn refresh_mirror(&self) {
+        self.mirror_stamps.lock().unwrap().clear();
         self.mirror_wake.notify_one();
     }
 
@@ -262,16 +273,17 @@ impl Engine {
         if !settings.mirror.enabled {
             return Ok(0);
         }
-        let m = crate::ai_folder::Mirror { store: &self.store, blobs: self.blobs.as_ref(), settings: &settings.mirror, contact_files: &self.contact_files };
+        let m = crate::ai_folder::Mirror { store: &self.store, blobs: self.blobs.as_ref(), settings: &settings.mirror, contact_files: &self.contact_files, history_seen: &self.history_seen };
         m.ensure_layout()?;
         // At startup and then daily: find thread folders that went missing,
-        // so they're written again below. Until a check has run, the folder
-        // isn't reported complete.
+        // and threads the date limit has moved past, so they're written
+        // again (or removed) below. Until a check has run, the folder isn't
+        // reported complete.
         let now = crate::store::now_ms();
         let due = self.mirror_check_due.load(std::sync::atomic::Ordering::Relaxed);
         let mut checked = due > 0;
         if due <= now {
-            match m.check_threads() {
+            match m.check_threads().and_then(|_| m.sweep_aged()) {
                 Ok(_) => {
                     self.mirror_check_due.store(now + MIRROR_CHECK_MS, std::sync::atomic::Ordering::Relaxed);
                     checked = true;
@@ -310,10 +322,36 @@ impl Engine {
                 warn!("mirror: {what}: {e:#}");
             }
         };
+        // A part is written again only when what it's built from changed
+        // (or the date moved on, for date limits and the agenda), and every
+        // part every ten minutes; comparing every file each pass kept an idle
+        // machine busy. A stamp is recorded only when its part is written.
+        let stamps = self.store.stamps()?;
+        let settings_json = serde_json::to_string(&settings.mirror)?;
+        let (day, hour) = (now / (24 * 60 * 60 * 1000), now / (60 * 60 * 1000));
+        let refresh = self.mirror_stamps.lock().unwrap().get("refresh").is_none_or(|&due| due as i64 <= now);
+        let fp = |stamp: u64, when: i64| {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (stamp, when, &settings_json).hash(&mut h);
+            h.finish()
+        };
+        let changed = |part: &'static str, stamp: u64, when: i64| refresh || self.mirror_stamps.lock().unwrap().get(part) != Some(&fp(stamp, when));
+        let record = |part: &'static str, stamp: u64, when: i64| {
+            self.mirror_stamps.lock().unwrap().insert(part, fp(stamp, when));
+        };
         if indexes || n > 0 || !checked {
             log("removing old threads", m.cleanup_orphans());
-            log("indexes", m.write_indexes());
-            log("calendar", if settings.mirror.include_calendar { m.write_calendar() } else { m.remove_section("calendar") });
+            // Thread folders written this pass change what the indexes link to.
+            if n > 0 || changed("mail", stamps.mail, day) {
+                log("indexes", m.write_indexes());
+                log("history", m.write_history().map(|_| ()));
+                record("mail", stamps.mail, day);
+            }
+            if changed("calendar", stamps.calendar, hour) {
+                log("calendar", if settings.mirror.include_calendar { m.write_calendar() } else { m.remove_section("calendar") });
+                record("calendar", stamps.calendar, hour);
+            }
             // Indexes can queue threads whose folders went missing.
             let pending = self.store.unmirrored_thread_count()?;
             log("sync.json", m.write_status(checked && pending == 0, pending));
@@ -325,8 +363,14 @@ impl Engine {
                 log("smart folders", m.write_smart_folders());
             }
         }
-        if indexes || n > 0 || self.contacts_dirty.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        // Contacts show message counts, so mail changes them too.
+        let contacts_stamp = stamps.contacts ^ stamps.mail;
+        if self.contacts_dirty.swap(false, std::sync::atomic::Ordering::Relaxed) || (indexes && changed("contacts", contacts_stamp, day)) {
             log("contacts", if settings.mirror.include_contacts { m.write_contacts() } else { m.remove_section("contacts") });
+            record("contacts", contacts_stamp, day);
+        }
+        if refresh && indexes {
+            self.mirror_stamps.lock().unwrap().insert("refresh", (now + MIRROR_REFRESH_MS) as u64);
         }
         Ok(n)
     }

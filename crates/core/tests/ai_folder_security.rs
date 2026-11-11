@@ -176,6 +176,8 @@ async fn a_long_attachment_name_does_not_stop_the_export() {
     let long = format!("{}.pdf", "a".repeat(300));
     sync_in(&engine, &fake, &account, vec![("long", with_attachment("long", &long, "See attached.")), ("after", raw("after", "Carol <carol@x.test>", "Later news", None))]).await;
     engine.mirror_pass(true).unwrap();
+    // Attachments arrive after their thread, downloaded for the folder (0078).
+    engine.fetch_ai_attachments(&mut Default::default()).await;
     let threads = thread_files(&mirror(&dir).join("mail"));
     assert!(threads.iter().any(|(_, t)| t.contains("Later news")), "later threads are still exported");
     let long_thread = threads.iter().find(|(_, t)| t.contains("Files long")).expect("the long-named one too");

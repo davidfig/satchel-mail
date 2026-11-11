@@ -57,7 +57,10 @@ impl SatchelMcp {
                     before_id: s("before_thread_id"),
                     offset: None,
                 };
-                self.run(Command::ListThreads { query: q }).await
+                let total = self.run(Command::CountThreads { query: q.clone() }).await?;
+                let threads = self.run(Command::ListThreads { query: q }).await?;
+                // The total lets an agent tell "that's all of them" from "there's more".
+                Ok(json!({ "total": total["total"], "threads": threads }))
             }
             "get_thread" => {
                 let v = self.run(Command::GetThread { thread_id: req("thread_id")? }).await?;
