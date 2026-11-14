@@ -22,6 +22,8 @@ interface ToastOpts {
   quiet?: boolean;
   /** Stays up until `dismiss` or a newer toast in its slot: for something still under way (a check). */
   persist?: boolean;
+  /** Always as wide as it gets, so a message that changes (a percentage) doesn't resize it. */
+  fixed?: boolean;
 }
 
 interface Slot {
@@ -82,7 +84,7 @@ export function toast(message: string, opts: ToastOpts = {}): ToastHandle {
   const label = h('span', message);
   const actions = opts.action ? [opts.action].flat() : [];
   const el = h(
-    `div.toast.${kind}`,
+    `div.toast.${kind}${opts.fixed ? '.fixed' : ''}`,
     label,
     ...actions.map((a) =>
       h('button.link', {

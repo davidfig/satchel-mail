@@ -32,7 +32,7 @@ export function installUpdates() {
  *  dismissed is offered again, since the user asked. */
 export async function checkForUpdates() {
   if (checking) return;
-  const shown = toast('Checking for updates…', { persist: true });
+  const shown = toast('Checking for updates…', { persist: true, fixed: true });
   checking = shown;
   try {
     const { current, ready } = await transport.host<{ current: string; ready: string | null }>('check_for_updates');
