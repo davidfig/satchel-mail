@@ -316,7 +316,12 @@ impl Engine {
                 warn(&mut out, WarningKind::DeceptiveLink, format!("A link shows {} but goes to {}.", l.shown, l.actual));
             }
         }
-        if let Some(rt) = m.reply_to.first() {
+        // Mailing software routinely sends from its own domain with replies
+        // going to the company, so a different Reply-To only matters when
+        // the mail claims to be from someone you've written to (0081).
+        if known
+            && let Some(rt) = m.reply_to.first()
+        {
             let rt_email = rt.email.to_lowercase();
             let rt_domain = satchel_mime::email_domain(&rt_email);
             if !from_domain.is_empty() && satchel_mime::base_domain(&rt_domain) != satchel_mime::base_domain(&from_domain) && !self.is_known(&rt_email) {

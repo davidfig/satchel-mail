@@ -97,8 +97,12 @@ async fn warns_about_impersonation_and_deceptive_links() {
     };
     deliver(&fake, "s7", signature("s7", ""), "INBOX");
     deliver(&fake, "s8", signature("s8", "Authentication-Results: mx.google.com; spf=fail; dkim=none; dmarc=fail\r\n"), "INBOX");
+    // Replies sent elsewhere: routine for a mailing service, suspicious from Bob.
+    let reply_to = |id: &str, from: &str| String::from_utf8(raw(id, from, "Hello", None)).unwrap().replacen("\r\n\r\n", "\r\nReply-To: <help@other.test>\r\n\r\n", 1).into_bytes();
+    deliver(&fake, "s9", reply_to("s9", "Shop <news@mailer.test>"), "INBOX");
+    deliver(&fake, "s10", reply_to("s10", "Bob <bob@x.test>"), "INBOX");
     engine.handle(&Caller::User, Command::SyncNow { account_id: None }).await.unwrap();
-    wait_for(|| engine.store().message_id_by_remote(&account, "s8").ok().flatten().is_some()).await;
+    wait_for(|| engine.store().message_id_by_remote(&account, "s10").ok().flatten().is_some()).await;
 
     let get = |rid: &str| {
         let id = engine.store().message_id_by_remote(&account, rid).unwrap().unwrap();
@@ -131,6 +135,10 @@ async fn warns_about_impersonation_and_deceptive_links() {
     assert_eq!(link_warnings(&known), 0, "{:?}", known.warnings);
     assert_eq!(known.deceptive_links.len(), 1);
     assert_eq!(link_warnings(&get("s8").await), 1, "a known sender's mail that failed authentication");
+
+    let replies_elsewhere = |m: &MessageDetail| m.warnings.iter().any(|w| w.kind == WarningKind::ReplyTo);
+    assert!(!replies_elsewhere(&get("s9").await), "a stranger's mailing service");
+    assert!(replies_elsewhere(&get("s10").await), "someone you've written to");
 
     // Bob himself gets no warnings.
     assert!(get("r1").await.warnings.is_empty());

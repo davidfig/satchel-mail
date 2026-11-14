@@ -5,15 +5,20 @@ import { h, icon, patch } from '../../lib/dom';
 import { timeRange } from '../../lib/format';
 import { chooseDialog, confirmDialog, errorToast, modal, toast } from '../../lib/ui';
 import { transport } from '../../transport';
-import type { DeceptiveLink, MessageDetail, PartStat } from '../../types';
+import type { DeceptiveLink, MessageDetail, MessageWarning, PartStat } from '../../types';
 import { findDeceptiveLink, followTarget, isAttribution, linkScheme, routeLinks, trimUrl } from '../../lib/thread';
 import { editDraft, openComposer } from './composer';
 
-/** The core's phishing and safety warnings for one message. A different
- *  Reply-To only matters when answering, so the reply box shows that one
- *  (`replyTo: true`) and the message leaves it out. */
+/** Warnings that only matter when answering: a different Reply-To, and an
+ *  unknown inviter on no-reply mail, whose reply box starts closed. */
+function forReplying(m: MessageDetail, w: MessageWarning): boolean {
+  return w.kind === 'reply_to' || (w.kind === 'unknown_inviter' && !!m.bulk);
+}
+
+/** The core's phishing and safety warnings for one message. Those that only
+ *  matter when answering go in the reply box (`replyTo: true`) instead. */
 export function warnings(m: MessageDetail, replyTo = false): HTMLElement | null {
-  const list = (m.warnings ?? []).filter((w) => (w.kind === 'reply_to') === replyTo);
+  const list = (m.warnings ?? []).filter((w) => forReplying(m, w) === replyTo);
   if (!list.length) return null;
   return h('div.banner.warn.msg-warnings', { role: 'note' },
     icon('warning', 16),

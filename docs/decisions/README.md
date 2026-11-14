@@ -85,3 +85,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0078 | [The AI folder keeps to its date limits over time, and holds the only copy of recent attachments](0078-ai-folder-windows-attachments-and-aging.md) | Accepted |
 | 0079 | [An idle AI folder pass writes only what changed](0079-ai-folder-writes-only-what-changed.md) | Accepted |
 | 0080 | [Settings sync between computers through a shared folder](0080-settings-sync-through-a-folder.md) | Accepted |
+| 0081 | [Reply warnings only where a reply could go astray](0081-fewer-reply-warnings.md) | Accepted |
