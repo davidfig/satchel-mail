@@ -80,6 +80,7 @@ export function installAlerts() {
     h('div.alert-actions',
       h('span.muted.small', alertLabel(a.minutes_before, a.all_day)),
       h('span.spacer'),
+      h('button', { title: 'Stop reminding me about this event', on: { click: () => void act(() => api.dismissAlert(a.id)) } }, 'Dismiss'),
       h('button', { title: 'Remind me again later', on: { click: (e: MouseEvent) => snoozeMenu(a, e.currentTarget as HTMLElement) } }, 'Snooze', icon('chevronDown', 14)),
       h('button', { title: 'Open the event, to see it or change its alerts', on: { click: () => open(a) } }, 'Open')));
 

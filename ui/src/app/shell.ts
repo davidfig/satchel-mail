@@ -194,6 +194,9 @@ export class Shell {
     const errors = accounts.filter((a) => a.sync.state === 'error' || a.sync.state === 'offline' || a.sync.state === 'sign_in');
     // The one problem, if it's a sign-out: the footer can fix it directly.
     const loneSignOut = errors.length === 1 && errors[0].sync.state === 'sign_in' ? errors[0] : null;
+    // Offline is not an account problem: say so, and count only real errors.
+    const attention = errors.filter((a) => a.sync.state !== 'offline').length;
+    const offlineLabel = attention === 0 ? 'No internet connection' : attention > 1 ? `${attention} accounts need attention` : '1 account needs attention';
     const combined = store.state.view === 'mail' && !collapsed && accounts.length > 1;
     const inboxUnread = unread('inbox');
     // Shown once there's a favorite (and while it's open, so removing the
@@ -239,7 +242,7 @@ export class Shell {
           ? h('button.sync-status.error', {
               title: errors.map((a) => `${a.email}: ${a.sync.error}`).join('\n'),
               on: { click: () => (loneSignOut ? signInAgain(loneSignOut) : store.set({ view: 'settings', settingsSection: 'accounts' })) },
-            }, icon('warning', 14), loneSignOut ? 'Sign in again' : errors.length > 1 ? `${errors.length} accounts need attention` : '1 account needs attention')
+            }, icon('warning', 14), loneSignOut ? 'Sign in again' : offlineLabel)
           : syncing.length
             // One row per syncing account, marked with its color.
             ? syncing.map((a) => h('div.sync-status', { title: `${a.email}: ${a.sync.detail ?? 'Syncing…'}` },
