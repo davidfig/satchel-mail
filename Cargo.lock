@@ -4568,7 +4568,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-api"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "chrono",
  "serde",
@@ -4577,7 +4577,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-cli"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "axum",
@@ -4597,7 +4597,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-core"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4625,7 +4625,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-desktop"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4658,7 +4658,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-ical"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -4669,7 +4669,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-mcp"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4685,7 +4685,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-mime"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "ammonia",
  "base64 0.22.1",
@@ -4698,7 +4698,7 @@ dependencies = [
 
 [[package]]
 name = "satchel-providers"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "async-imap",
