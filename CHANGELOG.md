@@ -11,6 +11,11 @@ workflow uses the section as the GitHub release notes and fails if it's missing
 or the page is out of date. See docs/RELEASING.md.
 -->
 
+## 0.1.18 (2026-11-15)
+
+- Help → What's New opens a real changelog at satchel.email/changelog, instead of an almost empty GitHub page.
+- The "ready to install" toast has a What's new button, and after an update the app says which version you're on, with a link to what changed.
+
 ## 0.1.17 (2026-11-15)
 
 - The app checks for updates every hour instead of every six hours, so fixes reach you sooner.
