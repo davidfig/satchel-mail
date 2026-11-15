@@ -161,6 +161,41 @@ Google and Microsoft sign-in need OAuth client ids — see
 configured through environment variables documented at the top of
 `scripts/release.sh`.
 
+Making a release (version, changelog, tag) is in
+[docs/RELEASING.md](docs/RELEASING.md). Pushing the tag only builds a draft:
+once the release workflow finishes, publish the draft on GitHub
+(`gh release edit vX.Y.Z --draft=false --latest`), or nobody gets the new
+version.
+
+## Deploying the site
+
+`site/` is served by Cloudflare Pages: the `satchel-email` project, connected
+to this GitHub repository, with no build step (it serves `site/` as is).
+Domains: `satchel.email`, `www.satchel.email` and `satchel-email.pages.dev`.
+
+- **Pushing to `main` deploys it.** Production updates within a minute or two
+  of the push; there is nothing to run.
+- **Other branches get a preview** at `https://<hash>.satchel-email.pages.dev`,
+  listed with the branch on the project's Deployments page.
+- **Check a deploy:** `wrangler pages deployment list --project-name satchel-email`
+  shows each deployment with its commit, or open the page and look for the change.
+- **Deploy by hand** (only if the Git hookup is broken):
+  `wrangler pages deploy site --project-name satchel-email --branch main`.
+  Run `wrangler login` first; it needs access to the Cloudflare account that
+  owns the project.
+
+Before you push a site change:
+
+- `site/changelog.html` is generated: edit `CHANGELOG.md` and run
+  `python3 scripts/changelog.py html` (a release tag fails if they differ).
+- `site/_headers` sets the security headers, including a CSP that allows only
+  the theme script inlined at the top of every page, by hash. If you change
+  that script, recompute the hash with the command in `_headers`, or every
+  page's theme breaks.
+- Preview it locally with `python3 -m http.server 7790 --directory site`
+  (the `site` entry in `.claude/launch.json`). Cloudflare also serves
+  `/changelog` for `changelog.html`; a local server needs the `.html`.
+
 ## Tests
 
 ```bash

@@ -57,6 +57,8 @@ scripts/run [web] [--test]                # build + run the app (also `pnpm app|
 scripts/dev-sign --sign-only BIN          # sign with the Apple Development cert so keychain "Always Allow" sticks
 scripts/vendor-golemdocs [REF]            # rebuild (or re-pin) the vendored document viewer (0062)
 python3 scripts/changelog.py html         # rebuild site/changelog.html after editing CHANGELOG.md (0082)
+git push origin main                      # deploys site/ (Cloudflare Pages; README "Deploying the site")
+gh release edit vX.Y.Z --draft=false --latest  # after a tag's release build finishes: publish it (docs/RELEASING.md)
 cargo test --workspace                    # unit + engine integration tests
 cargo clippy --workspace                  # keep at zero warnings
 (cd ui && npx tsc --noEmit && npm test && npm run build)

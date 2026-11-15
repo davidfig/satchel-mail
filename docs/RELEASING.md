@@ -27,8 +27,18 @@ release. Why it's signed this way: [0059](decisions/0059-signing-releases.md).
    bundles it for Help → What's New. A tag fails if the section is missing or the page is out of
    date ([0082](decisions/0082-changelog.md)).
 4. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
-5. When the workflow finishes, open the draft under Releases, check the notes
-   and files, and publish it. The site's download buttons point at
+5. **Publish the release once the workflow finishes.** The release isn't out
+   until this is done: the workflow only makes a draft, and nothing (the
+   site's download buttons, installed apps' updates) sees a draft. Wait for
+   the build, check the draft's notes and files, then publish:
+
+   ```bash
+   gh run watch "$(gh run list --workflow release.yml --branch vX.Y.Z --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+   gh release view vX.Y.Z               # notes and attached files
+   gh release edit vX.Y.Z --draft=false --latest
+   ```
+
+   If the build fails, don't publish; fix it and tag a new version. The site's download buttons point at
    `releases/latest/download/<file>`, so they follow the newest published
    release, and so do installed apps: within an hour they download it and
    offer "Restart to update" ([0063](decisions/0063-automatic-updates.md)).
