@@ -4,6 +4,7 @@ import type { View } from '../state';
 import { transport } from '../transport';
 import { openComposer } from '../views/mail/composer';
 import { openExternal } from '../views/mail/message-body';
+import { showChangelog } from './changelog';
 import { HELP_LINKS, toggleTheme } from './help';
 import { checkForUpdates } from './updates';
 
@@ -22,6 +23,7 @@ export function installMenu(host: MenuHost) {
     sync: () => api.syncNow(null).then(() => toast('Syncing…', { quiet: true }), errorToast),
     theme: () => toggleTheme(),
     'check-updates': () => void checkForUpdates(),
+    'whats-new': () => showChangelog(),
   };
   transport.onMenu((id) => {
     if (id.startsWith('key:')) trigger(id.slice(4));

@@ -1,22 +1,26 @@
 // Offers to restart into a new version once the desktop app has downloaded it (0063), and says
-// once that it installed. Both toasts link to that version's notes on the site's What's New page (0082).
+// once that it installed. Both toasts open What's New at that version (0082).
 
 import { transport } from '../transport';
 import { errorToast, toast, type ToastHandle } from '../lib/ui';
-import { openExternal } from '../views/mail/message-body';
-import { HELP_LINKS } from './help';
+import { showChangelog } from './changelog';
 
 /** The version this window last ran, to tell that an update installed. */
 const LAST_VERSION_KEY = 'satchel.lastVersion';
 
-/** Opens `version`'s section of the changelog; the toast stays up. */
-function whatsNew(version: string) {
-  return {
-    label: 'What’s new',
-    title: `What changed in ${version}`,
-    keep: true,
-    run: () => openExternal(`${HELP_LINKS['whats-new']}#v${version}`),
-  };
+/** Opens What's New at `version`; the toast stays up. */
+function whatsNew(version: string, run = () => showChangelog({ version })) {
+  return { label: 'What’s new', title: `What changed in ${version}`, keep: true, run };
+}
+
+/** What's New for a version downloaded but not yet installed: this build's
+ *  changelog doesn't have it, so its notes come from the update feed. */
+function whatsNewUpcoming(version: string) {
+  return whatsNew(version, () => {
+    void transport.host<string | null>('update_notes')
+      .catch(() => null)
+      .then((notes) => showChangelog({ version, upcoming: { version, notes: notes ?? '' } }));
+  });
 }
 
 function offer(version: string) {
@@ -24,7 +28,7 @@ function offer(version: string) {
     sticky: true,
     action: [
       { label: 'Restart to update', run: () => void transport.host('install_update').catch(errorToast) },
-      whatsNew(version),
+      whatsNewUpcoming(version),
     ],
   });
 }

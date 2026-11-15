@@ -4,6 +4,10 @@ Usage:
   python3 scripts/changelog.py html             write site/changelog.html
   python3 scripts/changelog.py check            fail if site/changelog.html is out of date
   python3 scripts/changelog.py notes VERSION    print VERSION's section (fail if there is none)
+  python3 scripts/changelog.py section VERSION  the same without the link to the site, for the update feed
+
+The app bundles CHANGELOG.md for its What's New dialog (ui/src/app/changelog.ts),
+which reads the same format; keep the two in step.
 
 CHANGELOG.md holds a `## X.Y.Z (YYYY-MM-DD)` section per release, newest first,
 each with an optional paragraph and a list of `- ` lines. Only `code`,
@@ -88,13 +92,13 @@ def page():
     return TEMPLATE.replace('{{SECTIONS}}', sections)
 
 
-def notes(version):
+def section(version):
     for v, _, lines in releases():
         if v == version:
             text = '\n'.join(lines).strip()
             if not text:
                 break
-            return text + '\n\nAlso on the site: https://satchel.email/changelog#v' + v + '\n'
+            return text + '\n'
     raise SystemExit(f'CHANGELOG.md has no notes for {version}. Add a "## {version} (YYYY-MM-DD)" section (docs/RELEASING.md).')
 
 
@@ -177,9 +181,13 @@ def main():
     elif args == ['check']:
         if PAGE.read_text(encoding='utf-8') != page():
             raise SystemExit('site/changelog.html is out of date: run `python3 scripts/changelog.py html` and commit it.')
-    elif len(args) == 2 and args[0] == 'notes':
+    elif len(args) == 2 and args[0] in ('notes', 'section'):
         sys.stdout.reconfigure(encoding='utf-8')  # Windows runners default to cp1252
-        sys.stdout.write(notes(args[1].removeprefix('v')))
+        version = args[1].removeprefix('v')
+        text = section(version)
+        if args[0] == 'notes':
+            text += f'\nAlso on the site: https://satchel.email/changelog#v{version}\n'
+        sys.stdout.write(text)
     else:
         raise SystemExit(__doc__)
 

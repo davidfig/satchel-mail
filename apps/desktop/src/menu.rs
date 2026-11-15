@@ -106,7 +106,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&item("key:?", "Keyboard Shortcuts", Some("Cmd+/"))?)
         .item(&item("help:feedback", "Send Feedback", None)?)
         .separator()
-        .item(&item("help:whats-new", "What’s New", None)?)
+        .item(&item("whats-new", "What’s New", None)?)
         .item(&item("check-updates", "Check for Updates…", None)?)
         .separator()
         .item(&item("help:website", "satchel.email Website", None)?)

@@ -66,3 +66,15 @@
 @keyframes rise { from { transform: translateY(8px); opacity: 0; } }
 .fatal { padding: 60px; text-align: center; }
 .link-address { font: 12.5px var(--mono); overflow-wrap: anywhere; max-height: 8em; overflow: auto; padding: 6px 8px; background: var(--panel-2); border-radius: 6px; user-select: all; }
+
+/* What's New (app/changelog.ts). */
+.changelog { font-size: 13.5px; line-height: 1.5; }
+.changelog .release { padding: 14px 0 6px; border-top: 1px solid var(--line); }
+.changelog .release:first-child { border-top: 0; padding-top: 4px; }
+.changelog .release.current h3 { color: var(--accent); }
+.changelog h3 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; font-size: 15px; }
+.changelog h3 .muted { font-size: 12px; font-weight: normal; }
+.changelog p { margin: 0 0 8px; }
+.changelog ul { margin: 0 0 8px; padding-left: 18px; }
+.changelog li { margin-bottom: 4px; }
+.changelog code { padding: 0 4px; border-radius: 4px; background: var(--panel-2); }

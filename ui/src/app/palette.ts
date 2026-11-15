@@ -7,6 +7,7 @@ import { type MailSource, type SettingsSection, type View, store } from '../stat
 import { transport } from '../transport';
 import { openComposer } from '../views/mail/composer';
 import { openExternal } from '../views/mail/message-body';
+import { showChangelog } from './changelog';
 import { HELP_LINKS, toggleTheme } from './help';
 import { UNIFIED, readJson, writeJson } from './location';
 import { checkForUpdates } from './updates';
@@ -39,7 +40,7 @@ function placesAndTools(host: PaletteHost): Command[] {
     { label: 'Toggle dark mode', icon: 'moon', run: () => toggleTheme() },
     // The Help menu's items, for where there's no menu bar. `satchel serve` is updated with the CLI.
     ...(transport.kind === 'tauri' ? [{ label: 'Check for updates', icon: 'refresh', run: () => void checkForUpdates() }] : []),
-    { label: 'What’s new', icon: 'external', run: () => openExternal(HELP_LINKS['whats-new']) },
+    { label: 'What’s new', icon: 'sparkle', run: () => showChangelog() },
     { label: 'Send feedback', icon: 'external', run: () => openExternal(HELP_LINKS.feedback) },
   ];
 }

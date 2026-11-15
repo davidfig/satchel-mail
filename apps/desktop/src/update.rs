@@ -24,6 +24,20 @@ pub fn app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+/// The notes the update feed gave for the downloaded version, if any: What's
+/// New shows them before it's installed, since this build's changelog doesn't
+/// have them yet (0082).
+#[tauri::command]
+pub fn update_notes(app: tauri::AppHandle) -> Option<String> {
+    #[cfg(feature = "updater")]
+    return feed::notes(&app);
+    #[cfg(not(feature = "updater"))]
+    {
+        let _ = app;
+        None
+    }
+}
+
 /// What a check the user asked for found.
 #[derive(serde::Serialize)]
 pub struct UpdateCheck {
@@ -140,6 +154,10 @@ mod feed {
 
     pub fn ready(app: &tauri::AppHandle) -> Option<String> {
         app.state::<Staged>().0.lock().unwrap().as_ref().map(|(u, _)| u.version.clone())
+    }
+
+    pub fn notes(app: &tauri::AppHandle) -> Option<String> {
+        app.state::<Staged>().0.lock().unwrap().as_ref().and_then(|(u, _)| u.body.clone())
     }
 
     pub fn install(app: &tauri::AppHandle) -> Result<(), String> {

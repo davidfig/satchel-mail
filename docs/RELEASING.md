@@ -22,9 +22,9 @@ release. Why it's signed this way: [0059](decisions/0059-signing-releases.md).
    people will notice, in their words, not the commit list
    (`git log --no-merges --format=%s v<last>..` is the place to start). Then
    run `python3 scripts/changelog.py html` and commit both files. The section
-   becomes the GitHub release notes, and the site's What's New page
-   (`satchel.email/changelog`, which Help → What's New opens) is built from
-   the same file. A tag fails if the section is missing or the page is out of
+   becomes the GitHub release notes and the update feed's notes, the site's
+   What's New page (`satchel.email/changelog`) is built from it, and the app
+   bundles it for Help → What's New. A tag fails if the section is missing or the page is out of
    date ([0082](decisions/0082-changelog.md)).
 4. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
 5. When the workflow finishes, open the draft under Releases, check the notes
