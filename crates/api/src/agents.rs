@@ -211,6 +211,9 @@ pub struct Settings {
     /// The alert new timed events start with, in minutes before (None: none).
     #[serde(default = "default_alert")]
     pub default_alert_minutes: Option<i32>,
+    /// Move a message to Trash once you unsubscribe from it.
+    #[serde(default = "yes")]
+    pub trash_on_unsubscribe: bool,
 }
 
 fn default_alert() -> Option<i32> {
@@ -237,6 +240,7 @@ impl Default for Settings {
             look_up_places: false,
             calendar_alerts: true,
             default_alert_minutes: default_alert(),
+            trash_on_unsubscribe: true,
         }
     }
 }

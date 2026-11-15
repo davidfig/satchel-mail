@@ -203,6 +203,15 @@ export async function unsubscribe(view: MailView, m: MessageDetail, inSpam: bool
     if (r.via === 'browser' && r.url) openExternal(r.url);
     const msg = r.via === 'browser' ? 'Finish unsubscribing in your browser.' : r.via === 'email' ? `Unsubscribe request sent to ${r.to}.` : `Unsubscribed from ${who}.`;
     const ids = view.openThread?.thread_id === m.thread_id ? view.openThread.messages.map((x) => x.id) : [m.id];
+    // By default the conversation goes to Trash too (Settings → General).
+    if (store.state.settings?.trash_on_unsubscribe ?? true) {
+      const t = view.list.find(m.thread_id) ?? (view.openSummary?.thread_id === m.thread_id ? view.openSummary : undefined);
+      const write = api.trash(ids);
+      if (t) removeNow(view, [t], write);
+      await write.then(() => toast(`${msg} Moved to Trash.`, { kind: 'success' }), errorToast);
+      void view.refresh();
+      return;
+    }
     const archive = () => void api.archive(ids).then(() => { toast('Archived'); void view.refresh(); }, errorToast);
     toast(msg, inSpam ? {} : { kind: 'success', action: { label: 'Archive', run: archive } });
   } catch (e) {

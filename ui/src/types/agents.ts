@@ -91,6 +91,8 @@ export interface Settings {
   calendar_alerts: boolean;
   /** The alert new timed events start with, in minutes before (null: none). */
   default_alert_minutes: number | null;
+  /** Move a message to Trash once you unsubscribe from it. */
+  trash_on_unsubscribe: boolean;
 }
 
 export interface AuditEntry {
