@@ -116,6 +116,15 @@ jobs:
           v="$(python3 -c 'import json; print(json.load(open("apps/desktop/tauri.conf.json"))["version"])')"
           [[ "v$v" == "$GITHUB_REF_NAME" ]] || { echo "::error::tauri.conf.json says $v but the tag is $GITHUB_REF_NAME"; exit 1; }
 
+      # The release notes come from CHANGELOG.md, so a release needs its section there, and the site's
+      # What's New page has to match it. Checked here so a missing entry fails before the long build.
+      - name: Changelog has this release
+        if: env.RELEASE == 'true'
+        shell: bash
+        run: |
+          python3 scripts/changelog.py notes "$GITHUB_REF_NAME" > /dev/null
+          python3 scripts/changelog.py check
+
       # release.sh turns on the updater when SATCHEL_UPDATE_URL is set (0063).
       - name: Update signing
         shell: bash
@@ -311,6 +320,16 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            CHANGELOG.md
+            scripts/changelog.py
+          sparse-checkout-cone-mode: false
+
+      - name: Release notes
+        run: python3 scripts/changelog.py notes "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
@@ -347,7 +366,7 @@ jobs:
               platforms["windows-x86_64"] = entry(windows, dist / f"{windows}.sig")
           feed = {
               "version": tag.removeprefix("v"),
-              "notes": f"https://github.com/{os.environ['REPO']}/releases/tag/{tag}",
+              "notes": f"https://satchel.email/changelog#{tag}",
               "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "platforms": platforms,
           }
@@ -369,4 +388,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "satchel.email ${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --notes-file "$RUNNER_TEMP/notes.md" --title "satchel.email ${GITHUB_REF_NAME#v}"

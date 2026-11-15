@@ -86,3 +86,4 @@ One file per decision. Copy `template.md`, use the next number, and add it here.
 | 0079 | [An idle AI folder pass writes only what changed](0079-ai-folder-writes-only-what-changed.md) | Accepted |
 | 0080 | [Settings sync between computers through a shared folder](0080-settings-sync-through-a-folder.md) | Accepted |
 | 0081 | [Reply warnings only where a reply could go astray](0081-fewer-reply-warnings.md) | Accepted |
+| 0082 | [A hand-written changelog, published as the site's What's New page](0082-changelog.md) | Accepted |

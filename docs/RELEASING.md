@@ -18,15 +18,23 @@ release. Why it's signed this way: [0059](decisions/0059-signing-releases.md).
    deliberate, never automatic ([0062](decisions/0062-golemdocs-viewer.md)).
 2. Bump `version` in `apps/desktop/tauri.conf.json` (and the workspace
    `Cargo.toml`).
-3. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
-4. When the workflow finishes, open the draft under Releases, check the notes
+3. Add a `## X.Y.Z (YYYY-MM-DD)` section to the top of `CHANGELOG.md`: what
+   people will notice, in their words, not the commit list
+   (`git log --no-merges --format=%s v<last>..` is the place to start). Then
+   run `python3 scripts/changelog.py html` and commit both files. The section
+   becomes the GitHub release notes, and the site's What's New page
+   (`satchel.email/changelog`, which Help → What's New opens) is built from
+   the same file. A tag fails if the section is missing or the page is out of
+   date ([0082](decisions/0082-changelog.md)).
+4. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
+5. When the workflow finishes, open the draft under Releases, check the notes
    and files, and publish it. The site's download buttons point at
    `releases/latest/download/<file>`, so they follow the newest published
    release, and so do installed apps: within an hour they download it and
    offer "Restart to update" ([0063](decisions/0063-automatic-updates.md)).
    To pull a bad release, set it back to a draft and ship a fix with a higher
    version; apps never go back a version.
-5. Trim the site's "Early release" notice as Google and Microsoft finish their
+6. Trim the site's "Early release" notice as Google and Microsoft finish their
    reviews.
 
 A tag fails unless the Mac signing keys and the update key below are set, or if

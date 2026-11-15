@@ -1,0 +1,157 @@
+<!doctype html>
+<!-- Generated from CHANGELOG.md by scripts/changelog.py. Edit that file, then run `python3 scripts/changelog.py html`. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>What's new in satchel.email</title>
+    <meta name="description" content="What changed in each release of satchel.email, the local-first email and calendar app." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="satchel.email" />
+    <meta property="og:title" content="What's new in satchel.email" />
+    <meta property="og:description" content="What changed in each release of satchel.email." />
+    <link rel="icon" href="satchel-mark.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('satchel.site.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="site.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <header class="chrome">
+      <div class="chrome-in gutter">
+        <a class="brand" href="./" aria-label="satchel.email home"><img src="satchel-mark.svg" alt="" width="22" height="22" /><span>satchel.email</span></a>
+        <nav class="tabs" aria-label="Pages">
+          <a href="mail.html">Mail</a>
+          <a href="calendar.html">Calendar</a>
+          <a href="ai.html">AI</a>
+          <a href="mcp.html">MCP</a>
+          <a href="open-source.html">Open source</a>
+        </nav>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark" title="Switch light or dark">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.5a6.5 6.5 0 1 0 6.5 6.5A5 5 0 0 1 10 3.5z" /></svg>
+        </button>
+        <a class="btn primary" href="./#get">Get it</a>
+      </div>
+    </header>
+
+    <main class="desk gutter">
+      <article class="msg changelog">
+        <p class="crumb"><a href="./">satchel.email</a> &rsaquo; What's new</p>
+        <h1>What's new</h1>
+        <p class="lede">What changed in each release, newest first. The app updates itself, so you'll get these within an hour of a release.</p>
+
+        <section class="release" id="v0.1.17">
+          <h2><a href="#v0.1.17">0.1.17</a> <time datetime="2026-11-15">November 15, 2026</time></h2>
+            <ul class="plain"><li>The app checks for updates every hour instead of every six hours, so fixes reach you sooner.</li><li>The update-check toast fits its text.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.16">
+          <h2><a href="#v0.1.16">0.1.16</a> <time datetime="2026-11-14">November 14, 2026</time></h2>
+            <ul class="plain"><li>Fewer reply warnings: a different Reply-To address is flagged only on mail from people you've written to, where a reply could be hijacked, not on everyday newsletters and notifications.</li><li>The update-check toast keeps the same width while an update downloads.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.15">
+          <h2><a href="#v0.1.15">0.1.15</a> <time datetime="2026-11-14">November 14, 2026</time></h2>
+            <ul class="plain"><li>Alerts have a Dismiss button.</li><li>The app says when you're offline.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.14">
+          <h2><a href="#v0.1.14">0.1.14</a> <time datetime="2026-11-11">November 11, 2026</time></h2>
+            <ul class="plain"><li>Settings and AI proposals can sync between your computers through a shared folder, such as iCloud Drive or Dropbox.</li><li>Each message is stored once, compressed, so the app's data takes less space.</li><li>The AI folder (<code>~/Satchel</code>) is smaller, fills in your older mail over time, and costs less to keep up to date. Threads missing from it are repaired.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.13">
+          <h2><a href="#v0.1.13">0.1.13</a> <time datetime="2026-11-10">November 10, 2026</time></h2>
+            <ul class="plain"><li>Right-clicking a conversation in the Mac app opens satchel.email's menu again, instead of the system's.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.12">
+          <h2><a href="#v0.1.12">0.1.12</a> <time datetime="2026-11-08">November 8, 2026</time></h2>
+            <ul class="plain"><li>All-day events show on their own days in the calendar.</li><li>No scam warning for people you've written to.</li><li>When a folder opens, the cursor is on its first conversation (or where you left it), so j/k and Enter work right away.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.11">
+          <h2><a href="#v0.1.11">0.1.11</a> <time datetime="2026-11-08">November 8, 2026</time></h2>
+            <ul class="plain"><li>Check for Updates says what it's doing.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.10">
+          <h2><a href="#v0.1.10">0.1.10</a> <time datetime="2026-11-08">November 8, 2026</time></h2>
+            <ul class="plain"><li>Add send-as addresses to an account and choose which one to send from.</li><li>Replies proposed by AI agents go out from the send-as address the conversation reached, like yours do.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.9">
+          <h2><a href="#v0.1.9">0.1.9</a> <time datetime="2026-11-07">November 7, 2026</time></h2>
+            <ul class="plain"><li>The "Sending" toast counts down, and has a Send now button.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.8">
+          <h2><a href="#v0.1.8">0.1.8</a> <time datetime="2026-11-07">November 7, 2026</time></h2>
+            <ul class="plain"><li>The unread count shows on the app icon on Windows and Linux too.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.7">
+          <h2><a href="#v0.1.7">0.1.7</a> <time datetime="2026-11-07">November 7, 2026</time></h2>
+            <ul class="plain"><li>The Mac app's Dock icon shows how many inbox messages are unread.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.6">
+          <h2><a href="#v0.1.6">0.1.6</a> <time datetime="2026-11-06">November 6, 2026</time></h2>
+            <ul class="plain"><li>A fuller Help menu: Send Feedback, What's New, Check for Updates, and links to the website, privacy policy and terms.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.5">
+          <h2><a href="#v0.1.5">0.1.5</a> <time datetime="2026-11-06">November 6, 2026</time></h2>
+            <ul class="plain"><li>A signed-out account is hard to miss: a banner with a Sign in button, and a notification if it stays signed out. Password accounts can enter a new password without being removed.</li><li>Gmail mail shows up sooner, and the app checks for mail when you come back to the window.</li><li>A link that goes somewhere other than it shows now asks when you click it. Mail from verified senders no longer gets a scam banner for this.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.4">
+          <h2><a href="#v0.1.4">0.1.4</a> <time datetime="2026-11-05">November 5, 2026</time></h2>
+            <ul class="plain"><li>Smart folders: save a search and it appears under Mail.</li><li>Deleted mail stays deleted, and the next conversation opens.</li><li>A Google sign-in that doesn't allow Gmail access is refused with an explanation, instead of half working.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.3">
+          <h2><a href="#v0.1.3">0.1.3</a> <time datetime="2026-11-04">November 4, 2026</time></h2>
+            <ul class="plain"><li>A conversation shows which of your addresses it reached.</li><li>Moving the open conversation away opens the next one.</li><li>Message previews show real text, not HTML codes like <code>&amp;amp;</code>.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.2">
+          <h2><a href="#v0.1.2">0.1.2</a> <time datetime="2026-11-04">November 4, 2026</time></h2>
+            <ul class="plain"><li>Accounts whose sign-in was revoked can sign in again.</li><li>The Mac download itself is notarized by Apple, not only the app inside it.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.1">
+          <h2><a href="#v0.1.1">0.1.1</a> <time datetime="2026-11-03">November 3, 2026</time></h2>
+            <p>The first public release.</p>
+            <ul class="plain"><li>HTML messages show right away, instead of waiting for every remote image to load.</li><li>Sync no longer undoes changes that are still on their way to the server.</li></ul>
+        </section>
+
+        <section class="release" id="v0.1.0">
+          <h2><a href="#v0.1.0">0.1.0</a> <time datetime="2026-11-03">November 3, 2026</time></h2>
+            <p>A test build, not released to the public. What the first version can do:</p>
+            <ul class="plain"><li>Mail, calendar and contacts for Gmail, Microsoft, and any IMAP/SMTP, JMAP, CalDAV or CardDAV account, kept on your computer.</li><li>AI agents read your mail through the <code>~/Satchel</code> folder or MCP and can only propose changes, which you review.</li><li>Attachments open in the app, and links that try to deceive are flagged.</li><li>Calendar alerts, a reworked event editor with place suggestions, and favorite senders.</li><li>Mail that expects a reply is told apart from lists and automated mail.</li><li>Select conversations with Shift+click, Shift+Arrow or Cmd+A, and copy a conversation for AI.</li><li>Installed apps update themselves from new releases.</li></ul>
+        </section>
+
+        <p class="fine">Every release, with its downloads, is also on <a href="https://github.com/davidfig/satchel-mail/releases">GitHub</a>.</p>
+      </article>
+    </main>
+
+    <footer class="foot gutter">
+      <span>satchel.email</span>
+      <span class="foot-links">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+        <a href="https://github.com/davidfig/satchel-mail">GitHub</a>
+        <a href="security.html">Security</a>
+        <a href="trademarks.html">Trademarks</a>
+        <a href="support.html">Support</a>
+        <a href="changelog.html">What&rsquo;s new</a>
+      </span>
+    </footer>
+  </body>
+</html>
