@@ -50,5 +50,6 @@ could turn it on, but nothing built a feed or used it.
   points at the previous one, then ship a fix with a higher version (apps
   never downgrade).
 - The Mac builds now also produce the `.app` bundle the update is made from.
-- Not covered: release notes in the toast, beta channels, and updating
+- Not covered: release notes in the toast (the toasts link to them instead,
+  0082), beta channels, and updating
   `satchel serve` or the standalone CLI.

@@ -18,6 +18,12 @@ pub fn update_ready(app: tauri::AppHandle) -> Option<String> {
     }
 }
 
+/// The version running now, so the UI can say once that an update installed.
+#[tauri::command]
+pub fn app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 /// What a check the user asked for found.
 #[derive(serde::Serialize)]
 pub struct UpdateCheck {

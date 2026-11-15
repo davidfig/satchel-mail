@@ -9,6 +9,8 @@ interface ToastAction {
   run: () => void;
   /** Tooltip for the button; defaults to the label. */
   title?: string;
+  /** Leaves the toast up after it runs, for a link beside the main action (What's new). */
+  keep?: boolean;
 }
 
 interface ToastOpts {
@@ -92,7 +94,7 @@ export function toast(message: string, opts: ToastOpts = {}): ToastHandle {
         on: {
           click: () => {
             a.run();
-            clearSlot(key);
+            if (!a.keep) clearSlot(key);
           },
         },
       }, a.label),

@@ -345,6 +345,7 @@ fn main() {
             notify::can_notify,
             notify::notify,
             notify::take_open_request,
+            update::app_version,
             update::update_ready,
             update::check_for_updates,
             update::install_update

@@ -6,7 +6,7 @@ import { applyTheme, store } from '../state';
 /** The pages Help opens in the browser. */
 export const HELP_LINKS: Record<string, string> = {
   feedback: 'https://github.com/davidfig/satchel-mail/issues',
-  'whats-new': 'https://github.com/davidfig/satchel-mail/releases/latest',
+  'whats-new': 'https://satchel.email/changelog',
   website: 'https://satchel.email/',
   privacy: 'https://satchel.email/privacy',
   terms: 'https://satchel.email/terms',
