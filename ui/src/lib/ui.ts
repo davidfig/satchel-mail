@@ -22,7 +22,7 @@ interface ToastOpts {
   quiet?: boolean;
   /** Stays up until `dismiss` or a newer toast in its slot: for something still under way (a check). */
   persist?: boolean;
-  /** Always as wide as it gets, so a message that changes (a percentage) doesn't resize it. */
+  /** Never narrows when its message changes, so a changing percentage doesn't make it jitter. */
   fixed?: boolean;
 }
 
@@ -112,7 +112,11 @@ export function toast(message: string, opts: ToastOpts = {}): ToastHandle {
 /** Acts on `slot` only while it's still the one showing in `key`. */
 function handle(key: SlotKey, slot: Slot): ToastHandle {
   return {
-    setMessage: (t) => { if (slots[key] === slot) slot.label.textContent = t; },
+    setMessage: (t) => {
+      if (slots[key] !== slot) return;
+      if (slot.el.classList.contains('fixed')) slot.el.style.minWidth = `${slot.el.offsetWidth}px`;
+      slot.label.textContent = t;
+    },
     dismiss: () => { if (slots[key] === slot) clearSlot(key); },
   };
 }
