@@ -11,6 +11,11 @@ workflow uses the section as the GitHub release notes and fails if it's missing
 or the page is out of date. See docs/RELEASING.md.
 -->
 
+## 0.1.19 (2026-11-15)
+
+- Unsubscribing also moves the mail to Trash. To keep it instead, turn off "Move mail to Trash when you unsubscribe from it" in Settings → General.
+- Help → What's New opens inside the app, and works offline. When an update is ready to install, its What's new button shows what's in it before you restart.
+
 ## 0.1.18 (2026-11-15)
 
 - Help → What's New opens a real changelog at satchel.email/changelog, instead of an almost empty GitHub page.
