@@ -26,7 +26,7 @@ could turn it on, but nothing built a feed or used it.
   built into the app; the app rejects a bundle the key didn't sign, so a
   compromised download host can't push code. The private key is a repository
   secret, and a `v*` tag fails without it, like the other signing keys.
-- **When:** the app checks at start and every six hours, downloads a newer
+- **When:** the app checks at start and every hour (every six hours before 0.1.17), downloads a newer
   version in the background, then shows a toast that stays until dismissed:
   "satchel.email X is ready to install — Restart to update". Nothing
   installs without that click: restarting closes the window and stops syncs,

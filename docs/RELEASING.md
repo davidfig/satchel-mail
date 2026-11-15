@@ -22,7 +22,7 @@ release. Why it's signed this way: [0059](decisions/0059-signing-releases.md).
 4. When the workflow finishes, open the draft under Releases, check the notes
    and files, and publish it. The site's download buttons point at
    `releases/latest/download/<file>`, so they follow the newest published
-   release, and so do installed apps: within six hours they download it and
+   release, and so do installed apps: within an hour they download it and
    offer "Restart to update" ([0063](decisions/0063-automatic-updates.md)).
    To pull a bad release, set it back to a draft and ship a fix with a higher
    version; apps never go back a version.

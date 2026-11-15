@@ -1,5 +1,5 @@
 //! Updates from the release feed (0063). Release builds with the `updater`
-//! feature check the feed at start and every six hours, download a newer
+//! feature check the feed at start and every hour, download a newer
 //! version in the background and check its signature, then tell the UI
 //! (`satchel://update-ready`), which offers to restart into it. Nothing
 //! installs until the user says so. Other builds have no feed: the commands
@@ -28,7 +28,7 @@ pub struct UpdateCheck {
 }
 
 /// Checks the feed now, and downloads a newer version if there is one. For
-/// Help > Check for Updates; the same check runs by itself every six hours.
+/// Help > Check for Updates; the same check runs by itself every hour.
 #[tauri::command]
 pub async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheck, String> {
     #[cfg(feature = "updater")]
@@ -71,7 +71,7 @@ mod feed {
     use tauri::{Emitter, Manager};
     use tauri_plugin_updater::{Update, UpdaterExt};
 
-    const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+    const EVERY: Duration = Duration::from_secs(60 * 60);
 
     /// A downloaded update whose signature checked out, with its bytes.
     #[derive(Default)]
