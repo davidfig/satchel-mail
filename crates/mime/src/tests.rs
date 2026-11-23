@@ -88,6 +88,13 @@ fn sanitize_blocks_scripts_and_remote() {
 }
 
 #[test]
+fn sanitize_drops_title_text() {
+    let s = sanitize_html("<html><head><title>Sale now</title></head><body><p>hi</p></body></html>", false, &[]);
+    assert!(!s.html.contains("Sale now"));
+    assert!(s.html.contains("<p>hi</p>"));
+}
+
+#[test]
 fn sanitize_keeps_quote_markers() {
     let s = sanitize_html(r#"<p>new</p><div id="divRplyFwdMsg">From: a</div><blockquote type="cite">old</blockquote>"#, false, &[]);
     assert!(s.html.contains(r#"id="divRplyFwdMsg""#));

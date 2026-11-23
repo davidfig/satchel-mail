@@ -37,6 +37,8 @@ pub fn sanitize_html(html: &str, allow_remote: bool, inline: &[(String, String)]
     let mut b = ammonia::Builder::default();
     b.add_tags(["style", "font", "center", "big", "small", "u", "s"]);
     b.rm_clean_content_tags(["style"]);
+    // A dropped tag keeps its text; a `<title>` would show as a stray line.
+    b.add_clean_content_tags(["title"]);
     b.add_generic_attributes(["style", "class", "align", "valign", "width", "height", "bgcolor", "color", "dir", "role"]);
     b.add_tag_attributes("table", ["cellpadding", "cellspacing", "border"]);
     b.add_tag_attributes("td", ["colspan", "rowspan", "nowrap"]);

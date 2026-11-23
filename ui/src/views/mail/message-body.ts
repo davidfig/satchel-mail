@@ -178,6 +178,7 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean,
   const sandbox = transport.kind === 'tauri' ? 'allow-same-origin allow-popups' : 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
   const frame = h('iframe.html-body', { sandbox, referrerpolicy: 'no-referrer', title: 'Message content', dataset: { cautious: String(cautious) } }) as HTMLIFrameElement;
   frame.srcdoc = doc;
+  const wrap = h('div.html-wrap', frame);
   frameLinks.set(frame, links);
   // Size the frame as soon as the message is parsed, not on `load`, which
   // waits for every remote image; the observer grows it as they arrive.
@@ -188,7 +189,17 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean,
     const d = frame.contentDocument;
     if (sizedDoc || !d?.body || d.URL !== 'about:srcdoc' || d.readyState === 'loading') return false;
     sizedDoc = d;
-    const fit = () => (frame.style.height = `${Math.min(d.documentElement.scrollHeight + 4, 20000)}px`);
+    // Measure with the frame collapsed (to its CSS min-height). Newsletters
+    // often size themselves to the frame (`height:100%`, `100vh`); measured at
+    // full height they'd grow with it on every resize, sliding the content down.
+    // The wrapper holds the old height meanwhile, so the reader's scroll
+    // position isn't clamped by the brief collapse.
+    const fit = () => {
+      wrap.style.minHeight = `${wrap.offsetHeight}px`;
+      frame.style.height = '0';
+      frame.style.height = `${Math.min(d.documentElement.scrollHeight + 4, 20000)}px`;
+      wrap.style.minHeight = '';
+    };
     fit();
     new ResizeObserver(fit).observe(d.body);
     sized!();
@@ -223,7 +234,7 @@ export function htmlFrame(html: string, cautious: boolean, allowRemote: boolean,
       if (e.button === 1) onLink(e);
     });
   });
-  return h('div.html-wrap', frame);
+  return wrap;
 }
 
 /** Opens a link from a message body; false if it isn't one we follow. */
