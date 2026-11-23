@@ -11,6 +11,11 @@ workflow uses the section as the GitHub release notes and fails if it's missing
 or the page is out of date. See docs/RELEASING.md.
 -->
 
+## 0.1.20 (2026-11-23)
+
+- Some newsletters no longer slide down the message window as you read them; they open at the top at their real height.
+- A newsletter's title no longer shows up as a stray line above it.
+
 ## 0.1.19 (2026-11-15)
 
 - Unsubscribing also moves the mail to Trash. To keep it instead, turn off "Move mail to Trash when you unsubscribe from it" in Settings → General.
