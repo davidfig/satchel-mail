@@ -7,6 +7,7 @@ import { chooseDialog, confirmDialog, errorToast, modal, toast } from '../../lib
 import { transport } from '../../transport';
 import type { DeceptiveLink, MessageDetail, MessageWarning, PartStat } from '../../types';
 import { findDeceptiveLink, followTarget, isAttribution, linkScheme, routeLinks, trimUrl } from '../../lib/thread';
+import { unwrap } from '../../lib/unwrap';
 import { editDraft, openComposer } from './composer';
 
 /** Warnings that only matter when answering: a different Reply-To, and an
@@ -126,7 +127,7 @@ export function draftBanner(m: MessageDetail): HTMLElement {
 /** Plain text body: linkified, with quoted history folded behind a toggle. */
 export function textBody(text: string, cautious: boolean): HTMLElement {
   const pre = h('div.text-body');
-  const lines = text.replace(/\r\n?/g, '\n').replace(/\s+$/, '').split('\n');
+  const lines = unwrap(text.replace(/\r\n?/g, '\n').replace(/\s+$/, '').split('\n'));
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
