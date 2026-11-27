@@ -11,6 +11,14 @@ workflow uses the section as the GitHub release notes and fails if it's missing
 or the page is out of date. See docs/RELEASING.md.
 -->
 
+## 0.1.21 (2026-11-27)
+
+- Plain-text mail that the sender's app broke into short lines now flows as normal paragraphs, instead of breaking twice and leaving ragged gaps.
+- Right-clicking a conversation reliably opens Satchel's menu, even when text is selected in the message you're reading.
+- On a Mac, Ctrl+click only opens the menu. It no longer also opens the folder (so right-clicking Inbox to mark it all read doesn't reload the list) or selects the conversation.
+- Escape closes an open menu without also closing the conversation.
+- Selecting several conversations no longer pushes the list down: the actions for them float at the bottom of the list.
+
 ## 0.1.20 (2026-11-23)
 
 - Some newsletters no longer slide down the message window as you read them; they open at the top at their real height.
