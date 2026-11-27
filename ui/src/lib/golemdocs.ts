@@ -5,8 +5,8 @@
 
 // The build in ui/public/golemdocs/<GOLEMDOCS_BUILD>/. scripts/vendor-golemdocs
 // writes these two lines; change them by running it.
-export const GOLEMDOCS_COMMIT = '1efae91a0b84d7332c84525f1e4a077df969e8c8';
-export const GOLEMDOCS_BUILD = '1efae91a0b84';
+export const GOLEMDOCS_COMMIT = '0ead4c80391a3099c5a01a72bb4928b1a783ef10';
+export const GOLEMDOCS_BUILD = '0ead4c80391a';
 
 /** Sent to the viewer once it is ready. `bytes` is transferred. */
 export type ToViewer = { type: 'golemdocs:open'; bytes: ArrayBuffer; name: string; dark?: boolean; locale?: string };

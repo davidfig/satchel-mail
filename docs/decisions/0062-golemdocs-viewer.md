@@ -48,16 +48,23 @@ named golemdocs as the place to start for Office files.
   cached forever.
 - **Committed, not fetched at build time.** Building Satchel needs neither
   golemdocs nor network access beyond the usual crates and npm packages, and
-  a release is exactly what was reviewed. The cost is repository size: 38 MB
-  in 100 files (4.4 MB of code, 33.3 MB of fonts). Git stores files by
+  a release is exactly what was reviewed. The cost is repository size: 43 MB
+  in 134 files (9.7 MB of code, 33.3 MB of fonts). Git stores files by
   content, so a later build whose fonts haven't changed adds only its code:
-  each re-pin so far added between 0.1 and 2.8 MB, the most when the code
-  chunks are renamed, which makes every code file new.
-- **The pin:** golemdocs `1efae91a0b84d7332c84525f1e4a077df969e8c8`
-  (https://github.com/davidfig/golemdocs/commit/1efae91a0b84d7332c84525f1e4a077df969e8c8,
-  after its 0.33.0 release): SVG and SVGZ in WebKit's sandbox, and the
-  `golemdocs:key` message, which passes ←/→ on whenever the pages fit
-  sideways, a page zoomed to fit included.
+  each re-pin so far added between 0.1 and 3.1 MB, the most when the code
+  chunks are renamed, which makes every code file new. The code grew from
+  4.4 MB at the 0.33 pin because the build carries golemdocs' spreadsheet,
+  slides and media views; Satchel sends them no files, so they never load.
+- **The pin:** golemdocs `0ead4c80391a3099c5a01a72bb4928b1a783ef10`
+  (https://github.com/davidfig/golemdocs/commit/0ead4c80391a3099c5a01a72bb4928b1a783ef10,
+  after its 0.51.0 release, with a fix so `.mht` web pages open like
+  `.mhtml` ones). Since the previous pin (`1efae91a0b84`, after
+  0.33.0) the viewer gained Screen Reader Mode, a loading screen and a
+  grouped toolbar with the app's icons; its messages gained optional
+  `screenReader`, `contrast`, `statusBar` and `view` fields, which Satchel
+  doesn't send. Its HTML-page view, which runs a page's scripts, is only on
+  golemdocs' own share page: the viewer page Satchel frames still reads HTML
+  into its document model and runs nothing.
 - **The font set** is golemdocs' default for the viewer: the core atlases
   (Latin, Greek, Cyrillic) of Calibri, Cambria, Arial, Times New Roman and
   Courier New, 33.3 MB. Other fonts are drawn in a stand-in (Georgia in Times
