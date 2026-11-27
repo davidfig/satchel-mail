@@ -19,12 +19,16 @@ button.person-link:hover { text-decoration: underline; background: none; color: 
 button.avatar-link { border: none; background: none; padding: 0; height: auto; border-radius: 50%; cursor: pointer; flex: none; }
 button.avatar-link:hover .avatar { box-shadow: 0 0 0 2px var(--accent-soft); }
 .search { background: var(--panel-2) !important; }
-.bulk-bar { display: flex; gap: 6px; align-items: center; font-size: 12px; flex-wrap: wrap; }
-.bulk-bar button { height: 26px; padding: 0 8px; font-size: 12px; }
+.list-pane { position: relative; }
+/* Floats over the list so selecting threads doesn't push the rows down. */
+.bulk-bar { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5; display: flex; gap: 6px; align-items: center; font-size: 12.5px; padding: 4px 6px 4px 12px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow); }
+.list-pane.has-bulk .list-spacer { margin-bottom: 52px; }
+.bulk-bar .grow { color: var(--text-2); }
+.bulk-bar .link { margin-left: 4px; font-size: 12px; }
 .list-scroll { flex: 1; overflow-y: auto; position: relative; outline: none; }
 .list-scroll:focus-visible { outline: none; }
 .list-spacer { position: relative; }
-.list-rows { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+.list-rows { position: absolute; left: 0; right: 0; top: 0; will-change: transform; -webkit-user-select: none; user-select: none; }
 .empty-list { padding: 40px 20px; text-align: center; color: var(--text-3); }
 .thread-row { display: flex; gap: 10px; padding: 9px 12px 9px 10px; border-bottom: 1px solid var(--line); cursor: default; align-items: flex-start; overflow: hidden; position: relative; }
 /* From a favorite sender (0053): a tint under hover and selection, and a heart by the name. */

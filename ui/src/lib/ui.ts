@@ -275,6 +275,8 @@ export function popupMenu(anchor: HTMLElement | { x: number; y: number }, items:
     else if (e.key === 'Escape') menu.remove();
     else return;
     e.preventDefault();
+    // Escape closes the menu and nothing else (not the conversation).
+    e.stopPropagation();
   });
 }
 
@@ -389,6 +391,13 @@ export function installShortcuts() {
     const t = e.target as HTMLElement;
     const typing = t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName);
     const k = keyName(e);
+    // An open menu takes Escape even when the focus isn't in it.
+    const menu = document.querySelector('.menu[role="menu"]');
+    if (menu && k === 'Escape') {
+      menu.remove();
+      e.preventDefault();
+      return;
+    }
     if (typing && !k.startsWith('mod+') && k !== 'Escape') return;
     // Select all in a text field selects its text.
     if (typing && k === 'mod+a') return;
@@ -415,29 +424,55 @@ export function installShortcuts() {
   });
 }
 
-// Whether text was selected before the latest right-click. WebKit on macOS
-// selects the word under the pointer on a right-click's mousedown, so the
-// selection by `contextmenu` time doesn't say whether the user made one.
-let selectedBeforeRightClick = false;
+// The text selected before the latest right-click. WebKit on macOS selects
+// the word under the pointer on a right-click's mousedown, so the selection by
+// `contextmenu` time doesn't say whether the user made one. Ctrl+click is a
+// right-click on a Mac but reports the left button.
+let selectedBeforeRightClick: Range[] = [];
 document.addEventListener('mousedown', (e) => {
-  if (e.button === 2) selectedBeforeRightClick = !(getSelection()?.isCollapsed ?? true);
+  if (e.button === 2 || (e.button === 0 && e.ctrlKey)) selectedBeforeRightClick = selectedRanges();
 }, true);
 
-/** Our own right-click menu on `el`, built when it opens. Text selections,
- *  links and form fields inside keep the system menu, so Copy still works. */
+// Ctrl+click is a right-click on a Mac, but WebKit also sends it as a click,
+// so a sidebar folder would open (and its list reload) under its own menu.
+if (navigator.platform.includes('Mac')) {
+  document.addEventListener('click', (e) => {
+    if (e.ctrlKey && e.button === 0) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+}
+
+function selectedRanges(): Range[] {
+  const sel = getSelection();
+  if (!sel || sel.isCollapsed) return [];
+  return Array.from({ length: sel.rangeCount }, (_, i) => sel.getRangeAt(i).cloneRange());
+}
+
+/** Our own right-click menu on `el`, built when it opens. Text selected
+ *  inside `el`, links and form fields keep the system menu, so Copy still
+ *  works; a selection elsewhere on the page doesn't get in the way. */
 export function contextMenu(el: HTMLElement, build: (e: MouseEvent) => (MenuItem | '-')[] | null) {
   listen(el, 'contextmenu', (ev) => {
     const e = ev as MouseEvent;
     const t = e.target as HTMLElement;
     // The keyboard's menu key has no mousedown, so the live selection decides.
-    const selected = e.button === 2 ? selectedBeforeRightClick : !(getSelection()?.isCollapsed ?? true);
+    const fromPointer = e.button === 2 || e.ctrlKey;
+    const ranges = fromPointer ? selectedBeforeRightClick : selectedRanges();
+    const selected = ranges.some((r) => r.intersectsNode(el));
     if (t.closest('a, input, textarea, [contenteditable="true"]') || selected) return;
     const items = build(e);
     if (!items?.length) return;
     e.preventDefault();
     e.stopPropagation();
-    // Drop the word WebKit selected for its own menu.
-    getSelection()?.removeAllRanges();
+    // Drop the word WebKit selected for its own menu, keeping what the user
+    // had selected elsewhere.
+    if (fromPointer) {
+      const sel = getSelection();
+      sel?.removeAllRanges();
+      for (const r of ranges) sel?.addRange(r);
+    }
     // The keyboard's menu key (or Shift+F10) reports no pointer position.
     const at = e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : el;
     popupMenu(at, items);

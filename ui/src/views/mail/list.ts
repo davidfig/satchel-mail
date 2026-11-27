@@ -8,6 +8,7 @@ import type { MailView } from './index';
 export const ROW_H = 74;
 // Browsers cap element heights (~17M px in WebKit); beyond this the scrollbar is scaled.
 export const MAX_SCROLL_PX = 8_000_000;
+const MAC = navigator.platform.includes('Mac');
 
 // Rows live in a logical space of total * ROW_H pixels. When that exceeds what
 // browsers can render, the scroll range is compressed by `scale`.
@@ -71,7 +72,8 @@ export function renderRows(view: MailView) {
                 void view.extendTo(idx);
                 return;
               }
-              if (e.metaKey || e.ctrlKey) {
+              // Ctrl+click is a right-click on a Mac, not a toggle.
+              if (MAC ? e.metaKey : e.ctrlKey) {
                 // A later Shift+click ranges from here.
                 view.cursor = idx;
                 view.toggleSelect(t);

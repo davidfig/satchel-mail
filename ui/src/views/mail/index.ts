@@ -47,6 +47,7 @@ export class MailView {
   spacer = h('div.list-spacer');
   rows = h('div.list-rows');
   header = h('header.list-head');
+  bulk = h('div.bulk-slot');
   searchInput = h('input.search', { type: 'search', placeholder: 'Search mail', 'aria-label': 'Search mail' });
   list = new ThreadWindow(() => this.query(), () => this.renderRows(), (e) => errorToast(e));
   cursor = -1;
@@ -78,7 +79,7 @@ export class MailView {
   constructor() {
     this.spacer.appendChild(this.rows);
     this.scroller.appendChild(this.spacer);
-    this.listPane.append(this.header, this.scroller);
+    this.listPane.append(this.header, this.scroller, this.bulk);
     this.root.append(this.listPane, this.reader);
     this.scroller.addEventListener('scroll', () => this.renderRows());
     contextMenu(this.rows, (e) => {
@@ -188,18 +189,24 @@ export class MailView {
         h('button.icon-btn', { title: 'Refresh (sync now)', 'aria-label': 'Sync now', on: { click: () => void api.syncNow(null).then(() => toast('Syncing…', { quiet: true })) } }, icon('refresh')),
         h('button.icon-btn', { title: 'Compose (c)', 'aria-label': 'Compose', on: { click: () => openComposer({}) } }, icon('compose'))),
       s.kind === 'person' ? this.personCard(s) : this.searchInput,
+    );
+    // Floats over the bottom of the list, so selecting doesn't move the rows.
+    this.listPane.classList.toggle('has-bulk', n > 0);
+    patch(
+      this.bulk,
       n > 0 &&
-        h('div.bulk-bar',
-          h('span', `${n} selected`),
-          h('button', { title: 'Archive selected (e)', on: { click: () => void this.act('archive') } }, icon('archive', 16), 'Archive'),
-          h('button', { title: 'Mark selected as read (Shift+I)', on: { click: () => void this.act('read') } }, icon('mailOpen', 16), 'Read'),
-          h('button', { title: 'Move selected to Trash (#)', on: { click: () => void this.act('trash') } }, icon('trash', 16), 'Delete'),
+        h('div.bulk-bar', { role: 'toolbar', 'aria-label': 'Selected conversations' },
+          h('span.grow', `${n} selected`),
+          // The reader's buttons, in the reader's order.
           this.inSpam()
             ? [
-                h('button', { title: 'Not spam: move to Inbox and keep these senders out of Spam (!)', on: { click: () => void this.act('not_spam') } }, icon('inbox', 16), 'Not spam'),
-                h('button', { title: BLOCK_TIP, on: { click: () => void this.act('block') } }, icon('junk', 16), 'Spam'),
+                h('button.icon-btn', { title: 'Not spam: move to Inbox and keep these senders out of Spam (!)', 'aria-label': 'Not spam', on: { click: () => void this.act('not_spam') } }, icon('inbox')),
+                h('button.icon-btn', { title: BLOCK_TIP, 'aria-label': 'Spam', on: { click: () => void this.act('block') } }, icon('junk')),
               ]
-            : h('button', { title: 'Mark as spam: these senders always go to Spam (!)', on: { click: () => void this.act('spam') } }, icon('junk', 16), 'Spam'),
+            : h('button.icon-btn', { title: 'Mark as spam: these senders always go to Spam (!)', 'aria-label': 'Mark as spam', on: { click: () => void this.act('spam') } }, icon('junk')),
+          h('button.icon-btn', { title: 'Archive selected (e)', 'aria-label': 'Archive', on: { click: () => void this.act('archive') } }, icon('archive')),
+          h('button.icon-btn', { title: 'Move selected to Trash (#)', 'aria-label': 'Delete', on: { click: () => void this.act('trash') } }, icon('trash')),
+          h('button.icon-btn', { title: 'Mark selected as read (Shift+I)', 'aria-label': 'Mark as read', on: { click: () => void this.act('read') } }, icon('mailOpen')),
           h('button.link', { title: 'Clear the selection', on: { click: () => { this.selected.clear(); this.renderHeader(); this.renderRows(); } } }, 'Clear')),
     );
   }
